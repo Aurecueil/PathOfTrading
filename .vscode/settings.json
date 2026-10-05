@@ -1,8 +1,8 @@
 {
-	"svelte.enable-ts-plugin": true
+  "svelte.enable-ts-plugin": true,
   "rust-analyzer.check.command": "clippy",
   "rust-analyzer.inlayHints.lifetimeElisionHints.enable": "skip_trivial",
-
+  "security.workspace.trust.enabled": false,
   "editor.formatOnSave": true,
   "editor.defaultFormatter": "esbenp.prettier-vscode",
 
