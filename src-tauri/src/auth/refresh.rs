@@ -1,46 +1,75 @@
 use super::env;
+use std::fs;
+use std::time::Duration;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use url::Url;
 
 #[tauri::command]
-pub async fn refresh_poetoken_background() -> Result<String, String> {
-    const HTTP_CLIENT_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+pub async fn refresh_poetoken_background(app: tauri::AppHandle) -> Result<String, String> {
+    // 1. Point to the EXACT same profile dir used during login
+    let mut profile_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    profile_dir.push("poe_webview_profile");
+    fs::create_dir_all(&profile_dir).map_err(|e| e.to_string())?;
 
-    let poesessid = env::load_secret("poesessid")?
-        .ok_or_else(|| "No POESESSID found in storage. Please log in first.".to_string())?;
+    // 2. Clean up any stale background window if one got stuck
+    if let Some(existing) = app.get_webview_window("poe_refresh_hidden") {
+        let _ = existing.close();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
 
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none()) // Capture Set-Cookie before 301/302 redirects
-        .build()
-        .map_err(|e| e.to_string())?;
+    let trade_url: Url = "https://www.pathofexile.com/trade"
+        .parse()
+        .map_err(|e: url::ParseError| e.to_string())?;
 
-    let res = client
-        .get("https://www.pathofexile.com/trade")
-        .header("User-Agent", HTTP_CLIENT_USER_AGENT)
-        .header("Cookie", format!("POESESSID={poesessid}"))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    // 3. Spawn the window completely invisible and offscreen
+    let window =
+        WebviewWindowBuilder::new(&app, "poe_refresh_hidden", WebviewUrl::External(trade_url))
+            .title("PoE Token Refresh")
+            .visible(false) // Hidden from user
+            .focused(false)
+            .data_directory(profile_dir)
+            .build()
+            .map_err(|e| e.to_string())?;
 
-    // Extract POETOKEN from Set-Cookie headers
-    for value in res.headers().get_all(reqwest::header::SET_COOKIE) {
-        if let Ok(cookie_str) = value.to_str() {
-            if cookie_str.starts_with("POETOKEN=") {
-                let token = cookie_str
-                    .split(';')
-                    .next()
-                    .unwrap_or("")
-                    .replace("POETOKEN=", "");
+    let poe_domain: Url = "https://www.pathofexile.com".parse().unwrap();
+    let mut attempts = 0;
+    const MAX_ATTEMPTS: usize = 30; // 30 * 250ms = ~7.5s max
 
-                env::save_secret("poetoken", &token)?;
-                return Ok(token);
+    let mut token_result = None;
+
+    // 4. Poll cookie store until POETOKEN appears
+    while attempts < MAX_ATTEMPTS {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        attempts += 1;
+
+        if let Ok(cookies) = window.cookies_for_url(poe_domain.clone()) {
+            for c in &cookies {
+                if c.name() == "POETOKEN" && !c.value().is_empty() {
+                    token_result = Some(c.value().to_string());
+                    break;
+                }
             }
+        }
+
+        if token_result.is_some() {
+            break;
         }
     }
 
-    Err("Failed to refresh POETOKEN. The POESESSID session may have expired.".into())
+    // 5. Always destroy the hidden window
+    let _ = window.close();
+
+    // 6. Return or error
+    if let Some(token) = token_result {
+        env::save_secret("poetoken", &token)?;
+        Ok(token)
+    } else {
+        Err("Failed to refresh POETOKEN. Session might be expired or Cloudflare challenged.".into())
+    }
 }
 
 // --- Check Session Status on Boot ---
 #[tauri::command]
-async fn check_auth_status() -> Result<bool, String> {
+pub async fn check_auth_status() -> Result<bool, String> {
     Ok(env::load_secret("poesessid")?.is_some())
 }
