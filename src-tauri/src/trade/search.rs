@@ -1,37 +1,35 @@
-use reqwest::header::{CONTENT_TYPE, USER_AGENT};
-use reqwest::Client;
-use serde_json::json;
+use crate::auth::env::load_secret;
+use reqwest::header::{CONTENT_TYPE, COOKIE, USER_AGENT};
+use reqwest::{Client, Response};
+use serde_json::Value;
 
-#[tauri::command]
-pub async fn search_items(_app: tauri::AppHandle) -> Result<super::SearchResponse, String> {
+pub async fn search_items_trade(payload: Value, realm: String) -> Result<Response, String> {
     let client = Client::new();
-
-    let payload = json!({
-        "query": {
-            "status": { "option": "any" },
-            "name": "Mageblood",
-            "type": "Heavy Belt",
-            "stats": [{ "type": "and", "filters": [] }]
-        },
-        "sort": { "price": "asc" }
-    });
     let endpoint = super::ENDPOINT;
-    let url = format!("{endpoint}/api/trade/search/Allflame");
+    let trade_path = if realm == "poe2" { "trade2" } else { "trade" };
+    let league = if realm == "poe2" {
+        "Forbidden%20Rites"
+    } else {
+        "Allflame"
+    };
+    let url = format!("{endpoint}/api/{trade_path}/search/{league}");
 
-    // .json::<SearchResponse>() automatically parses into your struct
-    let data: super::SearchResponse = client
+    // Propagate load errors, then ensure the secret was actually found
+    let poe_token =
+        load_secret("poetoken")?.ok_or_else(|| "Missing 'poetoken' secret".to_string())?;
+    let poesessid =
+        load_secret("poesessid")?.ok_or_else(|| "Missing 'poesessid' secret".to_string())?;
+
+    let cookie_header = format!("POESESSID={poesessid}; poetoken={poe_token}");
+    let data = client
         .post(&url)
         .header(CONTENT_TYPE, "application/json")
         .header(USER_AGENT, "Aurecueil.PathOfTrading (dc:aurecueil)")
+        .header(COOKIE, cookie_header)
         .json(&payload)
         .send()
         .await
-        .map_err(|e| format!("HTTP request error: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("Status code error: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("Deserialization error: {e}"))?;
+        .map_err(|e| format!("HTTP request error: {e}"))?;
 
     Ok(data)
 }
