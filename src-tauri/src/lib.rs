@@ -12,17 +12,19 @@ pub fn run() {
         "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
         "--disable-blink-features=AutomationControlled --enable-features=NetworkService,NetworkServiceInProcess",
     );
+
     let limiter_setup = limiter.clone();
+
     tauri::Builder::default()
         .manage(limiter)
         .setup(move |app| {
-            // Uses the clone dedicated to the closure
-            limiter_setup.start_workers(app.handle().clone());
             let app_handle = app.handle().clone();
+
+            // Start the search worker & multi-realm batching engine
+            limiter_setup.start_workers(app_handle.clone());
 
             // Run token refresh in the background on startup
             tauri::async_runtime::spawn(async move {
-                // Optional: check if the user is even logged in first
                 match auth::refresh::check_auth_status().await {
                     Ok(true) => {
                         println!("Existing session found. Refreshing POETOKEN...");
@@ -37,6 +39,7 @@ pub fn run() {
                     Err(e) => eprintln!("Failed to check auth status: {e}"),
                 }
             });
+
             // initialize();
             Ok(())
         })
@@ -50,6 +53,8 @@ pub fn run() {
             trade::get_limiter_state,
             trade::items::load_item_data,
             trade::filters::load_filters_data,
+            trade::stats::load_stats_data,
+            trade::league::load_league_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

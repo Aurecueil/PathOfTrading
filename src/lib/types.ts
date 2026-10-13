@@ -7,6 +7,7 @@ export interface SearchTile {
   title: string;
   displayName?: string;
   realm: "poe" | "poe2";
+  league: string;
   layoutMode: "list" | "grid";
   loading: boolean;
   searchId?: string;
@@ -14,6 +15,7 @@ export interface SearchTile {
   fetchedItems: PoETradeItemEntry[];
   payload?: any;
   fullPayload?: any;
+  sort?: any;
 }
 
 export interface PoETradeItemEntry {
@@ -41,7 +43,14 @@ export interface FormSubmitData {
   title: string;
   displayName?: string;
   realm: "poe" | "poe2";
+  league: string;
   payload: any;
   full_payload: any;
-  sort?: string;
+}
+
+export interface SortOptionItem {
+  id: string;
+  category: "group" | "filter" | "stat";
+  label: string;
+  tag?: string;
 }

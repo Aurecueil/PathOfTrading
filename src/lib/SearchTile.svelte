@@ -25,7 +25,6 @@
 
   $: activePayload = tile.payload;
 
-  // Show displayName always; fallback to realm-specific default without touching title
   $: defaultRealmTitle =
     tile.realm?.toLowerCase() === "poe2"
       ? "Poe2 Trade Search"
@@ -46,10 +45,12 @@
     tile.fetchedItems = [];
 
     try {
+      // 1. Dispatch search matching the refactored Tauri command:
+      // pub async fn search_items(realm: String, payload: Value, cache_ok: Option<bool>)
       const rawResponse: string = await invoke("search_items", {
-        id: String(tile.id),
         realm: tile.realm,
         payload: payloadToRun,
+        cacheOk: false,
       });
 
       const data =
@@ -58,9 +59,11 @@
       tile.searchId = data.id;
       tile.results = data.result || [];
 
+      // 2. Queue IDs into the batching fetch pipeline
       if (tile.results.length > 0 && tile.searchId) {
-        const firstTen = tile.results.slice(0, 10).join(",");
-        await fetchFoundItems(firstTen, tile.searchId);
+        // Hand off initial IDs (up to 10 or more) as an array for batching
+        const targetIds = tile.results.slice(0, 10);
+        await fetchFoundItems(targetIds, tile.searchId);
       }
     } catch (err) {
       console.error(`[SearchTile ${tile.id}] Search error:`, err);
@@ -69,18 +72,28 @@
     }
   }
 
-  export async function fetchFoundItems(idsChunk: string, queryId: string) {
+  export async function fetchFoundItems(ids: string[], queryId: string) {
     try {
-      const rawResponse: string = await invoke("fetch_items", {
-        id: idsChunk,
-        realm: tile.realm,
-        ids: idsChunk,
-        query: queryId,
+      // Dispatch FetchJob model:
+      // pub struct FetchJob { id, ids, min, wait_ms, cache_ok, reservation, realm }
+      const data: any = await invoke("fetch_items", {
+        job: {
+          id: queryId,
+          ids,
+          min: 5,
+          wait_ms: 100,
+          cache_ok: false,
+          reservation: null,
+          realm: tile.realm,
+        },
       });
 
-      const data =
-        typeof rawResponse === "string" ? JSON.parse(rawResponse) : rawResponse;
-      const items: PoETradeItemEntry[] = data.result || [];
+      console.log(`[SearchTile ${tile.id}] fetch_items raw response:`, data);
+
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      console.log(`[SearchTile ${tile.id}] fetch_items parsed data:`, parsed);
+
+      const items: PoETradeItemEntry[] = parsed.result || [];
 
       tile.fetchedItems = [...tile.fetchedItems, ...items];
     } catch (err) {
@@ -205,7 +218,7 @@
         title={!activePayload
           ? "No search payload configured"
           : "Search Market"}
-        on:click={() => runSearchWithPayload()}
+        on:click|stopPropagation={() => runSearchWithPayload()}
       >
         {#if tile.loading}
           <span class="spin">↻</span>
@@ -214,17 +227,24 @@
         {/if}
       </button>
 
-      <button type="button" on:click={() => dispatch("openfilters")}>
+      <button
+        type="button"
+        on:click|stopPropagation={() => dispatch("openfilters")}
+      >
         Filters
       </button>
 
-      <button type="button" class="del" on:click={() => dispatch("delete")}>
+      <button
+        type="button"
+        class="del"
+        on:click|stopPropagation={() => dispatch("delete")}
+      >
         ×
       </button>
     </div>
   </div>
 
-  <div class="tile-body">
+  <div class="tile-body" on:wheel|stopPropagation>
     {#if tile.loading}
       <div class="status-msg">Searching market...</div>
     {:else if tile.fetchedItems.length === 0}

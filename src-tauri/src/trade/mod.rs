@@ -1,13 +1,14 @@
 pub mod fetch;
 pub mod filters;
 pub mod items;
+pub mod league;
 pub mod search;
+pub mod stats;
 
-use futures::future::BoxFuture;
-use reqwest::{header::HeaderMap, Response};
+use reqwest::header::HeaderMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
@@ -15,47 +16,152 @@ use tokio::sync::{oneshot, Mutex, Notify};
 
 pub const ENDPOINT: &str = "https://www.pathofexile.com";
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SearchResponse {
+// ===========================================================================
+// 1. Data Structures & Telemetry Models
+// ===========================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FetchJob {
     pub id: String,
-    pub result: Vec<String>,
-    pub total: u64,
+    pub ids: Vec<String>,
+    pub min: usize,
+    pub wait_ms: u64,
+    #[serde(default)]
+    pub cache_ok: bool,
+    pub reservation: Option<String>,
+    pub realm: String,
 }
 
-#[derive(Clone, Serialize)]
-pub struct LimiterStatus {
-    pub max: usize,
-    pub window_secs: u64,
-    pub current_count: usize,
-    pub penalty_seconds_left: u64,
-    pub queued_ids: Vec<String>,
+#[derive(Clone, Serialize, PartialEq, Eq, Debug)]
+pub struct OperationTelemetry {
+    pub max_requests: usize,
+    pub available_requests: usize,
+    pub reserved_requests: HashMap<String, usize>,
+    pub is_rate_limited: bool,
+    pub retry_after_ms: u64,
 }
 
-#[derive(Clone, Serialize)]
-pub struct FullLimiterState {
-    pub search: LimiterStatus,
-    pub fetch: LimiterStatus,
+#[derive(Clone, Serialize, PartialEq, Eq, Debug)]
+pub struct FullTelemetryState {
+    pub search: OperationTelemetry,
+    pub fetch: OperationTelemetry,
+    pub queue_status: HashMap<String, HashMap<String, usize>>,
 }
 
-// ---------------------------------------------------------------------------
-// 1. Sliding Window Rate Tracker
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 2. In-Memory Session Cache
+// ===========================================================================
+
+#[derive(Default)]
+pub struct SessionCache {
+    search_cache: Mutex<HashMap<String, String>>,
+    fetch_cache: Mutex<HashMap<String, Value>>,
+}
+
+impl SessionCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub async fn get_search(&self, realm: &str, query: &Value) -> Option<String> {
+        let key = format!("{}:{}", realm, query);
+        let cache = self.search_cache.lock().await;
+        cache.get(&key).cloned()
+    }
+
+    pub async fn set_search(&self, realm: &str, query: &Value, val: String) {
+        let key = format!("{}:{}", realm, query);
+        let mut cache = self.search_cache.lock().await;
+        cache.insert(key, val);
+    }
+
+    pub async fn get_fetch_item(&self, realm: &str, item_id: &str) -> Option<Value> {
+        let key = format!("{}:{}", realm, item_id);
+        let cache = self.fetch_cache.lock().await;
+        cache.get(&key).cloned()
+    }
+
+    pub async fn set_fetch_item(&self, realm: &str, item_id: &str, val: Value) {
+        let key = format!("{}:{}", realm, item_id);
+        let mut cache = self.fetch_cache.lock().await;
+        cache.insert(key, val);
+    }
+}
+
+// ===========================================================================
+// 3. Rate Limiter Core
+// ===========================================================================
 
 #[derive(Debug, Clone)]
-struct Rule {
+struct ServerRule {
     max: usize,
     window: Duration,
 }
 
-#[derive(Default)]
-struct RateTracker {
-    rules: Vec<Rule>,
+struct RateLimiterCore {
+    rules: Vec<ServerRule>,
     history: VecDeque<Instant>,
     penalty_until: Option<Instant>,
+    configured_reservations: HashMap<String, usize>,
+    used_reservations: HashMap<String, usize>,
+    last_reported_server_hits: usize,
 }
 
-impl RateTracker {
-    fn delay_needed(&mut self, now: Instant) -> Option<Duration> {
+impl Default for RateLimiterCore {
+    fn default() -> Self {
+        let mut configured_reservations = HashMap::new();
+        configured_reservations.insert("outside".to_string(), 1);
+
+        Self {
+            // Seed with Path of Exile default limits so request #1 is monitored correctly
+            rules: vec![
+                ServerRule {
+                    max: 12,
+                    window: Duration::from_secs(4),
+                },
+                ServerRule {
+                    max: 16,
+                    window: Duration::from_secs(12),
+                },
+            ],
+            history: VecDeque::new(),
+            penalty_until: None,
+            configured_reservations,
+            used_reservations: HashMap::new(),
+            last_reported_server_hits: 0,
+        }
+    }
+}
+
+impl RateLimiterCore {
+    fn primary_rule(&self) -> Option<&ServerRule> {
+        self.rules.iter().min_by_key(|r| r.window)
+    }
+
+    fn purge_expired(&mut self, now: Instant) {
+        let max_window = self
+            .rules
+            .iter()
+            .map(|r| r.window)
+            .max()
+            .unwrap_or(Duration::from_secs(60));
+
+        while let Some(&first) = self.history.front() {
+            if now.duration_since(first) > max_window {
+                self.history.pop_front();
+            } else {
+                break;
+            }
+        }
+
+        if self.history.is_empty() {
+            self.used_reservations.clear();
+        }
+    }
+
+    fn check_delay(&mut self, now: Instant, reservation: Option<&str>) -> Option<Duration> {
+        self.purge_expired(now);
+
         if let Some(until) = self.penalty_until {
             if now < until {
                 return Some(until - now);
@@ -63,46 +169,77 @@ impl RateTracker {
             self.penalty_until = None;
         }
 
-        let mut max_wait: Option<Duration> = None;
         for rule in &self.rules {
-            let active_count = self
+            let hits = self
                 .history
                 .iter()
                 .filter(|&&t| now.duration_since(t) < rule.window)
                 .count();
 
-            if active_count >= rule.max {
-                if let Some(&oldest_in_window) = self
+            if hits >= rule.max {
+                if let Some(&oldest) = self
                     .history
                     .iter()
                     .find(|&&t| now.duration_since(t) < rule.window)
                 {
-                    let next_slot = oldest_in_window + rule.window;
+                    let next_slot = oldest + rule.window;
                     if next_slot > now {
-                        let wait = next_slot - now;
-                        max_wait = Some(max_wait.map_or(wait, |w| w.max(wait)));
+                        return Some(next_slot - now);
                     }
                 }
             }
         }
 
-        max_wait
+        if let Some(rule) = self.primary_rule() {
+            let primary_window_hits = self
+                .history
+                .iter()
+                .filter(|&&t| now.duration_since(t) < rule.window)
+                .count();
+
+            let total_reserved: usize = self.configured_reservations.values().sum();
+            let general_pool_capacity = rule.max.saturating_sub(total_reserved);
+
+            let res_key = reservation.unwrap_or("general");
+            if res_key != "general" {
+                let max_res = self
+                    .configured_reservations
+                    .get(res_key)
+                    .copied()
+                    .unwrap_or(0);
+                let used_res = self.used_reservations.get(res_key).copied().unwrap_or(0);
+
+                if used_res >= max_res {
+                    let used_general = primary_window_hits
+                        .saturating_sub(self.used_reservations.values().sum::<usize>());
+                    if used_general >= general_pool_capacity {
+                        return Some(Duration::from_millis(50));
+                    }
+                }
+            } else {
+                let used_general = primary_window_hits
+                    .saturating_sub(self.used_reservations.values().sum::<usize>());
+                if used_general >= general_pool_capacity {
+                    return Some(Duration::from_millis(50));
+                }
+            }
+        }
+
+        None
     }
 
-    fn record_dispatch(&mut self, now: Instant) {
+    fn record_dispatch(&mut self, now: Instant, reservation: Option<&str>) {
         self.history.push_back(now);
-        let max_retention = Duration::from_secs(3600); // 1 hour max retention window
-        while let Some(&first) = self.history.front() {
-            if now.duration_since(first) > max_retention {
-                self.history.pop_front();
-            } else {
-                break;
+        if let Some(res) = reservation {
+            let max_res = self.configured_reservations.get(res).copied().unwrap_or(0);
+            let used = self.used_reservations.entry(res.to_string()).or_insert(0);
+            if *used < max_res {
+                *used += 1;
             }
         }
     }
 
-    fn update_from_headers(&mut self, headers: &HeaderMap) {
-        // PoE defines limits per-account or per-ip: check account first, then ip
+    fn reconcile_headers(&mut self, headers: &HeaderMap) {
         let rule_hdr = headers
             .get("x-rate-limit-account")
             .or_else(|| headers.get("x-rate-limit-ip"))
@@ -114,14 +251,14 @@ impl RateTracker {
             .and_then(|v| v.to_str().ok());
 
         if let (Some(r_raw), Some(s_raw)) = (rule_hdr, state_hdr) {
-            let parsed_rules: Vec<Rule> = r_raw
+            let parsed_rules: Vec<ServerRule> = r_raw
                 .split(',')
                 .filter_map(|segment| {
                     let parts: Vec<&str> = segment.split(':').collect();
                     if parts.len() >= 2 {
                         let max = parts[0].trim().parse::<usize>().ok()?;
                         let win = parts[1].trim().parse::<u64>().ok()?;
-                        Some(Rule {
+                        Some(ServerRule {
                             max,
                             window: Duration::from_secs(win),
                         })
@@ -135,70 +272,223 @@ impl RateTracker {
                 self.rules = parsed_rules;
             }
 
-            // Parse penalties from state: hits:window:penalty_seconds
+            let mut server_primary_hits: Option<usize> = None;
             for segment in s_raw.split(',') {
                 let parts: Vec<&str> = segment.split(':').collect();
                 if parts.len() == 3 {
-                    if let Ok(penalty_secs) = parts[2].trim().parse::<u64>() {
-                        if penalty_secs > 0 {
-                            let penalty =
-                                Duration::from_secs(penalty_secs) + Duration::from_millis(500);
-                            let until = Instant::now() + penalty;
-                            self.penalty_until =
-                                Some(self.penalty_until.map_or(until, |cur| cur.max(until)));
-                        }
+                    let hits = parts[0].trim().parse::<usize>().unwrap_or(0);
+                    let penalty_secs = parts[2].trim().parse::<u64>().unwrap_or(0);
+
+                    if server_primary_hits.is_none() {
+                        server_primary_hits = Some(hits);
+                    }
+
+                    if penalty_secs > 0 {
+                        let penalty =
+                            Duration::from_secs(penalty_secs) + Duration::from_millis(500);
+                        let until = Instant::now() + penalty;
+                        self.penalty_until =
+                            Some(self.penalty_until.map_or(until, |c| c.max(until)));
                     }
                 }
             }
+
+            if let Some(srv_hits) = server_primary_hits {
+                let now = Instant::now();
+                let local_count = if let Some(rule) = self.primary_rule() {
+                    self.history
+                        .iter()
+                        .filter(|&&t| now.duration_since(t) < rule.window)
+                        .count()
+                } else {
+                    self.history.len()
+                };
+
+                if srv_hits > local_count {
+                    let diff = srv_hits - local_count;
+                    for _ in 0..diff {
+                        self.history.push_back(now);
+                    }
+                } else if srv_hits < local_count {
+                    // If server has fewer hits (e.g. server window rolled over before local),
+                    // drain extra local timestamps from the front so we don't hold back requests unnecessarily
+                    let mut diff = local_count - srv_hits;
+                    while diff > 0 && !self.history.is_empty() {
+                        self.history.pop_front();
+                        diff -= 1;
+                    }
+                }
+                self.last_reported_server_hits = srv_hits;
+            }
+        }
+    }
+
+    fn telemetry(&self, now: Instant) -> OperationTelemetry {
+        let (max, window) = self
+            .primary_rule()
+            .map(|r| (r.max, r.window))
+            .unwrap_or((12, Duration::from_secs(4)));
+
+        let active_hits = if window.as_secs() > 0 {
+            self.history
+                .iter()
+                .filter(|&&t| now.duration_since(t) < window)
+                .count()
+        } else {
+            0
+        };
+
+        // Capacity dedicated to general requests:
+        // General available requests cannot exceed general capacity
+        let available = max.saturating_sub(active_hits);
+
+        let retry_after_ms = self
+            .penalty_until
+            .and_then(|u| u.checked_duration_since(now))
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+
+        OperationTelemetry {
+            max_requests: max,
+            available_requests: available,
+            reserved_requests: self.configured_reservations.clone(),
+            is_rate_limited: retry_after_ms > 0 || (max > 0 && available == 0),
+            retry_after_ms,
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// 2. Queue Types & Isolated Queue Workers
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 4. Shared Rate Limiter Wrapper
+// ===========================================================================
 
-type ApiJob = Box<dyn Fn() -> BoxFuture<'static, Result<Response, String>> + Send + Sync>;
+pub struct SharedRateLimiter {
+    core: Mutex<RateLimiterCore>,
+    update_notify: Arc<Notify>,
+}
 
-struct QueueTask {
-    id: String,
-    job: ApiJob,
+impl SharedRateLimiter {
+    pub fn new(update_notify: Arc<Notify>) -> Self {
+        Self {
+            core: Mutex::new(RateLimiterCore::default()),
+            update_notify,
+        }
+    }
+
+    pub async fn time_until_next_change(&self) -> Option<Duration> {
+        let mut core = self.core.lock().await;
+        let now = Instant::now();
+        core.purge_expired(now);
+
+        let mut next_change: Option<Instant> = None;
+
+        if let Some(until) = core.penalty_until {
+            if until > now {
+                next_change = Some(until);
+            }
+        }
+
+        for rule in &core.rules {
+            for &t in core.history.iter() {
+                let expires_at = t + rule.window;
+                if expires_at > now {
+                    next_change = Some(next_change.map_or(expires_at, |cur| cur.min(expires_at)));
+                    break;
+                }
+            }
+        }
+
+        next_change.map(|t| t.saturating_duration_since(now))
+    }
+
+    pub async fn wait_for_slot(&self, reservation: Option<&str>) {
+        loop {
+            let delay = {
+                let mut core = self.core.lock().await;
+                core.check_delay(Instant::now(), reservation)
+            };
+
+            match delay {
+                Some(d) => tokio::time::sleep(d).await,
+                None => break,
+            }
+        }
+    }
+
+    pub async fn record(&self, reservation: Option<&str>) {
+        {
+            let mut core = self.core.lock().await;
+            core.record_dispatch(Instant::now(), reservation);
+        }
+        self.update_notify.notify_one();
+    }
+
+    pub async fn reconcile(&self, headers: &HeaderMap) {
+        {
+            let mut core = self.core.lock().await;
+            core.reconcile_headers(headers);
+        }
+        self.update_notify.notify_one();
+    }
+
+    pub async fn set_penalty(&self, duration: Duration) {
+        {
+            let mut core = self.core.lock().await;
+            let until = Instant::now() + duration;
+            core.penalty_until = Some(core.penalty_until.map_or(until, |c| c.max(until)));
+        }
+        self.update_notify.notify_one();
+    }
+
+    pub async fn get_telemetry(&self) -> OperationTelemetry {
+        let mut core = self.core.lock().await;
+        core.purge_expired(Instant::now());
+        core.telemetry(Instant::now())
+    }
+}
+
+// ===========================================================================
+// 5. Unified Service with Diff Emission
+// ===========================================================================
+
+struct PendingFetch {
+    job: FetchJob,
+    ready_at: Instant,
+    collected_results: Vec<Value>,
+    tx: oneshot::Sender<Result<Value, String>>,
+}
+struct SearchTask {
+    realm: String,
+    query: Value,
     tx: oneshot::Sender<Result<String, String>>,
 }
 
-struct QueueWorker {
-    tasks: Mutex<VecDeque<QueueTask>>,
-    tracker: Mutex<RateTracker>,
-    notify: Notify,
-}
-
-impl QueueWorker {
-    fn new() -> Self {
-        Self {
-            tasks: Mutex::new(VecDeque::new()),
-            tracker: Mutex::new(RateTracker::default()),
-            notify: Notify::new(),
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// 3. API Rate Limiter Service
-// ---------------------------------------------------------------------------
-
 #[derive(Clone)]
 pub struct ApiRateLimiter {
-    fetch_queue: Arc<QueueWorker>,
-    search_queue: Arc<QueueWorker>,
+    search_limiter: Arc<SharedRateLimiter>,
+    fetch_limiter: Arc<SharedRateLimiter>,
+    cache: Arc<SessionCache>,
+    search_tasks: Arc<Mutex<VecDeque<SearchTask>>>,
+    fetch_queues: Arc<Mutex<HashMap<String, VecDeque<PendingFetch>>>>,
+    queue_notify: Arc<Notify>,
+    telemetry_notify: Arc<Notify>,
     app_handle: Arc<Mutex<Option<AppHandle>>>,
+    last_emitted_state: Arc<Mutex<Option<FullTelemetryState>>>,
 }
 
 impl ApiRateLimiter {
     pub fn new() -> Self {
+        let telemetry_notify = Arc::new(Notify::new());
         Self {
-            fetch_queue: Arc::new(QueueWorker::new()),
-            search_queue: Arc::new(QueueWorker::new()),
+            search_limiter: Arc::new(SharedRateLimiter::new(telemetry_notify.clone())),
+            fetch_limiter: Arc::new(SharedRateLimiter::new(telemetry_notify.clone())),
+            cache: Arc::new(SessionCache::new()),
+            search_tasks: Arc::new(Mutex::new(VecDeque::new())),
+            fetch_queues: Arc::new(Mutex::new(HashMap::new())),
+            queue_notify: Arc::new(Notify::new()),
+            telemetry_notify,
             app_handle: Arc::new(Mutex::new(None)),
+            last_emitted_state: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -208,251 +498,551 @@ impl ApiRateLimiter {
             *handle_ref.lock().await = Some(app);
         });
 
-        self.start_worker(self.fetch_queue.clone());
-        self.start_worker(self.search_queue.clone());
-    }
+        // 1. Search worker
+        let this = self.clone();
+        tauri::async_runtime::spawn(async move {
+            this.run_search_worker().await;
+        });
 
-    pub async fn emit_update(&self) {
-        let handle = self.app_handle.lock().await;
-        if let Some(app) = handle.as_ref() {
-            let state = self.get_snapshot().await;
-            let _ = app.emit("limiter-update", state);
-        }
-    }
+        // 2. Fetch worker
+        let this = self.clone();
+        tauri::async_runtime::spawn(async move {
+            this.run_fetch_batcher().await;
+        });
 
-    pub async fn search_items(
-        &self,
-        id: String,
-        realm: String,
-        query: Value,
-    ) -> Result<String, String> {
-        self.enqueue(
-            &self.search_queue,
-            id,
-            Box::new(move || {
-                let q = query.clone();
-                let q1 = realm.clone();
-                Box::pin(async move { search::search_items_trade(q, q1).await })
-            }),
-        )
-        .await
-    }
-
-    pub async fn fetch_items(
-        &self,
-        id: String,
-        realm: String,
-        ids: String,
-        query: String,
-    ) -> Result<String, String> {
-        self.enqueue(
-            &self.fetch_queue,
-            id,
-            Box::new(move || {
-                let q1 = ids.clone();
-                let q2 = query.clone();
-                let q3 = realm.clone();
-                Box::pin(async move { fetch::fetch_items_trade(q2, q1, q3).await })
-            }),
-        )
-        .await
-    }
-
-    async fn enqueue(
-        &self,
-        worker: &Arc<QueueWorker>,
-        id: String,
-        job: ApiJob,
-    ) -> Result<String, String> {
-        let (tx, rx) = oneshot::channel();
-        let task = QueueTask {
-            id: id.clone(),
-            job,
-            tx,
-        };
-
-        {
-            let mut tasks = worker.tasks.lock().await;
-
-            // Remove previous pending request with identical ID
-            if let Some(pos) = tasks.iter().position(|t| t.id == id) {
-                let old = tasks.remove(pos).unwrap();
-                let _ = old
-                    .tx
-                    .send(Err("Superseded by newer request with same ID".into()));
-            }
-
-            // FIFO: push to the BACK of the deque
-            tasks.push_back(task);
-        }
-
-        worker.notify.notify_one();
-        self.emit_update().await;
-
-        rx.await.map_err(|_| "Request was canceled".to_string())?
-    }
-
-    pub async fn get_snapshot(&self) -> FullLimiterState {
-        let now = Instant::now();
-
-        async fn make_status(worker: &Arc<QueueWorker>, now: Instant) -> LimiterStatus {
-            let tasks = worker.tasks.lock().await;
-            let tracker = worker.tracker.lock().await;
-
-            let queued_ids: Vec<String> = tasks.iter().map(|t| t.id.clone()).collect();
-
-            let (max, window_secs) = tracker
-                .rules
-                .first()
-                .map(|r| (r.max, r.window.as_secs()))
-                .unwrap_or((0, 0));
-
-            let current_count = if window_secs > 0 {
-                let win = Duration::from_secs(window_secs);
-                tracker
-                    .history
-                    .iter()
-                    .filter(|&&t| now.duration_since(t) < win)
-                    .count()
-            } else {
-                0
-            };
-
-            let penalty_seconds_left = tracker
-                .penalty_until
-                .and_then(|until| until.checked_duration_since(now))
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-
-            LimiterStatus {
-                max,
-                window_secs,
-                current_count,
-                penalty_seconds_left,
-                queued_ids,
-            }
-        }
-
-        FullLimiterState {
-            search: make_status(&self.search_queue, now).await,
-            fetch: make_status(&self.fetch_queue, now).await,
-        }
-    }
-
-    fn start_worker(&self, worker: Arc<QueueWorker>) {
-        let limiter = self.clone();
-
+        // 3. Telemetry Diff-Emitter: wakes on mutation event OR window expiration
+        let this = self.clone();
         tauri::async_runtime::spawn(async move {
             loop {
-                // 1. Wait until a task is available
-                let task = loop {
-                    let mut tasks = worker.tasks.lock().await;
-                    if let Some(t) = tasks.pop_front() {
-                        break t;
-                    }
-                    drop(tasks);
-                    worker.notify.notified().await;
+                // Emit initial or newly mutated state
+                this.emit_telemetry_if_changed().await;
+
+                let next_search = this.search_limiter.time_until_next_change().await;
+                let next_fetch = this.fetch_limiter.time_until_next_change().await;
+
+                let shortest_sleep = match (next_search, next_fetch) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (Some(a), None) => Some(a),
+                    (None, Some(b)) => Some(b),
+                    (None, None) => None,
                 };
 
-                limiter.emit_update().await;
-
-                if task.tx.is_closed() {
-                    continue;
-                }
-
-                // 2. Dispatch loop with exponential/header retry handling
-                loop {
-                    // Wait for active rate-limiting window/penalties to clear
-                    loop {
-                        let delay = {
-                            let mut tracker = worker.tracker.lock().await;
-                            tracker.delay_needed(Instant::now())
-                        };
-
-                        match delay {
-                            Some(d) => tokio::time::sleep(d).await,
-                            None => break,
-                        }
+                if let Some(duration) = shortest_sleep {
+                    tokio::select! {
+                        biased;
+                        _ = this.telemetry_notify.notified() => {},
+                        _ = tokio::time::sleep(duration) => {},
                     }
-
-                    // Record attempt slot
-                    {
-                        let mut tracker = worker.tracker.lock().await;
-                        tracker.record_dispatch(Instant::now());
-                    }
-                    limiter.emit_update().await;
-
-                    // 3. Execute HTTP request
-                    match (task.job)().await {
-                        Ok(resp) => {
-                            let status = resp.status();
-                            let headers = resp.headers().clone();
-
-                            // Update rules from response headers
-                            {
-                                let mut tracker = worker.tracker.lock().await;
-                                tracker.update_from_headers(&headers);
-                            }
-                            limiter.emit_update().await;
-
-                            // Handle HTTP 429 Rate Limited
-                            if status.as_u16() == 429 {
-                                let retry_secs = headers
-                                    .get("retry-after")
-                                    .and_then(|v| v.to_str().ok())
-                                    .and_then(|s| s.parse::<u64>().ok())
-                                    .unwrap_or(5);
-
-                                tokio::time::sleep(
-                                    Duration::from_secs(retry_secs) + Duration::from_millis(500),
-                                )
-                                .await;
-                                continue;
-                            }
-
-                            let body_text = resp.text().await.map_err(|e| e.to_string());
-                            let _ = task.tx.send(body_text);
-                            break;
-                        }
-                        Err(err) => {
-                            let _ = task.tx.send(Err(err));
-                            break;
-                        }
-                    }
+                } else {
+                    this.telemetry_notify.notified().await;
                 }
             }
         });
     }
+
+    /// Compares against previous snapshot and ONLY emits across IPC if values differ
+    pub async fn emit_telemetry_if_changed(&self) {
+        let current_state = self.get_telemetry_state().await;
+
+        let mut last_state = self.last_emitted_state.lock().await;
+        if last_state.as_ref() == Some(&current_state) {
+            return;
+        }
+
+        *last_state = Some(current_state.clone());
+        drop(last_state);
+
+        let handle = self.app_handle.lock().await;
+        if let Some(app) = handle.as_ref() {
+            let _ = app.emit("limiter-update", current_state);
+        }
+    }
+
+    pub async fn get_telemetry_state(&self) -> FullTelemetryState {
+        let search_telemetry = self.search_limiter.get_telemetry().await;
+        let fetch_telemetry = self.fetch_limiter.get_telemetry().await;
+
+        let mut queue_status = HashMap::new();
+        {
+            let searches = self.search_tasks.lock().await;
+            let mut search_counts = HashMap::new();
+            for task in searches.iter() {
+                *search_counts.entry(task.realm.clone()).or_insert(0) += 1;
+            }
+            queue_status.insert("search".to_string(), search_counts);
+        }
+        {
+            let fetches = self.fetch_queues.lock().await;
+            let mut fetch_counts = HashMap::new();
+            for (realm, q) in fetches.iter() {
+                fetch_counts.insert(realm.clone(), q.len());
+            }
+            queue_status.insert("fetch".to_string(), fetch_counts);
+        }
+
+        FullTelemetryState {
+            search: search_telemetry,
+            fetch: fetch_telemetry,
+            queue_status,
+        }
+    }
+
+    // --- Search Pipeline ---
+
+    pub async fn search_items(
+        &self,
+        realm: String,
+        payload: Value,
+        cache_ok: bool,
+    ) -> Result<String, String> {
+        if cache_ok {
+            if let Some(cached) = self.cache.get_search(&realm, &payload).await {
+                return Ok(cached);
+            }
+        }
+
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut tasks = self.search_tasks.lock().await;
+            tasks.push_back(SearchTask {
+                realm,
+                query: payload,
+                tx,
+            });
+        }
+
+        self.queue_notify.notify_one();
+        self.telemetry_notify.notify_one();
+
+        rx.await
+            .map_err(|_| "Search request canceled".to_string())?
+    }
+
+    async fn run_search_worker(&self) {
+        loop {
+            let task = loop {
+                let mut tasks = self.search_tasks.lock().await;
+                if let Some(t) = tasks.pop_front() {
+                    break t;
+                }
+                drop(tasks);
+                self.queue_notify.notified().await;
+            };
+
+            if task.tx.is_closed() {
+                self.telemetry_notify.notify_one();
+                continue;
+            }
+
+            // Wait for limiter slot & claim it
+            self.search_limiter.wait_for_slot(None).await;
+            self.search_limiter.record(None).await;
+            self.telemetry_notify.notify_one(); // <--- Instantly reflects on UI that a slot was taken!
+
+            // Spawn request so the worker loop can immediately process the next queued task!
+            let limiter = self.search_limiter.clone();
+            let cache = self.cache.clone();
+            let telemetry_notify = self.telemetry_notify.clone();
+
+            tauri::async_runtime::spawn(async move {
+                let result =
+                    search::search_items_trade(task.query.clone(), task.realm.clone()).await;
+                match result {
+                    Ok(resp) => {
+                        let status = resp.status();
+                        let headers = resp.headers().clone();
+
+                        limiter.reconcile(&headers).await;
+
+                        if status.as_u16() == 429 {
+                            let retry_secs = headers
+                                .get("retry-after")
+                                .and_then(|v| v.to_str().ok())
+                                .and_then(|s| s.parse::<u64>().ok())
+                                .unwrap_or(5);
+
+                            limiter
+                                .set_penalty(
+                                    Duration::from_secs(retry_secs) + Duration::from_millis(500),
+                                )
+                                .await;
+                            let _ = task.tx.send(Err("Rate limited (429)".to_string()));
+                        } else {
+                            match resp.text().await {
+                                Ok(text) => {
+                                    cache
+                                        .set_search(&task.realm, &task.query, text.clone())
+                                        .await;
+                                    let _ = task.tx.send(Ok(text));
+                                }
+                                Err(e) => {
+                                    let _ = task.tx.send(Err(e.to_string()));
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = task.tx.send(Err(e));
+                    }
+                }
+                telemetry_notify.notify_one();
+            });
+        }
+    }
+    // --- Fetch Pipeline ---
+
+    pub async fn fetch_items(&self, job: FetchJob) -> Result<Value, String> {
+        let realm = job.realm.clone();
+
+        if job.cache_ok {
+            let mut all_found = true;
+            let mut cached_results = Vec::new();
+
+            for id in &job.ids {
+                if let Some(item_val) = self.cache.get_fetch_item(&realm, id).await {
+                    cached_results.push(item_val);
+                } else {
+                    all_found = false;
+                    break;
+                }
+            }
+
+            if all_found && !cached_results.is_empty() {
+                return Ok(serde_json::json!({ "result": cached_results }));
+            }
+        }
+
+        let (tx, rx) = oneshot::channel();
+        let ready_at = Instant::now() + Duration::from_millis(job.wait_ms);
+
+        {
+            let mut queues = self.fetch_queues.lock().await;
+            let queue = queues.entry(realm).or_default();
+            queue.push_back(PendingFetch {
+                job,
+                ready_at,
+                collected_results: Vec::new(),
+                tx,
+            });
+        }
+
+        self.queue_notify.notify_one();
+        self.telemetry_notify.notify_one();
+
+        rx.await.map_err(|_| "Fetch request canceled".to_string())?
+    }
+    async fn run_fetch_batcher(&self) {
+        loop {
+            let now = Instant::now();
+            let mut target_realm: Option<String> = None;
+
+            // 1. Locate a realm where at least one job is ready
+            {
+                let queues = self.fetch_queues.lock().await;
+                for (realm, queue) in queues.iter() {
+                    if queue
+                        .iter()
+                        .any(|pf| pf.ready_at <= now && !pf.tx.is_closed())
+                    {
+                        target_realm = Some(realm.clone());
+                        break;
+                    }
+                }
+            }
+
+            let realm = match target_realm {
+                Some(r) => r,
+                None => {
+                    tokio::select! {
+                        _ = self.queue_notify.notified() => {},
+                        _ = tokio::time::sleep(Duration::from_millis(5)) => {},
+                    }
+                    continue;
+                }
+            };
+
+            let mut selected_ids: Vec<String> = Vec::with_capacity(10);
+            let mut job_allocations: Vec<(String, Vec<String>)> = Vec::new();
+            let mut reservation_to_charge: Option<String> = None;
+
+            // 2. Assemble Batch (Fair Round-Robin up to 10 items)
+            {
+                let mut queues = self.fetch_queues.lock().await;
+                let queue = match queues.get_mut(&realm) {
+                    Some(q) => q,
+                    None => continue,
+                };
+
+                // Purge canceled jobs
+                queue.retain(|pf| !pf.tx.is_closed());
+
+                // Collect all candidate jobs in this realm from recent to oldest
+                // Once the batch fires, allow peers queued around the same time to participate
+                let candidate_indices: Vec<usize> = (0..queue.len()).rev().collect();
+
+                if candidate_indices.is_empty() {
+                    continue;
+                }
+
+                let mut batch_count = 0;
+                let mut allocation_plan: HashMap<String, usize> = HashMap::new();
+
+                // Determine if any job has a reservation
+                for &idx in &candidate_indices {
+                    if reservation_to_charge.is_none() && queue[idx].job.reservation.is_some() {
+                        reservation_to_charge = queue[idx].job.reservation.clone();
+                    }
+                }
+
+                // -------------------------------------------------------------
+                // Pass 1: Fair Round-Robin to satisfy each job's `min`
+                // -------------------------------------------------------------
+                let mut progress = true;
+                while batch_count < 10 && progress {
+                    progress = false;
+                    for &idx in &candidate_indices {
+                        if batch_count >= 10 {
+                            break;
+                        }
+
+                        let job = &queue[idx].job;
+                        let target_min = job.min.clamp(1, job.ids.len());
+                        let current_allocated = allocation_plan.get(&job.id).copied().unwrap_or(0);
+
+                        // If this job still needs items to reach its min
+                        if current_allocated < target_min && current_allocated < job.ids.len() {
+                            *allocation_plan.entry(job.id.clone()).or_insert(0) += 1;
+                            batch_count += 1;
+                            progress = true;
+                        }
+                    }
+                }
+
+                // -------------------------------------------------------------
+                // Pass 2: Fair Round-Robin to fill remaining space up to 10
+                // -------------------------------------------------------------
+                progress = true;
+                while batch_count < 10 && progress {
+                    progress = false;
+                    for &idx in &candidate_indices {
+                        if batch_count >= 10 {
+                            break;
+                        }
+
+                        let job = &queue[idx].job;
+                        let current_allocated = allocation_plan.get(&job.id).copied().unwrap_or(0);
+
+                        // If this job has extra items beyond min
+                        if current_allocated < job.ids.len() {
+                            *allocation_plan.entry(job.id.clone()).or_insert(0) += 1;
+                            batch_count += 1;
+                            progress = true;
+                        }
+                    }
+                }
+
+                // -------------------------------------------------------------
+                // Pass 3: Drain and sanitize allocated IDs
+                // -------------------------------------------------------------
+                for pending in queue.iter_mut() {
+                    if let Some(&count) = allocation_plan.get(&pending.job.id) {
+                        if count > 0 {
+                            let drained: Vec<String> = pending.job.ids.drain(0..count).collect();
+                            let mut clean_drained = Vec::with_capacity(drained.len());
+
+                            for raw_id in drained {
+                                let clean_id = raw_id.trim().trim_matches('"').to_string();
+                                if !clean_id.is_empty() && selected_ids.len() < 10 {
+                                    selected_ids.push(clean_id.clone());
+                                    clean_drained.push(clean_id);
+                                }
+                            }
+
+                            if !clean_drained.is_empty() {
+                                job_allocations.push((pending.job.id.clone(), clean_drained));
+                            }
+                        }
+                    }
+                }
+            }
+
+            if selected_ids.is_empty() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                continue;
+            }
+
+            // 3. Throttle against FETCH rate limiter
+            self.fetch_limiter
+                .wait_for_slot(reservation_to_charge.as_deref())
+                .await;
+            self.fetch_limiter
+                .record(reservation_to_charge.as_deref())
+                .await;
+            self.telemetry_notify.notify_one();
+
+            // 4. Format strictly clean CSV
+            let joined_ids = selected_ids
+                .iter()
+                .take(10)
+                .cloned()
+                .collect::<Vec<String>>()
+                .join(",");
+
+            let response = fetch::fetch_items_trade(joined_ids, realm.clone()).await;
+
+            match response {
+                Ok(resp) => {
+                    let status = resp.status();
+                    let headers = resp.headers().clone();
+
+                    self.fetch_limiter.reconcile(&headers).await;
+
+                    if status.as_u16() == 429 {
+                        let retry_secs = headers
+                            .get("retry-after")
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .unwrap_or(5);
+
+                        self.fetch_limiter
+                            .set_penalty(
+                                Duration::from_secs(retry_secs) + Duration::from_millis(500),
+                            )
+                            .await;
+
+                        // Re-insert unperformed IDs back to front of their respective jobs
+                        let mut queues = self.fetch_queues.lock().await;
+                        if let Some(queue) = queues.get_mut(&realm) {
+                            for (job_id, drained) in job_allocations {
+                                if let Some(pending) = queue.iter_mut().find(|p| p.job.id == job_id)
+                                {
+                                    for id in drained.into_iter().rev() {
+                                        pending.job.ids.insert(0, id);
+                                    }
+                                }
+                            }
+                        }
+                        self.telemetry_notify.notify_one();
+                        continue;
+                    }
+
+                    match resp.json::<Value>().await {
+                        Ok(json) => {
+                            let mut returned_items_by_id: HashMap<String, Value> = HashMap::new();
+
+                            if let Some(items) = json.get("result").and_then(|r| r.as_array()) {
+                                for (idx, item) in items.iter().enumerate() {
+                                    if let Some(req_id) = selected_ids.get(idx) {
+                                        if !item.is_null() {
+                                            self.cache
+                                                .set_fetch_item(&realm, req_id, item.clone())
+                                                .await;
+                                            returned_items_by_id
+                                                .insert(req_id.clone(), item.clone());
+                                        }
+                                    }
+
+                                    if let Some(item_id) = item.get("id").and_then(|v| v.as_str()) {
+                                        returned_items_by_id
+                                            .insert(item_id.to_string(), item.clone());
+                                    }
+                                }
+                            }
+
+                            // Distribute items strictly to the jobs that requested them
+                            let mut queues = self.fetch_queues.lock().await;
+                            if let Some(queue) = queues.get_mut(&realm) {
+                                for (job_id, drained_ids) in job_allocations {
+                                    if let Some(pending) =
+                                        queue.iter_mut().find(|p| p.job.id == job_id)
+                                    {
+                                        for id in &drained_ids {
+                                            if let Some(item_val) = returned_items_by_id.get(id) {
+                                                pending.collected_results.push(item_val.clone());
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Complete jobs that have their items or have satisfied their min
+                                let mut i = 0;
+                                while i < queue.len() {
+                                    let is_finished = queue[i].job.ids.is_empty()
+                                        || queue[i].collected_results.len() >= queue[i].job.min;
+
+                                    if is_finished {
+                                        let mut finished = queue.remove(i).unwrap();
+                                        let response_payload = serde_json::json!({
+                                            "result": finished.collected_results
+                                        });
+                                        let _ = finished.tx.send(Ok(response_payload));
+                                    } else {
+                                        i += 1;
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            self.fail_jobs_by_id(&realm, &job_allocations, e.to_string())
+                                .await;
+                        }
+                    }
+                }
+                Err(err_msg) => {
+                    self.fail_jobs_by_id(&realm, &job_allocations, err_msg)
+                        .await;
+                }
+            }
+
+            self.telemetry_notify.notify_one();
+        }
+    }
+
+    async fn fail_jobs_by_id(
+        &self,
+        realm: &str,
+        allocations: &[(String, Vec<String>)],
+        err_msg: String,
+    ) {
+        let mut queues = self.fetch_queues.lock().await;
+        if let Some(queue) = queues.get_mut(realm) {
+            for (job_id, _) in allocations {
+                if let Some(pos) = queue.iter().position(|p| p.job.id == *job_id) {
+                    let failed = queue.remove(pos).unwrap();
+                    let _ = failed.tx.send(Err(err_msg.clone()));
+                }
+            }
+        }
+    }
 }
 
-// ---------------------------------------------------------------------------
-// 4. Tauri Command Handlers
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 6. Tauri Command Handlers
+// ===========================================================================
 
 #[tauri::command]
 pub async fn search_items(
     limiter: State<'_, ApiRateLimiter>,
-    id: String,
     realm: String,
     payload: Value,
+    cache_ok: Option<bool>,
 ) -> Result<String, String> {
-    limiter.search_items(id, realm, payload).await
+    limiter
+        .search_items(realm, payload, cache_ok.unwrap_or(false))
+        .await
 }
 
 #[tauri::command]
 pub async fn fetch_items(
     limiter: State<'_, ApiRateLimiter>,
-    id: String,
-    realm: String,
-    ids: String,
-    query: String,
-) -> Result<String, String> {
-    limiter.fetch_items(id, realm, ids, query).await
+    job: FetchJob,
+) -> Result<Value, String> {
+    limiter.fetch_items(job).await
 }
 
 #[tauri::command]
 pub async fn get_limiter_state(
     limiter: State<'_, ApiRateLimiter>,
-) -> Result<FullLimiterState, String> {
-    Ok(limiter.get_snapshot().await)
+) -> Result<FullTelemetryState, String> {
+    Ok(limiter.get_telemetry_state().await)
 }

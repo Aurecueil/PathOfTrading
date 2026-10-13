@@ -2,7 +2,9 @@
 <script lang="ts">
   import Tile from "$lib/SearchTile.svelte";
   import FilterDrawer from "$lib/FilterDrawer.svelte";
-  import type { SearchTile, FormSubmitData } from "$lib/types";
+  import type { SearchTile } from "$lib/types";
+
+  type TileState = SearchTile;
 
   let scale: number = 1;
   let offsetX: number = 0;
@@ -18,7 +20,7 @@
     return Math.round(val / step) * step;
   }
 
-  let tiles: SearchTile[] = [
+  let tiles: TileState[] = [
     {
       id: 1,
       x: 100,
@@ -28,13 +30,25 @@
       title: "",
       displayName: "",
       realm: "poe",
+      league: "",
       layoutMode: "list",
       loading: false,
       results: [],
       fetchedItems: [],
-      payload: null,
-      fullPayload: null,
-      sort: "price_asc",
+      payload: {
+        query: {
+          status: { option: "securable" },
+          stats: [{ type: "and", filters: [] }],
+        },
+        sort: { price: "asc" },
+      },
+      fullPayload: {
+        query: {
+          status: { option: "securable" },
+          stats: [{ type: "and", filters: [] }],
+        },
+        sort: { price: "asc" },
+      },
     },
   ];
 
@@ -60,7 +74,7 @@
     const rawX = center.x - 190;
     const rawY = center.y - 150;
 
-    const newTile: SearchTile = {
+    const newTile: TileState = {
       id: nextId++,
       x: snapToGrid ? snap(rawX) : Math.round(rawX),
       y: snapToGrid ? snap(rawY) : Math.round(rawY),
@@ -69,13 +83,25 @@
       title: "",
       displayName: "",
       realm: "poe",
+      league: "",
       layoutMode: "list",
       loading: false,
       results: [],
       fetchedItems: [],
-      payload: null,
-      fullPayload: null,
-      sort: "price_asc",
+      payload: {
+        query: {
+          status: { option: "securable" },
+          stats: [{ type: "and", filters: [] }],
+        },
+        sort: { price: "asc" },
+      },
+      fullPayload: {
+        query: {
+          status: { option: "securable" },
+          stats: [{ type: "and", filters: [] }],
+        },
+        sort: { price: "asc" },
+      },
     };
     tiles = [...tiles, newTile];
   }
@@ -88,8 +114,11 @@
     delete tileRefs[id];
   }
 
-  // Seamless switch: saves pending edits without triggering a search
-  function handleOpenFilters(tileId: number) {
+  function handleOpenFilters(tileId: number, e?: Event) {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
     if (activeTileId !== null && activeTileId !== tileId) {
       drawerRef?.saveWithoutSearch();
     }
@@ -100,7 +129,6 @@
     function handleWheel(e: WheelEvent) {
       if (isLocked) return;
 
-      // Hard check: prevent viewport zoom if wheel event occurs inside the drawer
       const target = e.target as HTMLElement;
       if (target.closest(".drawer")) return;
 
@@ -151,10 +179,10 @@
     } catch (_) {}
   }
 
-  // Saves changes without executing trade search (triggered during seamless tile switch)
   function handleSaveOnly(e: CustomEvent<any>) {
     if (activeTileId === null) return;
-    const { title, displayName, realm, payload, full_payload, sort } = e.detail;
+    const { title, displayName, realm, league, payload, full_payload } =
+      e.detail;
 
     tiles = tiles.map((t) =>
       t.id === activeTileId
@@ -163,18 +191,18 @@
             title: title ?? "",
             displayName: displayName ?? "",
             realm,
+            league: league ?? t.league,
             payload,
             fullPayload: full_payload,
-            sort: sort ?? t.sort,
           }
         : t,
     );
   }
 
-  // Saves changes and performs trade search
   function handleFormSubmit(e: CustomEvent<any>) {
     if (activeTileId === null) return;
-    const { title, displayName, realm, payload, full_payload, sort } = e.detail;
+    const { title, displayName, realm, league, payload, full_payload, close } =
+      e.detail;
     const targetId = activeTileId;
 
     tiles = tiles.map((t) =>
@@ -184,15 +212,18 @@
             title: title ?? "",
             displayName: displayName ?? "",
             realm,
+            league: league ?? t.league,
             payload,
             fullPayload: full_payload,
-            sort: sort ?? t.sort,
           }
         : t,
     );
 
+    if (close !== false) {
+      activeTileId = null;
+    }
+
     const ref = tileRefs[targetId];
-    activeTileId = null;
     ref?.runSearchWithPayload(payload);
   }
 </script>
@@ -247,7 +278,7 @@
         {scale}
         {snapToGrid}
         gridSize={GRID_SIZE}
-        on:openfilters={() => handleOpenFilters(tile.id)}
+        on:openfilters={(e) => handleOpenFilters(tile.id, e)}
         on:delete={() => removeTile(tile.id)}
       />
     {/each}
@@ -260,8 +291,8 @@
         initialTitle={activeTile.title}
         initialDisplayName={activeTile.displayName || ""}
         initialRealm={activeTile.realm}
+        initialLeague={activeTile.league || ""}
         initialPayload={activeTile.fullPayload || activeTile.payload || null}
-        initialSort={activeTile.sort || "price_asc"}
         on:close={() => (activeTileId = null)}
         on:save_only={handleSaveOnly}
         on:save_and_search={handleFormSubmit}

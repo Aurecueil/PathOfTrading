@@ -1,7 +1,7 @@
 <script lang="ts">
   import { openTabs, closeProject } from "../lib/projects.svelte";
   import { onMount, onDestroy } from "svelte";
-  import { invoke } from "@tauri-apps/api/core"; // If using Tauri v1: "@tauri-apps/api/tauri"
+  import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { initItemData } from "$lib/types/tradeStore";
 
@@ -9,92 +9,187 @@
 
   // Menu State
   let fileMenuOpen = $state(false);
-
-  // Rate Limiter State
-  interface LimiterStatus {
-    max: number;
-    window_secs: number;
-    current_count: number;
-    penalty_seconds_left: number;
-    queued_ids: number[];
-  }
-
-  interface FullLimiterState {
-    search: LimiterStatus;
-    fetch: LimiterStatus;
-  }
-
   let rateLimiterOpen = $state(false);
-  let rateState = $state<FullLimiterState>({
+
+  interface OperationTelemetry {
+    max_requests: number;
+    available_requests: number;
+    reserved_requests: Record<string, number>;
+    is_rate_limited: boolean;
+    retry_after_ms: number;
+  }
+
+  interface FullTelemetryState {
+    search: OperationTelemetry;
+    fetch: OperationTelemetry;
+    queue_status: Record<string, Record<string, number>>;
+  }
+
+  let rateState = $state<FullTelemetryState>({
     search: {
-      max: 0,
-      window_secs: 0,
-      current_count: 0,
-      penalty_seconds_left: 0,
-      queued_ids: [],
+      max_requests: 12,
+      available_requests: 12,
+      reserved_requests: { outside: 1 },
+      is_rate_limited: false,
+      retry_after_ms: 0,
     },
     fetch: {
-      max: 0,
-      window_secs: 0,
-      current_count: 0,
-      penalty_seconds_left: 0,
-      queued_ids: [],
+      max_requests: 12,
+      available_requests: 12,
+      reserved_requests: { outside: 1 },
+      is_rate_limited: false,
+      retry_after_ms: 0,
+    },
+    queue_status: {
+      search: {},
+      fetch: {},
     },
   });
 
-  let unlisten: UnlistenFn | undefined;
-  let timerInterval: ReturnType<typeof setInterval>;
+  // Dynamic countdown states (remaining ms rendered live)
+  let searchRemainingMs = $state(0);
+  let fetchRemainingMs = $state(0);
 
-  onMount(async () => {
-    // 1. Initial snapshot fetch from Tauri
-    try {
-      initItemData();
-      rateState = await invoke<FullLimiterState>("get_limiter_state");
-    } catch {
-      // Ignored if called during non-tauri dev previews
+  // Target timestamps in UNIX epoch ms
+  let searchDeadline = 0;
+  let fetchDeadline = 0;
+
+  let countdownInterval: ReturnType<typeof setInterval> | undefined;
+  let unlisten: UnlistenFn | undefined;
+
+  /**
+   * Reconciles backend retry_after_ms with the local ticking deadline.
+   * Tolerates minor timing drift without visual stutter.
+   */
+  function syncPenaltyDeadlines(payload: FullTelemetryState) {
+    const now = Date.now();
+
+    // 1. Search reconciliation
+    if (payload.search.retry_after_ms <= 0) {
+      searchDeadline = 0;
+      searchRemainingMs = 0;
+    } else {
+      const currentExpected = Math.max(0, searchDeadline - now);
+      // Re-anchor if not running or if difference exceeds 250ms drift
+      if (
+        searchDeadline === 0 ||
+        Math.abs(currentExpected - payload.search.retry_after_ms) > 250
+      ) {
+        searchDeadline = now + payload.search.retry_after_ms;
+        searchRemainingMs = payload.search.retry_after_ms;
+      }
     }
 
-    // 2. Listen to live updates from Rust worker
+    // 2. Fetch reconciliation
+    if (payload.fetch.retry_after_ms <= 0) {
+      fetchDeadline = 0;
+      fetchRemainingMs = 0;
+    } else {
+      const currentExpected = Math.max(0, fetchDeadline - now);
+      if (
+        fetchDeadline === 0 ||
+        Math.abs(currentExpected - payload.fetch.retry_after_ms) > 250
+      ) {
+        fetchDeadline = now + payload.fetch.retry_after_ms;
+        fetchRemainingMs = payload.fetch.retry_after_ms;
+      }
+    }
+  }
+
+  function sumReserved(reservedMap: Record<string, number> = {}): number {
+    return Object.values(reservedMap).reduce((acc, curr) => acc + curr, 0);
+  }
+
+  function getBarSlots(op: OperationTelemetry) {
+    const total = op.max_requests || 12;
+    const reserved = Math.min(sumReserved(op.reserved_requests), total);
+    const unreservedCap = total - reserved;
+
+    const hits = Math.max(0, total - op.available_requests);
+    const available = Math.max(0, unreservedCap - hits);
+    const used = Math.min(hits, unreservedCap);
+
+    return {
+      availablePct: (available / total) * 100,
+      usedPct: (used / total) * 100,
+      reservedPct: (reserved / total) * 100,
+      availableCount: available,
+      totalCount: total,
+    };
+  }
+
+  function sumQueueCounts(realmCounts: Record<string, number> = {}): number {
+    return Object.values(realmCounts).reduce((acc, curr) => acc + curr, 0);
+  }
+
+  const searchQueueCount = $derived(
+    sumQueueCounts(rateState.queue_status?.search),
+  );
+  const fetchQueueCount = $derived(
+    sumQueueCounts(rateState.queue_status?.fetch),
+  );
+  const totalQueueCount = $derived(searchQueueCount + fetchQueueCount);
+
+  const searchBar = $derived(getBarSlots(rateState.search));
+  const fetchBar = $derived(getBarSlots(rateState.fetch));
+
+  onMount(async () => {
     try {
-      unlisten = await listen<FullLimiterState>("limiter-update", (event) => {
-        rateState = event.payload;
+      initItemData();
+      const initial = await invoke<FullTelemetryState>("get_limiter_state");
+      if (initial) {
+        rateState = { ...initial };
+        syncPenaltyDeadlines(initial);
+      }
+    } catch {
+      // Dev mode fallback
+    }
+
+    try {
+      unlisten = await listen<FullTelemetryState>("limiter-update", (event) => {
+        rateState = { ...event.payload };
+        syncPenaltyDeadlines(event.payload);
       });
     } catch {
       // Dev mode fallback
     }
 
-    // 3. UI-side 1s tick countdown for penalties
-    timerInterval = setInterval(() => {
-      if (rateState.search.penalty_seconds_left > 0)
-        rateState.search.penalty_seconds_left--;
-      if (rateState.fetch.penalty_seconds_left > 0)
-        rateState.fetch.penalty_seconds_left--;
-    }, 1000);
+    // Smooth 100ms local clock for countdown labels
+    countdownInterval = setInterval(() => {
+      const now = Date.now();
+
+      if (searchDeadline > 0) {
+        searchRemainingMs = Math.max(0, searchDeadline - now);
+        if (searchRemainingMs === 0) searchDeadline = 0;
+      }
+
+      if (fetchDeadline > 0) {
+        fetchRemainingMs = Math.max(0, fetchDeadline - now);
+        if (fetchRemainingMs === 0) fetchDeadline = 0;
+      }
+    }, 100);
   });
 
   onDestroy(() => {
     if (unlisten) unlisten();
-    clearInterval(timerInterval);
+    if (countdownInterval) clearInterval(countdownInterval);
   });
 
   function toggleFileMenu(event: MouseEvent) {
     event.stopPropagation();
     fileMenuOpen = !fileMenuOpen;
+    rateLimiterOpen = false;
   }
 
   function toggleRateMenu(event: MouseEvent) {
     event.stopPropagation();
     rateLimiterOpen = !rateLimiterOpen;
+    fileMenuOpen = false;
   }
 
   function closeAllMenus() {
     fileMenuOpen = false;
     rateLimiterOpen = false;
-  }
-
-  function handleAction(actionName: string) {
-    closeAllMenus();
-    console.log(`Action triggered: ${actionName}`);
   }
 </script>
 
@@ -114,29 +209,21 @@
         </button>
 
         {#if fileMenuOpen}
-          <div class="dropdown-menu">
-            <button
-              type="button"
-              class="dropdown-item"
-              onclick={() => handleAction("new")}
-            >
+          <div
+            class="dropdown-menu"
+            role="presentation"
+            onclick={(e) => e.stopPropagation()}
+          >
+            <button type="button" class="dropdown-item">
               <span>New File</span>
               <kbd>Ctrl+N</kbd>
             </button>
-            <button
-              type="button"
-              class="dropdown-item"
-              onclick={() => handleAction("open")}
-            >
+            <button type="button" class="dropdown-item">
               <span>Open...</span>
               <kbd>Ctrl+O</kbd>
             </button>
             <div class="divider"></div>
-            <button
-              type="button"
-              class="dropdown-item"
-              onclick={() => handleAction("save")}
-            >
+            <button type="button" class="dropdown-item">
               <span>Save</span>
               <kbd>Ctrl+S</kbd>
             </button>
@@ -158,12 +245,10 @@
     </nav>
   </header>
 
-  <!-- Route content -->
   <main class="content">
     {@render children()}
   </main>
 
-  <!-- Footer with Rate Limiter -->
   <footer>
     <div class="footer">
       <div class="disclaimer">
@@ -176,33 +261,43 @@
 
         <div class="ratelimiter-container">
           {#if rateLimiterOpen}
-            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
             <div
               class="ratelimiter-popover"
+              role="presentation"
               onclick={(e) => e.stopPropagation()}
             >
-              <div class="popover-title">Queue Inspector</div>
+              <div class="popover-title">Queue & Limiter Telemetry</div>
 
               <div class="queue-row">
                 <span class="queue-label"
-                  >Search ({rateState.search.queued_ids.length} awaiting):</span
+                  >Search ({searchQueueCount} queued):</span
                 >
-                <span class="queue-ids">
-                  {rateState.search.queued_ids.length > 0
-                    ? rateState.search.queued_ids.join(", ")
-                    : "none"}
+                <span class="queue-details">
+                  {#each Object.entries(rateState.queue_status?.search || {}) as [realm, count]}
+                    <span class="realm-badge">{realm}: {count}</span>
+                  {:else}
+                    <span class="queue-empty">idle</span>
+                  {/each}
                 </span>
               </div>
 
               <div class="queue-row">
                 <span class="queue-label"
-                  >Fetch ({rateState.fetch.queued_ids.length} awaiting):</span
+                  >Fetch ({fetchQueueCount} queued):</span
                 >
-                <span class="queue-ids">
-                  {rateState.fetch.queued_ids.length > 0
-                    ? rateState.fetch.queued_ids.join(", ")
-                    : "none"}
+                <span class="queue-details">
+                  {#each Object.entries(rateState.queue_status?.fetch || {}) as [realm, count]}
+                    <span class="realm-badge">{realm}: {count}</span>
+                  {:else}
+                    <span class="queue-empty">idle</span>
+                  {/each}
                 </span>
+              </div>
+
+              <div class="legend-row">
+                <span class="legend-chip legend-available">Available</span>
+                <span class="legend-chip legend-unavailable">In Use</span>
+                <span class="legend-chip legend-reserved">Reserved</span>
               </div>
             </div>
           {/if}
@@ -211,41 +306,64 @@
             type="button"
             class="ratelimiter"
             class:active={rateLimiterOpen}
-            class:has-penalty={rateState.search.penalty_seconds_left > 0 ||
-              rateState.fetch.penalty_seconds_left > 0}
+            class:has-penalty={searchRemainingMs > 0 || fetchRemainingMs > 0}
             onclick={toggleRateMenu}
           >
-            Ratelimit:
-            <!-- Search state -->
-            {#if rateState.search.penalty_seconds_left > 0}
+            <!-- Search Healthbar Block -->
+            <span class="bar-label">S</span>
+            {#if searchRemainingMs > 0}
               <span class="penalty-text"
-                >Search: {rateState.search.penalty_seconds_left}s</span
+                >{Math.ceil(searchRemainingMs / 1000)}s</span
               >
             {:else}
-              <span
-                >S: {rateState.search.current_count}/{rateState.search.max ||
-                  0}</span
+              <div
+                class="healthbar"
+                title="Search: {searchBar.availableCount} available / {searchBar.totalCount} total"
               >
+                <div
+                  class="seg seg-available"
+                  style="width: {searchBar.availablePct}%;"
+                ></div>
+                <div
+                  class="seg seg-unavailable"
+                  style="width: {searchBar.usedPct}%;"
+                ></div>
+                <div
+                  class="seg seg-reserved"
+                  style="width: {searchBar.reservedPct}%;"
+                ></div>
+              </div>
             {/if}
 
             <span class="bar-separator">|</span>
 
-            <!-- Fetch state -->
-            {#if rateState.fetch.penalty_seconds_left > 0}
+            <!-- Fetch Healthbar Block -->
+            <span class="bar-label">F</span>
+            {#if fetchRemainingMs > 0}
               <span class="penalty-text"
-                >Fetch: {rateState.fetch.penalty_seconds_left}s</span
+                >{Math.ceil(fetchRemainingMs / 1000)}s</span
               >
             {:else}
-              <span
-                >F: {rateState.fetch.current_count}/{rateState.fetch.max ||
-                  0}</span
+              <div
+                class="healthbar"
+                title="Fetch: {fetchBar.availableCount} available / {fetchBar.totalCount} total"
               >
+                <div
+                  class="seg seg-available"
+                  style="width: {fetchBar.availablePct}%;"
+                ></div>
+                <div
+                  class="seg seg-unavailable"
+                  style="width: {fetchBar.usedPct}%;"
+                ></div>
+                <div
+                  class="seg seg-reserved"
+                  style="width: {fetchBar.reservedPct}%;"
+                ></div>
+              </div>
             {/if}
 
-            <span class="queue-count"
-              >({rateState.search.queued_ids.length +
-                rateState.fetch.queued_ids.length})</span
-            >
+            <span class="queue-count">({totalQueueCount})</span>
           </button>
         </div>
       </div>
@@ -273,7 +391,6 @@
     color: #ffffff;
   }
 
-  /* Header & Navigation Bar */
   .header-bar {
     min-height: 28px;
     background: #000000;
@@ -297,22 +414,21 @@
     position: relative;
   }
 
-  /* Classic PoB Buttons */
   .menu-btn,
   .ratelimiter {
     background-color: #000000;
     color: #ffffff;
     border: 1px solid #555555;
     border-radius: 0;
-    font-size: 13px;
+    font-size: 12px;
     font-family: inherit;
     line-height: 1;
-    padding: 3px 8px;
+    padding: 2px 7px;
     cursor: pointer;
     box-sizing: border-box;
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
   }
 
   .menu-btn:hover,
@@ -323,7 +439,7 @@
 
   .menu-btn.active,
   .ratelimiter.active {
-    background-color: #4a4a4a;
+    background-color: #333333;
     border-color: #ffffff;
     color: #ffffff;
   }
@@ -332,9 +448,46 @@
     border-color: #d32f2f;
   }
 
+  .bar-label {
+    font-weight: 700;
+    font-size: 11px;
+    color: #cccccc;
+  }
+
+  .healthbar {
+    width: 48px;
+    height: 9px;
+    background-color: #1a1a1a;
+    display: flex;
+    overflow: hidden;
+    border: 1px solid #444444;
+    box-sizing: border-box;
+  }
+
+  .seg {
+    height: 100%;
+    transition: width 0.08s linear;
+  }
+
+  .seg-available {
+    background-color: #388e3c;
+  }
+
+  .seg-unavailable {
+    background-color: #2b2b2b;
+  }
+
+  .seg-reserved {
+    background-color: #8a8a8a;
+  }
+
   .penalty-text {
     color: #ff5252;
-    font-weight: 600;
+    font-weight: 700;
+    font-size: 11px;
+    font-family: monospace;
+    min-width: 18px;
+    text-align: center;
   }
 
   .bar-separator {
@@ -346,7 +499,6 @@
     font-size: 11px;
   }
 
-  /* Tabs container & items */
   .tabs {
     display: flex;
     align-items: center;
@@ -393,7 +545,6 @@
     color: #ffffff;
   }
 
-  /* Dropdown styling */
   .dropdown-menu {
     position: absolute;
     top: 100%;
@@ -441,17 +592,14 @@
     margin: 2px 0;
   }
 
-  /* Main routed content */
-  /* Main routed content */
   .content {
     flex: 1;
-    position: relative; /* establishes coordinate space for .viewport */
-    overflow: hidden; /* prevents page scrollbars */
+    position: relative;
+    overflow: hidden;
     background-color: #000000;
     user-select: text;
   }
 
-  /* Footer */
   footer {
     border-top: 1px solid #333333;
     background: #000000;
@@ -486,7 +634,6 @@
     color: #666666;
   }
 
-  /* Rate Limiter Popover */
   .ratelimiter-container {
     position: relative;
   }
@@ -496,7 +643,7 @@
     bottom: 100%;
     right: 0;
     margin-bottom: 4px;
-    min-width: 220px;
+    min-width: 240px;
     background: #000000;
     border: 1px solid #666666;
     box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.9);
@@ -506,7 +653,7 @@
     z-index: 1200;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 5px;
   }
 
   .popover-title {
@@ -514,22 +661,70 @@
     color: #aaaaaa;
     border-bottom: 1px solid #333333;
     padding-bottom: 3px;
-    margin-bottom: 2px;
   }
 
   .queue-row {
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 2px;
   }
 
   .queue-label {
     color: #ffffff;
   }
 
-  .queue-ids {
-    color: #ffb74d;
+  .queue-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
     padding-left: 6px;
-    word-break: break-all;
+  }
+
+  .realm-badge {
+    background-color: #1f1f1f;
+    border: 1px solid #444444;
+    padding: 1px 4px;
+    font-size: 10px;
+    color: #ffb74d;
+  }
+
+  .queue-empty {
+    color: #666666;
+    font-style: italic;
+  }
+
+  .legend-row {
+    display: flex;
+    gap: 8px;
+    border-top: 1px solid #222222;
+    padding-top: 4px;
+    margin-top: 2px;
+    font-size: 10px;
+  }
+
+  .legend-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+  }
+
+  .legend-chip::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    display: inline-block;
+  }
+
+  .legend-available::before {
+    background-color: #388e3c;
+  }
+
+  .legend-unavailable::before {
+    background-color: #2b2b2b;
+    border: 1px solid #555555;
+  }
+
+  .legend-reserved::before {
+    background-color: #8a8a8a;
   }
 </style>
