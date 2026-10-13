@@ -7,6 +7,7 @@ pub mod trade;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let limiter = trade::ApiRateLimiter::new();
+    let live_state = trade::live::LiveSessionState::default();
 
     std::env::set_var(
         "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
@@ -17,6 +18,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(limiter)
+        .manage(live_state)
         .setup(move |app| {
             let app_handle = app.handle().clone();
 
@@ -55,6 +57,10 @@ pub fn run() {
             trade::filters::load_filters_data,
             trade::stats::load_stats_data,
             trade::league::load_league_data,
+            trade::live::start_live_search,
+            trade::live::stop_live_search,
+            trade::whisper::whisper,
+            trade::cdn::fetch_image_bytes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

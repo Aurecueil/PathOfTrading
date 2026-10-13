@@ -19,3 +19,5 @@ export interface ItemCategory {
 export interface ItemDataResponse {
   result: ItemCategory[];
 }
+
+// item base types

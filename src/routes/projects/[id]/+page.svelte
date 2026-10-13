@@ -25,8 +25,8 @@
       id: 1,
       x: 100,
       y: 100,
-      w: 380,
-      h: 300,
+      w: 420,
+      h: 690,
       title: "",
       displayName: "",
       realm: "poe",
@@ -78,8 +78,8 @@
       id: nextId++,
       x: snapToGrid ? snap(rawX) : Math.round(rawX),
       y: snapToGrid ? snap(rawY) : Math.round(rawY),
-      w: snapToGrid ? snap(380) : 380,
-      h: snapToGrid ? snap(300) : 300,
+      w: snapToGrid ? snap(420) : 420,
+      h: snapToGrid ? snap(690) : 690,
       title: "",
       displayName: "",
       realm: "poe",
@@ -184,6 +184,11 @@
     const { title, displayName, realm, league, payload, full_payload } =
       e.detail;
 
+    const effectivePayload = payload ? { ...payload, league } : payload;
+    const effectiveFullPayload = full_payload
+      ? { ...full_payload, league }
+      : full_payload;
+
     tiles = tiles.map((t) =>
       t.id === activeTileId
         ? {
@@ -192,8 +197,8 @@
             displayName: displayName ?? "",
             realm,
             league: league ?? t.league,
-            payload,
-            fullPayload: full_payload,
+            payload: effectivePayload,
+            fullPayload: effectiveFullPayload,
           }
         : t,
     );
@@ -205,6 +210,11 @@
       e.detail;
     const targetId = activeTileId;
 
+    const effectivePayload = payload ? { ...payload, league } : payload;
+    const effectiveFullPayload = full_payload
+      ? { ...full_payload, league }
+      : full_payload;
+
     tiles = tiles.map((t) =>
       t.id === targetId
         ? {
@@ -213,8 +223,8 @@
             displayName: displayName ?? "",
             realm,
             league: league ?? t.league,
-            payload,
-            fullPayload: full_payload,
+            payload: effectivePayload,
+            fullPayload: effectiveFullPayload,
           }
         : t,
     );
@@ -224,7 +234,7 @@
     }
 
     const ref = tileRefs[targetId];
-    ref?.runSearchWithPayload(payload);
+    ref?.executeSearch(effectivePayload);
   }
 </script>
 

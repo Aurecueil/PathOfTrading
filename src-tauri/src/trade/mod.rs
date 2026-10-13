@@ -1,9 +1,12 @@
+pub mod cdn;
 pub mod fetch;
 pub mod filters;
 pub mod items;
 pub mod league;
+pub mod live;
 pub mod search;
 pub mod stats;
+pub mod whisper;
 
 use reqwest::header::HeaderMap;
 use serde::{Deserialize, Serialize};
@@ -113,7 +116,6 @@ impl Default for RateLimiterCore {
         configured_reservations.insert("outside".to_string(), 1);
 
         Self {
-            // Seed with Path of Exile default limits so request #1 is monitored correctly
             rules: vec![
                 ServerRule {
                     max: 12,
@@ -310,8 +312,6 @@ impl RateLimiterCore {
                         self.history.push_back(now);
                     }
                 } else if srv_hits < local_count {
-                    // If server has fewer hits (e.g. server window rolled over before local),
-                    // drain extra local timestamps from the front so we don't hold back requests unnecessarily
                     let mut diff = local_count - srv_hits;
                     while diff > 0 && !self.history.is_empty() {
                         self.history.pop_front();
@@ -338,8 +338,6 @@ impl RateLimiterCore {
             0
         };
 
-        // Capacity dedicated to general requests:
-        // General available requests cannot exceed general capacity
         let available = max.saturating_sub(active_hits);
 
         let retry_after_ms = self
@@ -457,6 +455,7 @@ struct PendingFetch {
     collected_results: Vec<Value>,
     tx: oneshot::Sender<Result<Value, String>>,
 }
+
 struct SearchTask {
     realm: String,
     query: Value,
@@ -510,11 +509,10 @@ impl ApiRateLimiter {
             this.run_fetch_batcher().await;
         });
 
-        // 3. Telemetry Diff-Emitter: wakes on mutation event OR window expiration
+        // 3. Telemetry Diff-Emitter
         let this = self.clone();
         tauri::async_runtime::spawn(async move {
             loop {
-                // Emit initial or newly mutated state
                 this.emit_telemetry_if_changed().await;
 
                 let next_search = this.search_limiter.time_until_next_change().await;
@@ -540,7 +538,6 @@ impl ApiRateLimiter {
         });
     }
 
-    /// Compares against previous snapshot and ONLY emits across IPC if values differ
     pub async fn emit_telemetry_if_changed(&self) {
         let current_state = self.get_telemetry_state().await;
 
@@ -634,61 +631,81 @@ impl ApiRateLimiter {
                 continue;
             }
 
-            // Wait for limiter slot & claim it
             self.search_limiter.wait_for_slot(None).await;
             self.search_limiter.record(None).await;
-            self.telemetry_notify.notify_one(); // <--- Instantly reflects on UI that a slot was taken!
+            self.telemetry_notify.notify_one();
 
-            // Spawn request so the worker loop can immediately process the next queued task!
-            let limiter = self.search_limiter.clone();
-            let cache = self.cache.clone();
-            let telemetry_notify = self.telemetry_notify.clone();
+            let result = search::search_items_trade(task.query.clone(), task.realm.clone()).await;
+            match result {
+                Ok(resp) => {
+                    let status = resp.status();
+                    let headers = resp.headers().clone();
 
-            tauri::async_runtime::spawn(async move {
-                let result =
-                    search::search_items_trade(task.query.clone(), task.realm.clone()).await;
-                match result {
-                    Ok(resp) => {
-                        let status = resp.status();
-                        let headers = resp.headers().clone();
+                    self.search_limiter.reconcile(&headers).await;
 
-                        limiter.reconcile(&headers).await;
+                    let is_429 = status.as_u16() == 429;
+                    let text = resp.text().await.unwrap_or_default();
+                    let parsed_json: Option<Value> = serde_json::from_str(&text).ok();
+                    let error_code = parsed_json
+                        .as_ref()
+                        .and_then(|j| j.get("error"))
+                        .and_then(|e| e.get("code"))
+                        .and_then(|c| c.as_i64());
 
-                        if status.as_u16() == 429 {
-                            let retry_secs = headers
-                                .get("retry-after")
-                                .and_then(|v| v.to_str().ok())
-                                .and_then(|s| s.parse::<u64>().ok())
-                                .unwrap_or(5);
+                    // Check for rate limit condition (HTTP 429 or error code 3)
+                    if is_429 || error_code == Some(3) {
+                        let retry_secs = headers
+                            .get("retry-after")
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .unwrap_or(5);
 
-                            limiter
-                                .set_penalty(
-                                    Duration::from_secs(retry_secs) + Duration::from_millis(500),
-                                )
-                                .await;
-                            let _ = task.tx.send(Err("Rate limited (429)".to_string()));
-                        } else {
-                            match resp.text().await {
-                                Ok(text) => {
-                                    cache
-                                        .set_search(&task.realm, &task.query, text.clone())
-                                        .await;
-                                    let _ = task.tx.send(Ok(text));
-                                }
-                                Err(e) => {
-                                    let _ = task.tx.send(Err(e.to_string()));
-                                }
-                            }
+                        self.search_limiter
+                            .set_penalty(
+                                Duration::from_secs(retry_secs) + Duration::from_millis(500),
+                            )
+                            .await;
+
+                        // Re-queue the task at the head of the deque to re-attempt after penalty
+                        {
+                            let mut tasks = self.search_tasks.lock().await;
+                            tasks.push_front(task);
+                        }
+                        self.telemetry_notify.notify_one();
+                        continue;
+                    }
+
+                    // Check for other API error payloads (e.g. Code 2)
+                    if let Some(ref j) = parsed_json {
+                        if let Some(err) = j.get("error") {
+                            let _ = task.tx.send(Err(err.to_string()));
+                            self.telemetry_notify.notify_one();
+                            continue;
                         }
                     }
-                    Err(e) => {
-                        let _ = task.tx.send(Err(e));
+
+                    if !status.is_success() {
+                        let _ = task
+                            .tx
+                            .send(Err(format!("HTTP Error {}: {}", status, text)));
+                        self.telemetry_notify.notify_one();
+                        continue;
                     }
+
+                    // Success response
+                    self.cache
+                        .set_search(&task.realm, &task.query, text.clone())
+                        .await;
+                    let _ = task.tx.send(Ok(text));
                 }
-                telemetry_notify.notify_one();
-            });
+                Err(e) => {
+                    let _ = task.tx.send(Err(e));
+                }
+            }
+            self.telemetry_notify.notify_one();
         }
     }
+
     // --- Fetch Pipeline ---
 
     pub async fn fetch_items(&self, job: FetchJob) -> Result<Value, String> {
@@ -731,12 +748,12 @@ impl ApiRateLimiter {
 
         rx.await.map_err(|_| "Fetch request canceled".to_string())?
     }
+
     async fn run_fetch_batcher(&self) {
         loop {
             let now = Instant::now();
             let mut target_realm: Option<String> = None;
 
-            // 1. Locate a realm where at least one job is ready
             {
                 let queues = self.fetch_queues.lock().await;
                 for (realm, queue) in queues.iter() {
@@ -764,8 +781,9 @@ impl ApiRateLimiter {
             let mut selected_ids: Vec<String> = Vec::with_capacity(10);
             let mut job_allocations: Vec<(String, Vec<String>)> = Vec::new();
             let mut reservation_to_charge: Option<String> = None;
+            let mut primary_query_id: Option<String> = None;
 
-            // 2. Assemble Batch (Fair Round-Robin up to 10 items)
+            // Batch allocation
             {
                 let mut queues = self.fetch_queues.lock().await;
                 let queue = match queues.get_mut(&realm) {
@@ -773,13 +791,9 @@ impl ApiRateLimiter {
                     None => continue,
                 };
 
-                // Purge canceled jobs
                 queue.retain(|pf| !pf.tx.is_closed());
 
-                // Collect all candidate jobs in this realm from recent to oldest
-                // Once the batch fires, allow peers queued around the same time to participate
                 let candidate_indices: Vec<usize> = (0..queue.len()).rev().collect();
-
                 if candidate_indices.is_empty() {
                     continue;
                 }
@@ -787,63 +801,64 @@ impl ApiRateLimiter {
                 let mut batch_count = 0;
                 let mut allocation_plan: HashMap<String, usize> = HashMap::new();
 
-                // Determine if any job has a reservation
                 for &idx in &candidate_indices {
                     if reservation_to_charge.is_none() && queue[idx].job.reservation.is_some() {
                         reservation_to_charge = queue[idx].job.reservation.clone();
                     }
                 }
+                for &idx in &candidate_indices {
+                    if primary_query_id.is_none() {
+                        primary_query_id = Some(queue[idx].job.id.clone());
+                    }
+                    if reservation_to_charge.is_none() && queue[idx].job.reservation.is_some() {
+                        reservation_to_charge = queue[idx].job.reservation.clone();
+                    }
+                }
 
-                // -------------------------------------------------------------
-                // Pass 1: Fair Round-Robin to satisfy each job's `min`
-                // -------------------------------------------------------------
-                let mut progress = true;
-                while batch_count < 10 && progress {
-                    progress = false;
+                // Pass 1: Ensure each candidate job gets its `min` requirement
+                for &idx in &candidate_indices {
+                    if batch_count >= 10 {
+                        break;
+                    }
+
+                    let job = &queue[idx].job;
+                    let target_min = job.min.clamp(1, job.ids.len());
+                    let current_allocated = allocation_plan.get(&job.id).copied().unwrap_or(0);
+
+                    if current_allocated < target_min {
+                        let needed = target_min - current_allocated;
+                        let space_left = 10 - batch_count;
+                        let take = needed.min(space_left);
+
+                        if take > 0 {
+                            *allocation_plan.entry(job.id.clone()).or_insert(0) += take;
+                            batch_count += take;
+                        }
+                    }
+                }
+
+                // Pass 2: Top off remaining slots greedily from the most recent job first
+                if batch_count < 10 {
                     for &idx in &candidate_indices {
                         if batch_count >= 10 {
                             break;
                         }
 
                         let job = &queue[idx].job;
-                        let target_min = job.min.clamp(1, job.ids.len());
                         let current_allocated = allocation_plan.get(&job.id).copied().unwrap_or(0);
+                        let remaining_in_job = job.ids.len().saturating_sub(current_allocated);
 
-                        // If this job still needs items to reach its min
-                        if current_allocated < target_min && current_allocated < job.ids.len() {
-                            *allocation_plan.entry(job.id.clone()).or_insert(0) += 1;
-                            batch_count += 1;
-                            progress = true;
+                        let space_left = 10 - batch_count;
+                        let take = remaining_in_job.min(space_left);
+
+                        if take > 0 {
+                            *allocation_plan.entry(job.id.clone()).or_insert(0) += take;
+                            batch_count += take;
                         }
                     }
                 }
 
-                // -------------------------------------------------------------
-                // Pass 2: Fair Round-Robin to fill remaining space up to 10
-                // -------------------------------------------------------------
-                progress = true;
-                while batch_count < 10 && progress {
-                    progress = false;
-                    for &idx in &candidate_indices {
-                        if batch_count >= 10 {
-                            break;
-                        }
-
-                        let job = &queue[idx].job;
-                        let current_allocated = allocation_plan.get(&job.id).copied().unwrap_or(0);
-
-                        // If this job has extra items beyond min
-                        if current_allocated < job.ids.len() {
-                            *allocation_plan.entry(job.id.clone()).or_insert(0) += 1;
-                            batch_count += 1;
-                            progress = true;
-                        }
-                    }
-                }
-
-                // -------------------------------------------------------------
                 // Pass 3: Drain and sanitize allocated IDs
-                // -------------------------------------------------------------
                 for pending in queue.iter_mut() {
                     if let Some(&count) = allocation_plan.get(&pending.job.id) {
                         if count > 0 {
@@ -871,7 +886,6 @@ impl ApiRateLimiter {
                 continue;
             }
 
-            // 3. Throttle against FETCH rate limiter
             self.fetch_limiter
                 .wait_for_slot(reservation_to_charge.as_deref())
                 .await;
@@ -880,7 +894,6 @@ impl ApiRateLimiter {
                 .await;
             self.telemetry_notify.notify_one();
 
-            // 4. Format strictly clean CSV
             let joined_ids = selected_ids
                 .iter()
                 .take(10)
@@ -888,7 +901,11 @@ impl ApiRateLimiter {
                 .collect::<Vec<String>>()
                 .join(",");
 
-            let response = fetch::fetch_items_trade(joined_ids, realm.clone()).await;
+            let query_id = primary_query_id
+                .or_else(|| job_allocations.first().map(|(id, _)| id.clone()))
+                .unwrap_or_default();
+
+            let response = fetch::fetch_items_trade(joined_ids, realm.clone(), query_id).await;
 
             match response {
                 Ok(resp) => {
@@ -897,7 +914,17 @@ impl ApiRateLimiter {
 
                     self.fetch_limiter.reconcile(&headers).await;
 
-                    if status.as_u16() == 429 {
+                    let is_429 = status.as_u16() == 429;
+                    let text = resp.text().await.unwrap_or_default();
+                    let parsed_json: Option<Value> = serde_json::from_str(&text).ok();
+                    let error_code = parsed_json
+                        .as_ref()
+                        .and_then(|j| j.get("error"))
+                        .and_then(|e| e.get("code"))
+                        .and_then(|c| c.as_i64());
+
+                    // Check for rate limit condition (HTTP 429 or error code 3)
+                    if is_429 || error_code == Some(3) {
                         let retry_secs = headers
                             .get("retry-after")
                             .and_then(|v| v.to_str().ok())
@@ -926,70 +953,88 @@ impl ApiRateLimiter {
                         continue;
                     }
 
-                    match resp.json::<Value>().await {
-                        Ok(json) => {
-                            let mut returned_items_by_id: HashMap<String, Value> = HashMap::new();
-
-                            if let Some(items) = json.get("result").and_then(|r| r.as_array()) {
-                                for (idx, item) in items.iter().enumerate() {
-                                    if let Some(req_id) = selected_ids.get(idx) {
-                                        if !item.is_null() {
-                                            self.cache
-                                                .set_fetch_item(&realm, req_id, item.clone())
-                                                .await;
-                                            returned_items_by_id
-                                                .insert(req_id.clone(), item.clone());
-                                        }
-                                    }
-
-                                    if let Some(item_id) = item.get("id").and_then(|v| v.as_str()) {
-                                        returned_items_by_id
-                                            .insert(item_id.to_string(), item.clone());
-                                    }
-                                }
-                            }
-
-                            // Distribute items strictly to the jobs that requested them
-                            let mut queues = self.fetch_queues.lock().await;
-                            if let Some(queue) = queues.get_mut(&realm) {
-                                for (job_id, drained_ids) in job_allocations {
-                                    if let Some(pending) =
-                                        queue.iter_mut().find(|p| p.job.id == job_id)
-                                    {
-                                        for id in &drained_ids {
-                                            if let Some(item_val) = returned_items_by_id.get(id) {
-                                                pending.collected_results.push(item_val.clone());
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Complete jobs that have their items or have satisfied their min
-                                let mut i = 0;
-                                while i < queue.len() {
-                                    let is_finished = queue[i].job.ids.is_empty()
-                                        || queue[i].collected_results.len() >= queue[i].job.min;
-
-                                    if is_finished {
-                                        let mut finished = queue.remove(i).unwrap();
-                                        let response_payload = serde_json::json!({
-                                            "result": finished.collected_results
-                                        });
-                                        let _ = finished.tx.send(Ok(response_payload));
-                                    } else {
-                                        i += 1;
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            self.fail_jobs_by_id(&realm, &job_allocations, e.to_string())
+                    // Check for other API error payloads (e.g. Code 2)
+                    if let Some(ref j) = parsed_json {
+                        if let Some(err) = j.get("error") {
+                            let err_msg = err.to_string();
+                            self.fail_jobs_by_id(&realm, &job_allocations, err_msg)
                                 .await;
+                            self.telemetry_notify.notify_one();
+                            continue;
                         }
+                    }
+
+                    if !status.is_success() {
+                        let err_msg = format!("HTTP Error {}: {}", status, text);
+                        self.fail_jobs_by_id(&realm, &job_allocations, err_msg)
+                            .await;
+                        self.telemetry_notify.notify_one();
+                        continue;
+                    }
+
+                    // Success payload
+                    if let Some(json) = parsed_json {
+                        let mut returned_items_by_id: HashMap<String, Value> = HashMap::new();
+
+                        if let Some(items) = json.get("result").and_then(|r| r.as_array()) {
+                            for (idx, item) in items.iter().enumerate() {
+                                if let Some(req_id) = selected_ids.get(idx) {
+                                    if !item.is_null() {
+                                        self.cache
+                                            .set_fetch_item(&realm, req_id, item.clone())
+                                            .await;
+                                        returned_items_by_id.insert(req_id.clone(), item.clone());
+                                    }
+                                }
+
+                                if let Some(item_id) = item.get("id").and_then(|v| v.as_str()) {
+                                    returned_items_by_id.insert(item_id.to_string(), item.clone());
+                                }
+                            }
+                        }
+
+                        // Distribute matched items to corresponding calling jobs
+                        let mut queues = self.fetch_queues.lock().await;
+                        if let Some(queue) = queues.get_mut(&realm) {
+                            for (job_id, drained_ids) in job_allocations {
+                                if let Some(pending) = queue.iter_mut().find(|p| p.job.id == job_id)
+                                {
+                                    for id in &drained_ids {
+                                        if let Some(item_val) = returned_items_by_id.get(id) {
+                                            pending.collected_results.push(item_val.clone());
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Complete jobs that have their items or have satisfied their min
+                            let mut i = 0;
+                            while i < queue.len() {
+                                let is_finished = queue[i].job.ids.is_empty()
+                                    || queue[i].collected_results.len() >= queue[i].job.min;
+
+                                if is_finished {
+                                    let finished = queue.remove(i).unwrap();
+                                    let response_payload = serde_json::json!({
+                                        "result": finished.collected_results
+                                    });
+                                    let _ = finished.tx.send(Ok(response_payload));
+                                } else {
+                                    i += 1;
+                                }
+                            }
+                        }
+                    } else {
+                        self.fail_jobs_by_id(
+                            &realm,
+                            &job_allocations,
+                            "Invalid JSON payload".to_string(),
+                        )
+                        .await;
                     }
                 }
                 Err(err_msg) => {
-                    self.fail_jobs_by_id(&realm, &job_allocations, err_msg)
+                    self.fail_jobs_by_id(&realm, &job_allocations, err_msg.to_string())
                         .await;
                 }
             }

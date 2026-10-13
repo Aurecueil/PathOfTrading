@@ -1,8 +1,10 @@
 <!-- src/lib/SearchTile.svelte -->
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
+  import { createEventDispatcher, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import type { SearchTile, PoETradeItemEntry } from "$lib/types";
+  import SearchItemRow from "./SearchItemRow.svelte";
 
   export let tile: SearchTile;
   export let scale: number = 1;
@@ -14,16 +16,40 @@
     delete: void;
   }>();
 
+  type SearchMode = "regular" | "live" | "mixed";
   type ResizeDirection = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
+
+  interface DisplayEntry {
+    id: string;
+    data: PoETradeItemEntry | null;
+    sortValue: any;
+    isLive?: boolean;
+  }
 
   const MIN_W = 260;
   const MIN_H = 180;
+  const BATCH_SIZE = 10;
+
+  let mode: SearchMode = "regular";
+  let isLiveActive: boolean = false;
+  let isLiveConnecting: boolean = false;
+  let isFetchingMore: boolean = false;
+
+  let itemsMap: Map<string, DisplayEntry> = new Map();
+  let displayedItems: DisplayEntry[] = [];
+
+  let unlistenItems: UnlistenFn | null = null;
+  let unlistenStatus: UnlistenFn | null = null;
+  let bodyElement: HTMLDivElement | null = null;
 
   function snap(val: number): number {
     return snapToGrid ? Math.round(val / gridSize) * gridSize : Math.round(val);
   }
 
   $: activePayload = tile.payload;
+
+  // Resolve league from tile property, payload, or fallback
+  $: currentLeague = (tile as any)?.league ?? activePayload?.league ?? "";
 
   $: defaultRealmTitle =
     tile.realm?.toLowerCase() === "poe2"
@@ -32,7 +58,49 @@
 
   $: displayTitle = tile.displayName?.trim() || defaultRealmTitle;
 
-  export async function runSearchWithPayload(payload?: any) {
+  function getSortConfig(): { field: string; dir: "asc" | "desc" } {
+    const sortObj = activePayload?.sort;
+    if (!sortObj || typeof sortObj !== "object") {
+      return { field: "price", dir: "asc" };
+    }
+    const [field, dir] = Object.entries(sortObj)[0] || ["price", "asc"];
+    return {
+      field,
+      dir: String(dir).toLowerCase() === "desc" ? "desc" : "asc",
+    };
+  }
+
+  function extractSortValue(entry: PoETradeItemEntry, field: string): any {
+    if (!entry) return null;
+    if (field === "price") {
+      return entry.listing?.price?.amount ?? null;
+    }
+    if (field in entry) return (entry as any)[field];
+    if (entry.item && field in entry.item) return (entry.item as any)[field];
+    if (entry.listing && field in entry.listing)
+      return (entry.listing as any)[field];
+    return null;
+  }
+
+  function sortDisplayList() {
+    const { dir } = getSortConfig();
+    displayedItems = [...displayedItems].sort((a, b) => {
+      const valA = a.sortValue;
+      const valB = b.sortValue;
+
+      if (valA === null || valA === undefined) return 1;
+      if (valB === null || valB === undefined) return -1;
+
+      if (typeof valA === "number" && typeof valB === "number") {
+        return dir === "asc" ? valA - valB : valB - valA;
+      }
+      return dir === "asc"
+        ? String(valA).localeCompare(String(valB))
+        : String(valB).localeCompare(String(valA));
+    });
+  }
+
+  export async function executeSearch(payload?: any) {
     const payloadToRun = payload || activePayload;
     if (!payloadToRun) return;
 
@@ -40,13 +108,13 @@
       tile.payload = payload;
     }
 
+    if (isLiveActive || isLiveConnecting) {
+      await stopLive();
+    }
+
     tile.loading = true;
-    tile.results = [];
-    tile.fetchedItems = [];
 
     try {
-      // 1. Dispatch search matching the refactored Tauri command:
-      // pub async fn search_items(realm: String, payload: Value, cache_ok: Option<bool>)
       const rawResponse: string = await invoke("search_items", {
         realm: tile.realm,
         payload: payloadToRun,
@@ -58,12 +126,28 @@
 
       tile.searchId = data.id;
       tile.results = data.result || [];
+      tile = tile; // Trigger reactive updates across child components
 
-      // 2. Queue IDs into the batching fetch pipeline
-      if (tile.results.length > 0 && tile.searchId) {
-        // Hand off initial IDs (up to 10 or more) as an array for batching
-        const targetIds = tile.results.slice(0, 10);
-        await fetchFoundItems(targetIds, tile.searchId);
+      // Wipe previous items when response arrives
+      itemsMap.clear();
+      displayedItems = [];
+
+      if (mode === "regular" || mode === "mixed") {
+        const initialBatch = tile.results.slice(0, BATCH_SIZE);
+        for (const id of initialBatch) {
+          const entry: DisplayEntry = { id, data: null, sortValue: null };
+          itemsMap.set(id, entry);
+          displayedItems.push(entry);
+        }
+        displayedItems = [...displayedItems];
+
+        if (initialBatch.length > 0 && tile.searchId) {
+          await fetchBatch(initialBatch, tile.searchId);
+        }
+      }
+
+      if (mode === "live" || mode === "mixed") {
+        await startLive();
       }
     } catch (err) {
       console.error(`[SearchTile ${tile.id}] Search error:`, err);
@@ -72,15 +156,21 @@
     }
   }
 
-  export async function fetchFoundItems(ids: string[], queryId: string) {
+  async function fetchBatch(
+    ids: string[],
+    queryId: string,
+    isLiveItem: boolean = false,
+  ) {
+    if (!ids.length) return;
+
+    const minCount = Math.ceil(ids.length / 2);
+
     try {
-      // Dispatch FetchJob model:
-      // pub struct FetchJob { id, ids, min, wait_ms, cache_ok, reservation, realm }
       const data: any = await invoke("fetch_items", {
         job: {
           id: queryId,
           ids,
-          min: 5,
+          min: minCount,
           wait_ms: 100,
           cache_ok: false,
           reservation: null,
@@ -88,18 +178,172 @@
         },
       });
 
-      console.log(`[SearchTile ${tile.id}] fetch_items raw response:`, data);
-
       const parsed = typeof data === "string" ? JSON.parse(data) : data;
-      console.log(`[SearchTile ${tile.id}] fetch_items parsed data:`, parsed);
+      const fetchedResults: PoETradeItemEntry[] = parsed.result || [];
+      const { field } = getSortConfig();
 
-      const items: PoETradeItemEntry[] = parsed.result || [];
+      for (const itemData of fetchedResults) {
+        const id = itemData.id;
+        const sortVal = extractSortValue(itemData, field);
 
-      tile.fetchedItems = [...tile.fetchedItems, ...items];
+        if (itemsMap.has(id)) {
+          const existing = itemsMap.get(id)!;
+          existing.data = itemData;
+          existing.sortValue = sortVal;
+        } else {
+          const newEntry: DisplayEntry = {
+            id,
+            data: itemData,
+            sortValue: sortVal,
+            isLive: isLiveItem,
+          };
+          itemsMap.set(id, newEntry);
+
+          if (mode === "live") {
+            displayedItems.unshift(newEntry);
+          } else {
+            displayedItems.push(newEntry);
+          }
+        }
+      }
+
+      if (mode === "mixed") {
+        sortDisplayList();
+      } else {
+        displayedItems = [...displayedItems];
+      }
     } catch (err) {
-      console.error(`[SearchTile ${tile.id}] Fetch error:`, err);
+      console.error(`[SearchTile ${tile.id}] Fetch batch error:`, err);
     }
   }
+
+  async function handleScroll(e: Event) {
+    if (mode === "live" || isFetchingMore || !tile.searchId) return;
+
+    const el = e.currentTarget as HTMLElement;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+
+    if (distanceToBottom < 100) {
+      const currentCount = displayedItems.length;
+      if (currentCount >= tile.results.length) return;
+
+      const nextBatchIds = tile.results.slice(
+        currentCount,
+        currentCount + BATCH_SIZE,
+      );
+      if (!nextBatchIds.length) return;
+
+      isFetchingMore = true;
+
+      for (const id of nextBatchIds) {
+        if (!itemsMap.has(id)) {
+          const entry: DisplayEntry = { id, data: null, sortValue: null };
+          itemsMap.set(id, entry);
+          displayedItems.push(entry);
+        }
+      }
+      displayedItems = [...displayedItems];
+
+      await fetchBatch(nextBatchIds, tile.searchId);
+      isFetchingMore = false;
+    }
+  }
+
+  async function startLive() {
+    if (!tile.searchId) return;
+    isLiveConnecting = true;
+
+    try {
+      unlistenStatus = await listen<boolean>(
+        `live-status-${tile.id}`,
+        (event) => {
+          if (event.payload) {
+            isLiveActive = true;
+            isLiveConnecting = false;
+          }
+        },
+      );
+
+      unlistenItems = await listen<{ tile_id: string; item_ids: string[] }>(
+        `live-items-${tile.id}`,
+        async (event) => {
+          const ids = event.payload.item_ids;
+          if (ids && ids.length > 0 && tile.searchId) {
+            if (mode === "live") {
+              for (let i = ids.length - 1; i >= 0; i--) {
+                const id = ids[i];
+                if (!itemsMap.has(id)) {
+                  const entry: DisplayEntry = {
+                    id,
+                    data: null,
+                    sortValue: null,
+                    isLive: true,
+                  };
+                  itemsMap.set(id, entry);
+                  displayedItems.unshift(entry);
+                }
+              }
+              displayedItems = [...displayedItems];
+            }
+            await fetchBatch(ids, tile.searchId, true);
+          }
+        },
+      );
+
+      await invoke("start_live_search", {
+        tileId: String(tile.id),
+        realm: tile.realm,
+        queryId: tile.searchId,
+      });
+
+      isLiveActive = true;
+    } catch (err) {
+      console.error(
+        `[SearchTile ${tile.id}] Failed to start live search:`,
+        err,
+      );
+      await stopLive();
+    } finally {
+      isLiveConnecting = false;
+    }
+  }
+
+  async function stopLive() {
+    try {
+      await invoke("stop_live_search", { tileId: String(tile.id) });
+    } catch (err) {
+      console.error(`[SearchTile ${tile.id}] Failed to stop live search:`, err);
+    } finally {
+      isLiveActive = false;
+      isLiveConnecting = false;
+      if (unlistenItems) {
+        unlistenItems();
+        unlistenItems = null;
+      }
+      if (unlistenStatus) {
+        unlistenStatus();
+        unlistenStatus = null;
+      }
+    }
+  }
+
+  async function toggleLiveButton() {
+    if (isLiveActive) {
+      await stopLive();
+    } else {
+      if (!tile.searchId) {
+        await executeSearch();
+      } else {
+        await startLive();
+      }
+    }
+  }
+
+  onDestroy(() => {
+    if (isLiveActive || isLiveConnecting) {
+      stopLive();
+    }
+  });
 
   function onHeaderPointerDown(e: PointerEvent) {
     if (e.button !== 0) return;
@@ -111,11 +355,8 @@
     const initY = tile.y;
 
     function onPointerMove(ev: PointerEvent) {
-      const dx = (ev.clientX - startX) / scale;
-      const dy = (ev.clientY - startY) / scale;
-
-      tile.x = snap(initX + dx);
-      tile.y = snap(initY + dy);
+      tile.x = snap(initX + (ev.clientX - startX) / scale);
+      tile.y = snap(initY + (ev.clientY - startY) / scale);
     }
 
     function onPointerUp() {
@@ -150,34 +391,18 @@
       let nextW = initW;
       let nextH = initH;
 
-      if (dir.includes("e")) {
-        const rawW = initW + dx;
-        const targetW = snap(rawW);
-        nextW = Math.max(MIN_W, targetW);
-      } else if (dir.includes("w")) {
-        const rawLeft = initX + dx;
-        let targetLeft = snap(rawLeft);
-
-        if (rightEdge - targetLeft < MIN_W) {
-          targetLeft = rightEdge - MIN_W;
-        }
-
+      if (dir.includes("e")) nextW = Math.max(MIN_W, snap(initW + dx));
+      else if (dir.includes("w")) {
+        let targetLeft = snap(initX + dx);
+        if (rightEdge - targetLeft < MIN_W) targetLeft = rightEdge - MIN_W;
         nextX = targetLeft;
         nextW = rightEdge - targetLeft;
       }
 
-      if (dir.includes("s")) {
-        const rawH = initH + dy;
-        const targetH = snap(rawH);
-        nextH = Math.max(MIN_H, targetH);
-      } else if (dir.includes("n")) {
-        const rawTop = initY + dy;
-        let targetTop = snap(rawTop);
-
-        if (bottomEdge - targetTop < MIN_H) {
-          targetTop = bottomEdge - MIN_H;
-        }
-
+      if (dir.includes("s")) nextH = Math.max(MIN_H, snap(initH + dy));
+      else if (dir.includes("n")) {
+        let targetTop = snap(initY + dy);
+        if (bottomEdge - targetTop < MIN_H) targetTop = bottomEdge - MIN_H;
         nextY = targetTop;
         nextH = bottomEdge - targetTop;
       }
@@ -211,14 +436,34 @@
     </div>
 
     <div class="actions" on:pointerdown|stopPropagation>
+      <select
+        class="mode-select"
+        bind:value={mode}
+        disabled={tile.loading || isLiveConnecting}
+      >
+        <option value="regular">Regular</option>
+        <option value="live">Live</option>
+        <option value="mixed">Mixed</option>
+      </select>
+
+      {#if mode !== "regular"}
+        <button
+          type="button"
+          class="live-btn"
+          class:active={isLiveActive}
+          disabled={tile.loading || isLiveConnecting || !activePayload}
+          on:click|stopPropagation={toggleLiveButton}
+        >
+          <span class="live-dot" class:pulsing={isLiveActive}></span>
+          {isLiveActive ? "Live" : "Start"}
+        </button>
+      {/if}
+
       <button
         type="button"
         class="search-btn"
-        disabled={tile.loading || !activePayload}
-        title={!activePayload
-          ? "No search payload configured"
-          : "Search Market"}
-        on:click|stopPropagation={() => runSearchWithPayload()}
+        disabled={tile.loading || isLiveConnecting || !activePayload}
+        on:click|stopPropagation={() => executeSearch()}
       >
         {#if tile.loading}
           <span class="spin">↻</span>
@@ -244,48 +489,50 @@
     </div>
   </div>
 
-  <div class="tile-body" on:wheel|stopPropagation>
+  <div
+    class="tile-body"
+    bind:this={bodyElement}
+    on:scroll={handleScroll}
+    on:wheel|stopPropagation
+  >
     {#if tile.loading}
-      <div class="status-msg">Searching market...</div>
-    {:else if tile.fetchedItems.length === 0}
+      <div class="search-overlay">
+        <span class="spin">↻</span>
+        <span>Searching market...</span>
+      </div>
+    {/if}
+
+    {#if displayedItems.length === 0 && !tile.loading}
       <div class="status-msg empty">
-        {tile.results.length === 0
-          ? "No search executed yet or no results"
-          : "Fetching items..."}
+        {#if isLiveConnecting}
+          Connecting to live socket...
+        {:else if isLiveActive}
+          Waiting for live listings...
+        {:else}
+          No search executed or no items found.
+        {/if}
       </div>
     {:else}
       <div class="item-list">
-        {#each tile.fetchedItems as itemEntry (itemEntry.id)}
-          {@const item = itemEntry.item || {}}
-          {@const listing = itemEntry.listing || {}}
-          {@const price = listing.price || {}}
-          {@const account = listing.account || {}}
-
-          <div class="item-row">
-            <div class="item-name">
-              {#if item.name}<strong>{item.name}</strong>{/if}
-              <span>{item.typeLine || ""}</span>
-            </div>
-
-            <div class="item-meta">
-              <span class="price">
-                Price: {price.amount ?? "?"}
-                {price.currency ?? "?"}
-              </span>
-              <span class="separator">|</span>
-              <span class="seller">
-                Seller: {account.name ?? "Anonymous"}
-                <span class="online-indicator" class:online={account.online}>
-                  ({account.online ? "Online" : "Offline"})
-                </span>
-              </span>
-            </div>
-          </div>
+        {#each displayedItems as itemEntry (itemEntry.id)}
+          <SearchItemRow
+            id={itemEntry.id}
+            data={itemEntry.data}
+            sortValue={itemEntry.sortValue}
+            realm={tile.realm}
+            league={currentLeague}
+            searchId={tile.searchId ?? ""}
+          />
         {/each}
+
+        {#if isFetchingMore}
+          <div class="fetching-more">Loading more results...</div>
+        {/if}
       </div>
     {/if}
   </div>
 
+  <!-- Resizers -->
   <div class="edge n" on:pointerdown={(e) => onResizePointerDown(e, "n")}></div>
   <div class="edge s" on:pointerdown={(e) => onResizePointerDown(e, "s")}></div>
   <div class="edge e" on:pointerdown={(e) => onResizePointerDown(e, "e")}></div>
@@ -367,6 +614,15 @@
     align-items: center;
     gap: 0.35rem;
   }
+  .mode-select {
+    background: #2b3040;
+    color: #cbd5e1;
+    border: 1px solid #374151;
+    font-size: 0.72rem;
+    padding: 0.15rem 0.3rem;
+    border-radius: 4px;
+    outline: none;
+  }
   .actions button {
     background: #2b3040;
     border: none;
@@ -392,6 +648,39 @@
   }
   .actions button.search-btn:hover:not(:disabled) {
     background: #1d4ed8;
+  }
+  .actions button.live-btn {
+    background: #1f2937;
+    color: #9ca3af;
+    border: 1px solid #374151;
+  }
+  .actions button.live-btn.active {
+    background: #7f1d1d;
+    color: #fca5a5;
+    border-color: #ef4444;
+  }
+  .live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #6b7280;
+    display: inline-block;
+  }
+  .live-dot.pulsing {
+    background: #ef4444;
+    box-shadow: 0 0 6px #ef4444;
+    animation: pulse 1.2s infinite ease-in-out;
+  }
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.3;
+      transform: scale(0.8);
+    }
   }
   .actions button.del {
     font-size: 1rem;
@@ -421,6 +710,19 @@
     display: flex;
     flex-direction: column;
   }
+  .search-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(2px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    z-index: 10;
+    color: #94a3b8;
+    font-size: 0.8rem;
+  }
   .status-msg {
     margin: auto;
     font-size: 0.8rem;
@@ -432,41 +734,11 @@
     flex-direction: column;
     gap: 0.4rem;
   }
-  .item-row {
-    background: #1e222d;
-    border: 1px solid #2b3245;
-    border-radius: 4px;
-    padding: 0.4rem 0.6rem;
-    font-size: 0.78rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-  .item-name {
-    color: #e2e8f0;
-  }
-  .item-name strong {
-    color: #fbbf24;
-  }
-  .item-meta {
-    display: flex;
-    gap: 0.4rem;
-    color: #94a3b8;
+  .fetching-more {
+    text-align: center;
     font-size: 0.72rem;
-    flex-wrap: wrap;
-  }
-  .price {
-    color: #38bdf8;
-    font-weight: 500;
-  }
-  .separator {
-    color: #475569;
-  }
-  .online-indicator {
-    color: #ef4444;
-  }
-  .online-indicator.online {
-    color: #4ade80;
+    color: #64748b;
+    padding: 0.3rem 0;
   }
   .edge,
   .corner {

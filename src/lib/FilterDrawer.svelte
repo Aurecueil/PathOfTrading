@@ -1,6 +1,6 @@
 <!-- src/lib/FilterDrawer.svelte -->
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
+  import { createEventDispatcher, onDestroy } from "svelte";
   import FilterGroup from "$lib/FilterGroup.svelte";
   import DrawerHeader from "$lib/trade/componenets/DrawerHeader.svelte";
   import ItemSearchCombobox from "$lib/trade/componenets/ItemSearchCombobox.svelte";
@@ -271,6 +271,10 @@
       return;
     }
 
+    if (initialPayload.league && !league) {
+      league = initialPayload.league;
+    }
+
     if (initialPayload.query?.status?.option) {
       statusOption = initialPayload.query.status.option;
     }
@@ -399,7 +403,7 @@
   }
 
   function getPayloads() {
-    return buildPayloads({
+    const payloads = buildPayloads({
       initialPayload,
       statGroups,
       realm,
@@ -412,6 +416,15 @@
       sortKey,
       sortDirection,
     });
+
+    if (payloads.payload && league) {
+      payloads.payload.league = league;
+    }
+    if (payloads.full_payload && league) {
+      payloads.full_payload.league = league;
+    }
+
+    return payloads;
   }
 
   let autoSaveTimeout: ReturnType<typeof setTimeout>;
@@ -481,6 +494,10 @@
     dispatch("close");
   }
 
+  onDestroy(() => {
+    clearTimeout(autoSaveTimeout);
+  });
+
   function handleWindowClick(e: MouseEvent) {
     const target = e.target as HTMLElement;
     if (!target.closest(".autocomplete-wrapper")) isItemDropdownOpen = false;
@@ -490,7 +507,6 @@
 
   function handleWindowKeyDown(e: KeyboardEvent) {
     const target = e.target as HTMLElement;
-    // Prevent actions if the event happened outside the drawer (e.g. keyboard click on canvas tiles)
     if (!target.closest(".drawer")) return;
 
     if (e.key === "Escape") {
