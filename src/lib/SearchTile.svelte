@@ -4,6 +4,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import type { SearchTile, PoETradeItemEntry } from "$lib/types";
+  import type { TileDisplayStyle, ResolvedDisplayStyle } from "$lib/types";
   import SearchItemRow from "./SearchItemRow.svelte";
 
   export let tile: SearchTile;
@@ -31,6 +32,7 @@
   const BATCH_SIZE = 10;
 
   let mode: SearchMode = "regular";
+  let displayStyle: TileDisplayStyle = (tile as any).displayStyle ?? "auto";
   let isLiveActive: boolean = false;
   let isLiveConnecting: boolean = false;
   let isFetchingMore: boolean = false;
@@ -42,19 +44,37 @@
   let unlistenStatus: UnlistenFn | null = null;
   let bodyElement: HTMLDivElement | null = null;
 
+  // Keep tile.displayStyle synced when changed
+  $: {
+    (tile as any).displayStyle = displayStyle;
+  }
+
+  // Dynamically resolve the effective item style from both explicit setting & tile dimensions
+  $: effectiveStyle = ((): ResolvedDisplayStyle => {
+    if (displayStyle === "minimal") return "minimal";
+    if (displayStyle === "compact") {
+      return tile.w < 310 ? "minimal" : "compact";
+    }
+    if (displayStyle === "full") {
+      return tile.w < 320 ? "compact" : "full";
+    }
+    // "auto" mode: adapt smoothly to tile width and height
+    if (tile.w < 380 || tile.h < 240) return "minimal";
+    if (tile.w < 560 || tile.h < 340) return "compact";
+    return "full";
+  })();
+
+  $: isNarrowHeader = tile.w < 440;
+
   function snap(val: number): number {
     return snapToGrid ? Math.round(val / gridSize) * gridSize : Math.round(val);
   }
 
   $: activePayload = tile.payload;
-
-  // Resolve league from tile property, payload, or fallback
   $: currentLeague = (tile as any)?.league ?? activePayload?.league ?? "";
 
   $: defaultRealmTitle =
-    tile.realm?.toLowerCase() === "poe2"
-      ? "Poe2 Trade Search"
-      : "Poe Trade Search";
+    tile.realm?.toLowerCase() === "poe2" ? "PoE2 Trade" : "PoE Trade";
 
   $: displayTitle = tile.displayName?.trim() || defaultRealmTitle;
 
@@ -126,9 +146,8 @@
 
       tile.searchId = data.id;
       tile.results = data.result || [];
-      tile = tile; // Trigger reactive updates across child components
+      tile = tile;
 
-      // Wipe previous items when response arrives
       itemsMap.clear();
       displayedItems = [];
 
@@ -223,7 +242,7 @@
     const el = e.currentTarget as HTMLElement;
     const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
 
-    if (distanceToBottom < 100) {
+    if (distanceToBottom < 120) {
       const currentCount = displayedItems.length;
       if (currentCount >= tile.results.length) return;
 
@@ -249,8 +268,20 @@
     }
   }
 
+  function cleanupListeners() {
+    if (unlistenItems) {
+      unlistenItems();
+      unlistenItems = null;
+    }
+    if (unlistenStatus) {
+      unlistenStatus();
+      unlistenStatus = null;
+    }
+  }
+
   async function startLive() {
     if (!tile.searchId) return;
+    cleanupListeners();
     isLiveConnecting = true;
 
     try {
@@ -316,14 +347,7 @@
     } finally {
       isLiveActive = false;
       isLiveConnecting = false;
-      if (unlistenItems) {
-        unlistenItems();
-        unlistenItems = null;
-      }
-      if (unlistenStatus) {
-        unlistenStatus();
-        unlistenStatus = null;
-      }
+      cleanupListeners();
     }
   }
 
@@ -342,6 +366,8 @@
   onDestroy(() => {
     if (isLiveActive || isLiveConnecting) {
       stopLive();
+    } else {
+      cleanupListeners();
     }
   });
 
@@ -424,22 +450,50 @@
 </script>
 
 <div
-  class="tile-root"
+  class="tile-root style-{effectiveStyle}"
+  class:live-active={isLiveActive}
   style:transform="translate({tile.x}px, {tile.y}px)"
   style:width="{tile.w}px"
   style:height="{tile.h}px"
 >
   <div class="tile-bar" on:pointerdown={onHeaderPointerDown}>
     <div class="bar-left">
-      <span class="realm-badge">{tile.realm}</span>
+      <span
+        class="realm-badge"
+        class:poe2={tile.realm?.toLowerCase() === "poe2"}
+      >
+        {tile.realm}
+      </span>
       <span class="title" title={displayTitle}>{displayTitle}</span>
+      {#if displayedItems.length > 0 || (tile.results && tile.results.length > 0)}
+        <span class="count-pill" title="Displayed / Total matched items">
+          {displayedItems.length}{#if tile.results?.length && mode !== "live"}/{tile
+              .results.length}{/if}
+        </span>
+      {/if}
     </div>
 
     <div class="actions" on:pointerdown|stopPropagation>
+      <!-- View Density / Style Selector -->
+      <select
+        class="style-select"
+        bind:value={displayStyle}
+        title="Item display density ({displayStyle === 'auto'
+          ? `Auto: ${effectiveStyle}`
+          : displayStyle})"
+      >
+        <option value="auto">Auto ({effectiveStyle[0].toUpperCase()})</option>
+        <option value="full">Full</option>
+        <option value="compact">Compact</option>
+        <option value="minimal">Minimal</option>
+      </select>
+
+      <!-- Search Mode Selector -->
       <select
         class="mode-select"
         bind:value={mode}
         disabled={tile.loading || isLiveConnecting}
+        title="Search mode"
       >
         <option value="regular">Regular</option>
         <option value="live">Live</option>
@@ -453,9 +507,12 @@
           class:active={isLiveActive}
           disabled={tile.loading || isLiveConnecting || !activePayload}
           on:click|stopPropagation={toggleLiveButton}
+          title={isLiveActive ? "Stop live listener" : "Start live listener"}
         >
           <span class="live-dot" class:pulsing={isLiveActive}></span>
-          {isLiveActive ? "Live" : "Start"}
+          {#if !isNarrowHeader}
+            {isLiveActive ? "Live" : "Start"}
+          {/if}
         </button>
       {/if}
 
@@ -464,25 +521,28 @@
         class="search-btn"
         disabled={tile.loading || isLiveConnecting || !activePayload}
         on:click|stopPropagation={() => executeSearch()}
+        title="Execute search"
       >
         {#if tile.loading}
           <span class="spin">↻</span>
         {:else}
-          🔍 Search
+          🔍{#if !isNarrowHeader}&nbsp;Search{/if}
         {/if}
       </button>
 
       <button
         type="button"
         on:click|stopPropagation={() => dispatch("openfilters")}
+        title="Configure search filters"
       >
-        Filters
+        ⚙️{#if !isNarrowHeader}&nbsp;Filters{/if}
       </button>
 
       <button
         type="button"
         class="del"
         on:click|stopPropagation={() => dispatch("delete")}
+        title="Remove tile"
       >
         ×
       </button>
@@ -505,28 +565,34 @@
     {#if displayedItems.length === 0 && !tile.loading}
       <div class="status-msg empty">
         {#if isLiveConnecting}
-          Connecting to live socket...
+          <span class="spin">↻</span> Connecting to live socket...
         {:else if isLiveActive}
-          Waiting for live listings...
+          <span class="live-dot pulsing"></span> Waiting for live listings...
         {:else}
           No search executed or no items found.
         {/if}
       </div>
     {:else}
-      <div class="item-list">
+      <div class="item-list list-{effectiveStyle}">
         {#each displayedItems as itemEntry (itemEntry.id)}
           <SearchItemRow
             id={itemEntry.id}
             data={itemEntry.data}
             sortValue={itemEntry.sortValue}
+            isLive={itemEntry.isLive ?? false}
             realm={tile.realm}
             league={currentLeague}
             searchId={tile.searchId ?? ""}
+            {effectiveStyle}
+            tileWidth={tile.w}
+            tileHeight={tile.h}
           />
         {/each}
 
         {#if isFetchingMore}
-          <div class="fetching-more">Loading more results...</div>
+          <div class="fetching-more">
+            <span class="spin">↻</span> Loading more results...
+          </div>
         {/if}
       </div>
     {/if}
@@ -563,25 +629,33 @@
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    background: #181b24;
+    background: #13161f;
     border-radius: 8px;
-    border: 1px solid #2c3345;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    border: 1px solid #283044;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
     overflow: visible;
+    transition: border-color 0.2s ease;
+  }
+  .tile-root.live-active {
+    border-color: #7f1d1d;
+    box-shadow:
+      0 10px 28px rgba(0, 0, 0, 0.55),
+      0 0 12px rgba(239, 68, 68, 0.12);
   }
   .tile-bar {
     height: 36px;
-    background: #212634;
+    background: linear-gradient(180deg, #212636 0%, #1a1e2b 100%);
     border-top-left-radius: 7px;
     border-top-right-radius: 7px;
     border-bottom: 1px solid #2c3345;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 0.5rem;
+    padding: 0 0.45rem;
     cursor: grab;
     user-select: none;
     flex-shrink: 0;
+    gap: 0.35rem;
   }
   .tile-bar:active {
     cursor: grabbing;
@@ -589,51 +663,76 @@
   .bar-left {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.35rem;
     overflow: hidden;
+    min-width: 0;
   }
   .realm-badge {
     text-transform: uppercase;
-    font-size: 0.65rem;
+    font-size: 0.62rem;
     font-weight: 700;
     background: #334155;
-    color: #94a3b8;
-    padding: 2px 4px;
+    color: #cbd5e1;
+    padding: 2px 5px;
     border-radius: 3px;
+    flex-shrink: 0;
+  }
+  .realm-badge.poe2 {
+    background: #3b1d5e;
+    color: #e9d5ff;
+    border: 1px solid #581c87;
   }
   .title {
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     font-weight: 600;
     color: #e2e8f0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .count-pill {
+    font-size: 0.65rem;
+    font-family: ui-monospace, monospace;
+    color: #94a3b8;
+    background: #0f131c;
+    border: 1px solid #262e40;
+    padding: 1px 5px;
+    border-radius: 999px;
+    flex-shrink: 0;
+  }
   .actions {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.25rem;
+    flex-shrink: 0;
   }
-  .mode-select {
-    background: #2b3040;
+  .mode-select,
+  .style-select {
+    background: #252a3a;
     color: #cbd5e1;
     border: 1px solid #374151;
-    font-size: 0.72rem;
-    padding: 0.15rem 0.3rem;
+    font-size: 0.7rem;
+    padding: 0.15rem 0.25rem;
     border-radius: 4px;
     outline: none;
+    cursor: pointer;
+  }
+  .style-select {
+    color: #93c5fd;
+    border-color: #1e3a8a;
   }
   .actions button {
     background: #2b3040;
-    border: none;
+    border: 1px solid transparent;
     color: #cbd5e1;
-    font-size: 0.75rem;
-    padding: 0.25rem 0.5rem;
+    font-size: 0.72rem;
+    padding: 0.2rem 0.45rem;
     border-radius: 4px;
     cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 0.2rem;
+    white-space: nowrap;
   }
   .actions button:hover:not(:disabled) {
     background: #3b4257;
@@ -645,6 +744,7 @@
   .actions button.search-btn {
     background: #1e3a8a;
     color: #bfdbfe;
+    border-color: #2563eb;
   }
   .actions button.search-btn:hover:not(:disabled) {
     background: #1d4ed8;
@@ -652,7 +752,7 @@
   .actions button.live-btn {
     background: #1f2937;
     color: #9ca3af;
-    border: 1px solid #374151;
+    border-color: #374151;
   }
   .actions button.live-btn.active {
     background: #7f1d1d;
@@ -678,17 +778,18 @@
       transform: scale(1);
     }
     50% {
-      opacity: 0.3;
+      opacity: 0.35;
       transform: scale(0.8);
     }
   }
   .actions button.del {
-    font-size: 1rem;
+    font-size: 0.95rem;
     line-height: 1;
-    padding: 0.1rem 0.4rem;
+    padding: 0.1rem 0.35rem;
   }
   .actions button.del:hover {
     color: #ef4444;
+    background: rgba(239, 68, 68, 0.12);
   }
   .spin {
     display: inline-block;
@@ -705,15 +806,21 @@
   .tile-body {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     position: relative;
-    padding: 0.5rem;
+    padding: 0.45rem;
     display: flex;
     flex-direction: column;
+    container-type: inline-size;
+    container-name: tile-body;
+  }
+  .style-minimal .tile-body {
+    padding: 0.3rem;
   }
   .search-overlay {
     position: absolute;
     inset: 0;
-    background: rgba(15, 23, 42, 0.75);
+    background: rgba(15, 23, 42, 0.78);
     backdrop-filter: blur(2px);
     display: flex;
     align-items: center;
@@ -725,20 +832,29 @@
   }
   .status-msg {
     margin: auto;
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     color: #94a3b8;
     text-align: center;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
   }
   .item-list {
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
+    gap: 0.5rem;
+  }
+  .item-list.list-compact {
+    gap: 0.35rem;
+  }
+  .item-list.list-minimal {
+    gap: 0.22rem;
   }
   .fetching-more {
     text-align: center;
     font-size: 0.72rem;
     color: #64748b;
-    padding: 0.3rem 0;
+    padding: 0.4rem 0;
   }
   .edge,
   .corner {

@@ -1,22 +1,21 @@
 export interface SearchTile {
-  id: number;
+  id: string | number;
   x: number;
   y: number;
   w: number;
   h: number;
-  title: string;
+  realm: "poe" | "poe2" | string;
+  league?: string;
   displayName?: string;
-  realm: "poe" | "poe2";
-  league: string;
-  layoutMode: "list" | "grid";
-  loading: boolean;
+  displayStyle?: TileDisplayStyle;
+  payload?: any;
   searchId?: string;
   results: string[];
-  fetchedItems: PoETradeItemEntry[];
-  payload?: any;
-  fullPayload?: any;
-  sort?: any;
+  loading?: boolean;
 }
+
+export type TileDisplayStyle = "auto" | "full" | "compact" | "minimal";
+export type ResolvedDisplayStyle = "full" | "compact" | "minimal";
 
 export interface PoETradeItemEntry {
   id: string;

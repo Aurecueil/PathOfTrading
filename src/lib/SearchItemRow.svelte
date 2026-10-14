@@ -1,269 +1,340 @@
 <!-- src/lib/SearchItemRow.svelte -->
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core"; // Use "@tauri-apps/api/tauri" if on Tauri v1
-  import type { TradeFetchResult } from "$lib/types/item";
+  import { invoke } from "@tauri-apps/api/core";
+  import type { PoETradeItemEntry } from "$lib/types";
+  import type { ResolvedDisplayStyle } from "$lib/types";
+  import type { Item } from "$lib/types/item";
   import ItemIcon from "$lib/trade/componenets/item/ItemIcon.svelte";
   import ItemStats from "$lib/trade/componenets/item/ItemStats.svelte";
   import ItemListing from "$lib/trade/componenets/item/ItemListing.svelte";
   import ItemJsonModal from "$lib/trade/componenets/item/ItemJsonModal.svelte";
 
   export let id: string;
-  export let data: TradeFetchResult | null = null;
+  export let data: PoETradeItemEntry | null = null;
   export let sortValue: any = null;
+  export let isLive: boolean = false;
   export let realm: string = "poe";
-  export let displayMode: "default" | "tile" = "default";
-
-  // --- Search Context ---
   export let league: string = "";
   export let searchId: string = "";
+  export let effectiveStyle: ResolvedDisplayStyle = "full";
+  export let tileWidth: number = 600;
+  export let tileHeight: number = 400;
 
-  // --- Modal State ---
+  let isTraveling = false;
+  let isQueued = false;
+  let travelError: string | null = null;
   let isJsonModalOpen = false;
 
-  // --- Travel / Whisper State ---
-  export let isTraveling = false;
-  export let isQueued = false;
-  export let travelError: string | null = null;
+  $: item = data?.item as Item | undefined;
+  $: listing = data?.listing;
 
-  // Resolve token from either whisper_token or hideout_token
-  $: token =
-    data?.listing?.whisper_token ?? data?.listing?.hideout_token ?? null;
+  function getRarityBorderClass(it?: Item): string {
+    if (!it) return "rarity-border-default";
+    const rarity = (it.rarity || "").toLowerCase();
+    if (rarity) return `rarity-border-${rarity}`;
+    switch (it.frameType) {
+      case 0:
+        return "rarity-border-normal";
+      case 1:
+        return "rarity-border-magic";
+      case 2:
+        return "rarity-border-rare";
+      case 3:
+        return "rarity-border-unique";
+      case 4:
+        return "rarity-border-gem";
+      case 5:
+        return "rarity-border-currency";
+      default:
+        return "rarity-border-rare";
+    }
+  }
 
-  async function executeWhisper(activeToken: string) {
+  async function handleTravel() {
+    if (!listing || isTraveling) return;
+    const token = listing.hideout_token ?? listing.whisper_token;
+    if (!token) {
+      travelError = "No hideout token";
+      return;
+    }
+
     isTraveling = true;
-    isQueued = false;
     travelError = null;
-
     try {
-      const targetRealm = data?.item?.realm ?? realm ?? "poe";
-      const targetLeague = league || data?.item?.league || "";
-
-      const result = await invoke<any>("whisper", {
-        token: activeToken,
-        realm: targetRealm,
-        league: targetLeague,
-        searchId,
+      await invoke("travel_to_hideout", {
+        realm,
+        token,
+        whisper: listing.whisper ?? null,
       });
-      console.log(`[RUST WHISPER SUCCESS - Item ${id}]`, result);
-      return result;
-    } catch (err: unknown) {
-      const errMsg =
-        typeof err === "string"
-          ? err
-          : ((err as Error)?.message ?? "Travel failed");
-      travelError = errMsg;
-      console.error(`[RUST WHISPER ERROR - Item ${id}]`, errMsg);
+    } catch (err: any) {
+      travelError = typeof err === "string" ? err : err?.message || "Failed";
     } finally {
       isTraveling = false;
     }
   }
-
-  export async function travelToHideout() {
-    const activeToken =
-      data?.listing?.whisper_token ?? data?.listing?.hideout_token;
-    if (activeToken) {
-      return await executeWhisper(activeToken);
-    }
-    console.log(
-      `[QUEUE] "Travel to Hideout" queued for item ${id}. Awaiting listing data...`,
-    );
-    isQueued = true;
-  }
-
-  // Reactive trigger when queued and listing data arrives
-  $: if (isQueued && token) {
-    executeWhisper(token);
-  }
 </script>
 
-<div
-  class="item-container mode-{displayMode}"
-  class:is-loading={!data}
-  data-item-id={id}
-  data-league={league || data?.item?.league || ""}
-  data-search-id={searchId}
->
-  {#if !data}
-    <div class="loading-placeholder">
-      <div class="loading-left">
-        <span class="spin">↻</span>
-        <span>Loading item {id}...</span>
+{#if !data || !item}
+  <div class="item-row skeleton-row mode-{effectiveStyle}">
+    {#if effectiveStyle !== "compact"}
+      <div class="skel-icon"></div>
+    {/if}
+    <div class="skel-content">
+      <div class="skel-line title"></div>
+      {#if effectiveStyle !== "minimal"}
+        <div class="skel-line sub"></div>
+        <div class="skel-line mod"></div>
+      {/if}
+    </div>
+    <div class="skel-listing">
+      <div class="skel-line price"></div>
+    </div>
+  </div>
+{:else}
+  <div
+    class="item-row mode-{effectiveStyle} {getRarityBorderClass(item)}"
+    class:is-live-entry={isLive}
+    data-item-id={id}
+  >
+    <!-- Small Top-Right Raw JSON Button -->
+    <button
+      type="button"
+      class="btn-top-json"
+      title="View full raw JSON received for this item"
+      on:click|stopPropagation={() => (isJsonModalOpen = true)}
+    >
+      &#123;&nbsp;&#125;
+    </button>
+
+    <!-- Left: Vertically Centered Icon (Full & Minimal modes only; hidden in Compact) -->
+    {#if effectiveStyle !== "compact"}
+      <div class="col-icon">
+        <ItemIcon {item} styleMode={effectiveStyle} />
       </div>
+    {/if}
 
-      <button
-        type="button"
-        class="btn-hideout"
-        class:is-queued={isQueued}
-        disabled={isQueued}
-        on:click={travelToHideout}
-      >
-        {#if isQueued}
-          <span class="spin">↻</span> Queued for Travel...
-        {:else}
-          Travel to Hideout
-        {/if}
-      </button>
-    </div>
-  {:else}
-    <div class="col-icon">
-      <ItemIcon item={data.item} />
-    </div>
-
+    <!-- Center: Stats & Modifiers -->
     <div class="col-stats">
-      <ItemStats item={data.item} {realm} />
+      <ItemStats {item} {realm} styleMode={effectiveStyle} {tileWidth} />
     </div>
 
+    <!-- Right / Bottom: Listing & Trade Actions -->
     <div class="col-listing">
       <ItemListing
-        listing={data.listing}
+        {listing}
         {sortValue}
         {isTraveling}
         {isQueued}
         {travelError}
         {league}
         {searchId}
-        onTravel={travelToHideout}
-        onOpenJson={() => (isJsonModalOpen = true)}
+        styleMode={effectiveStyle}
+        onTravel={handleTravel}
       />
     </div>
-  {/if}
-</div>
+  </div>
 
-<!-- Modal displays entire 1:1 received data -->
-<ItemJsonModal
-  isOpen={isJsonModalOpen}
-  rawData={data}
-  title={`Item ${id} JSON`}
-  onClose={() => (isJsonModalOpen = false)}
-/>
+  <ItemJsonModal
+    isOpen={isJsonModalOpen}
+    rawData={data}
+    title="{item.name ? `${item.name} ` : ''}{item.typeLine ||
+      item.baseType} ({id.slice(0, 8)})"
+    onClose={() => (isJsonModalOpen = false)}
+  />
+{/if}
 
 <style>
-  .item-container {
-    background: #10131a;
-    border: 1px solid #202634;
-    border-radius: 5px;
-    box-sizing: border-box;
-    transition: all 0.2s ease;
-  }
-  .item-container:hover {
-    border-color: #353f54;
-  }
-  .item-container.is-loading {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    min-height: 140px;
-    padding: 0.8rem;
-  }
-  .loading-placeholder {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    max-width: 450px;
-    gap: 1rem;
-    color: #94a3b8;
-    font-size: 0.8rem;
-  }
-  .loading-left {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+  .item-row {
+    position: relative;
+    display: grid;
+    background: #10141d;
+    border-top: 1px solid #22293a;
+    border-right: 1px solid #22293a;
+    border-bottom: 1px solid #22293a;
+    border-left: 3px solid #334155;
+    border-radius: 6px;
+    transition:
+      background 0.15s ease,
+      border-top-color 0.15s ease,
+      border-right-color 0.15s ease,
+      border-bottom-color 0.15s ease;
+    overflow: hidden;
   }
 
-  /* Default Row Mode */
-  .mode-default {
-    display: flex;
-    flex-direction: row;
-    align-items: stretch;
-    padding: 0.65rem;
-    gap: 0.85rem;
-    min-height: 148px;
-  }
-  .mode-default .col-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-  .mode-default .col-stats {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    min-width: 0;
-  }
-  .mode-default .col-listing {
-    border-left: 1px solid #1c222e;
-    padding-left: 0.75rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
+  /* Hover preserves border-left-color (rarity bar) */
+  .item-row:hover {
+    background: #141926;
+    border-top-color: #334155;
+    border-right-color: #334155;
+    border-bottom-color: #334155;
   }
 
-  /* Tile Grid Mode */
-  .mode-tile {
-    display: flex;
-    flex-direction: column;
-    padding: 0.85rem;
-    gap: 0.75rem;
-    width: 280px;
-    align-items: center;
+  /* Rarity Left Border Accents */
+  .rarity-border-normal {
+    border-left-color: #94a3b8;
   }
-  .mode-tile .col-icon {
-    display: flex;
-    justify-content: center;
+  .rarity-border-magic {
+    border-left-color: #6366f1;
   }
-  .mode-tile .col-stats {
-    width: 100%;
+  .rarity-border-rare {
+    border-left-color: #eab308;
   }
-  .mode-tile .col-listing {
-    border-top: 1px solid #1c222e;
-    padding-top: 0.6rem;
-    width: 100%;
-    display: flex;
-    justify-content: center;
+  .rarity-border-unique {
+    border-left-color: #ea580c;
+  }
+  .rarity-border-gem {
+    border-left-color: #14b8a6;
+  }
+  .rarity-border-currency {
+    border-left-color: #d6b676;
   }
 
-  .btn-hideout {
-    background: #1e293b;
-    border: 1px solid #334155;
-    color: #f1f5f9;
-    padding: 0.35rem 0.65rem;
+  /* Small Top-Right JSON Button */
+  .btn-top-json {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    z-index: 15;
+    background: rgba(15, 23, 42, 0.75);
+    border: 1px solid #263044;
+    color: #64748b;
+    font-size: 0.6rem;
+    font-family: ui-monospace, monospace;
+    font-weight: 700;
+    line-height: 1;
+    padding: 2px 4px;
     border-radius: 3px;
-    font-size: 0.72rem;
-    font-weight: 500;
     cursor: pointer;
     transition: all 0.15s ease;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
   }
-  .btn-hideout:hover:not(:disabled) {
-    background: #334155;
+  .btn-top-json:hover {
+    background: #1e293b;
     color: #38bdf8;
-    border-color: #475569;
-  }
-  .btn-hideout:disabled {
-    cursor: not-allowed;
-    opacity: 0.8;
-  }
-  .btn-hideout.is-queued {
-    background: #2a2012;
-    border-color: #d97706;
-    color: #fcd34d;
+    border-color: #38bdf8;
   }
 
-  .spin {
-    display: inline-block;
-    animation: rotate 1s linear infinite;
+  /* Live entry subtle flash */
+  .item-row.is-live-entry {
+    animation: liveFlash 2s ease-out;
   }
-  @keyframes rotate {
-    from {
-      transform: rotate(0deg);
+  @keyframes liveFlash {
+    0% {
+      background: rgba(239, 68, 68, 0.22);
+      box-shadow: 0 0 12px rgba(239, 68, 68, 0.35);
     }
-    to {
-      transform: rotate(360deg);
+    100% {
+      background: #10141d;
+      box-shadow: none;
+    }
+  }
+
+  /* FULL MODE LAYOUT */
+  .item-row.mode-full {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 0.75rem;
+    padding: 0.65rem;
+    align-items: center;
+  }
+
+  /* COMPACT MODE LAYOUT (No separate image column) */
+  .item-row.mode-compact {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.5rem;
+    padding: 0.45rem 0.55rem;
+    align-items: center;
+  }
+
+  /* MINIMAL MODE LAYOUT */
+  .item-row.mode-minimal {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 0.5rem;
+    padding: 0.3rem 1.8rem 0.3rem 0.45rem;
+    align-items: center;
+    min-height: 52px;
+  }
+
+  @container tile-body (max-width: 470px) {
+    .item-row.mode-full {
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+    .item-row.mode-compact {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .item-row.mode-full .col-listing,
+    .item-row.mode-compact .col-listing {
+      grid-column: 1 / -1;
+      border-top: 1px solid #1e2536;
+      padding-top: 0.4rem;
+    }
+  }
+
+  .col-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+  }
+
+  .col-stats {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .col-listing {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    height: 100%;
+  }
+
+  /* Skeletons */
+  .skeleton-row {
+    pointer-events: none;
+  }
+  .skel-icon,
+  .skel-line {
+    background: linear-gradient(90deg, #171d2b 25%, #222b3d 50%, #171d2b 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s infinite linear;
+    border-radius: 4px;
+  }
+  .mode-full .skel-icon {
+    width: 92px;
+    height: 140px;
+  }
+  .mode-minimal .skel-icon {
+    width: 44px;
+    height: 44px;
+  }
+  .skel-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    width: 100%;
+  }
+  .skel-line.title {
+    height: 14px;
+    width: 65%;
+  }
+  .skel-line.sub {
+    height: 10px;
+    width: 40%;
+  }
+  .skel-line.mod {
+    height: 10px;
+    width: 85%;
+  }
+  .skel-line.price {
+    height: 22px;
+    width: 70px;
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
     }
   }
 </style>
