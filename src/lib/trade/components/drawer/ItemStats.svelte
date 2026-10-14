@@ -8,8 +8,9 @@
     ItemSocket,
   } from "$lib/types/tradeItem";
   import type { ResolvedDisplayStyle } from "$lib/types/types";
-  import ItemModifier from "./ItemModifier.svelte";
-  import CdnImage from "./CdnImage.svelte";
+  import ItemModifier from "../item/ItemModifier.svelte";
+  import CdnImage from "../item/CdnImage.svelte";
+  import StatColorText from "$lib/trade/components/drawer/StatColorText.svelte";
 
   export let item: Item;
   export let realm: string = "poe";
@@ -206,7 +207,9 @@
               <CdnImage src={formatted.icon} alt="" className="prop-icon" />
             {/if}
             {#if formatted.values.length > 0}
-              <span class="label">{formatted.label}:</span>
+              <span class="label">
+                <StatColorText text={formatted.label} />:
+              </span>
               {#each formatted.values as val, vi}
                 <strong class:augmented={val.augmented}>{val.text}</strong>{vi <
                 formatted.values.length - 1
@@ -214,7 +217,7 @@
                   : ""}
               {/each}
             {:else}
-              <span>{formatted.label}</span>
+              <span><StatColorText text={formatted.label} /></span>
             {/if}
           </div>
         {/each}
@@ -231,7 +234,8 @@
           <span>
             Requires
             {#each item.requirements as req, ri}
-              {req.name} <strong>{req.values[0]?.[0]}</strong>{ri <
+              <StatColorText text={req.name} />
+              <strong>{req.values[0]?.[0]}</strong>{ri <
               item.requirements.length - 1
                 ? ", "
                 : ""}

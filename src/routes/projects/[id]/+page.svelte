@@ -1,16 +1,37 @@
-<!-- src/routes/+page.svelte -->
+<!-- src/routes/projects/[id]/+page.svelte -->
 <script lang="ts">
+  import { page } from "$app/stores";
+  import { onMount, onDestroy, tick } from "svelte";
   import Tile from "$lib/SearchTile.svelte";
   import FilterDrawer from "$lib/FilterForm.svelte";
   import CanvasToolbar from "$lib/viewport/CanvasToolbar.svelte";
   import TileContextMenu from "$lib/viewport/TileContextMenu.svelte";
   import CanvasShape from "$lib/viewport/CanvasShape.svelte";
-  import CanvasTitle from "$lib/viewport/TileContextMenu.svelte";
+  import CanvasTitle from "$lib/viewport/CanvasTitle.svelte";
   import CanvasRichText from "$lib/viewport/CanvasRichText.svelte";
+  import {
+    openTabs,
+    workspaceState,
+    loadProjectFromBackend,
+    saveProjectToBackend,
+    setProjectDirty,
+    isProjectDirty,
+    getSessionCamera,
+    setSessionCamera,
+    requestProjectName,
+    registerCanvasHandlers,
+    unregisterCanvasHandlers,
+    isAnnotationItem,
+    serializeTileForSave,
+    serializeAnnotationForSave,
+  } from "$lib/project/projects.svelte";
   import type {
     SearchTile,
     ToolType,
     CanvasAnnotation,
+    ProjectItem,
+    SavedProject,
+    ShareCodePayload,
   } from "$lib/types/types";
 
   type TileState = SearchTile;
@@ -22,6 +43,13 @@
 
   const GRID_SIZE = 40;
   const MAX_HISTORY = 50;
+  const AUTOSAVE_INTERVAL_MS = 25000;
+
+  let currentProjectId: string = "";
+  let currentProjectName: string = "";
+  let currentProjectRealm: string = "poe";
+  let currentProjectLeague: string = "Standard";
+  let isHydratingProject: boolean = false;
 
   let scale: number = 1;
   let offsetX: number = 0;
@@ -40,53 +68,308 @@
     return JSON.parse(JSON.stringify(obj));
   }
 
-  let tiles: TileState[] = [
-    {
-      id: 1,
-      x: 120,
-      y: 120,
-      w: 440,
-      h: 680,
-      title: "",
-      displayName: "",
-      realm: "poe",
-      league: "Standard",
-      disabled: false,
-      loading: false,
-      results: [],
-      payload: {
-        query: {
-          status: { option: "securable" },
-          stats: [{ type: "and", filters: [] }],
-        },
-        sort: { price: "asc" },
-      },
-      full_payload: {
-        query: {
-          status: { option: "securable" },
-          stats: [{ type: "and", filters: [] }],
-        },
-        sort: { price: "asc" },
-      },
-    },
-  ];
-
+  let tiles: TileState[] = [];
   let annotations: CanvasAnnotation[] = [];
-  let nextId = 2;
+  let nextId = 1;
   let tileRefs: Record<string | number, Tile> = {};
   let drawerRef: FilterDrawer | null = null;
   let activeTileId: string | number | null = null;
   $: activeTile = tiles.find((t) => t.id === activeTileId);
 
-  // Unified selection set
   let selectedIds: Set<string | number> = new Set();
 
-  // Undo / Redo stacks & Clipboard
   let undoStack: CanvasSnapshot[] = [];
   let redoStack: CanvasSnapshot[] = [];
   let clipboard: CanvasSnapshot | null = null;
+  let autoSaveTimer: ReturnType<typeof setInterval> | undefined;
+
+  function makeTileId(): string {
+    return `${currentProjectId}__tile_${nextId++}`;
+  }
+
+  // Sync camera movements into session memory without marking project dirty
+  $: if (!isHydratingProject && currentProjectId) {
+    setSessionCamera(currentProjectId, { scale, offsetX, offsetY });
+  }
+
+  $: routeProjectId = $page.params.id;
+  $: if (routeProjectId && routeProjectId !== currentProjectId) {
+    loadWorkspaceForProject(routeProjectId);
+  }
+
+  async function loadWorkspaceForProject(id: string) {
+    isHydratingProject = true;
+    currentProjectId = id;
+    workspaceState.activeProjectId = id;
+    activeTileId = null;
+    contextMenu = null;
+    selectedIds = new Set();
+    undoStack = [];
+    redoStack = [];
+    tileRefs = {};
+
+    let loaded: SavedProject;
+    try {
+      loaded = await loadProjectFromBackend(id);
+    } catch {
+      const existingTab = openTabs.find((t) => t.id === id);
+      loaded = {
+        id,
+        name: existingTab?.name ?? "",
+        realm: existingTab?.realm || "poe",
+        league: "Standard",
+        camera: { scale: 1, offsetX: 0, offsetY: 0 },
+        updated_at: Date.now(),
+        items: [],
+      };
+    }
+
+    currentProjectName = loaded.name ?? "";
+    currentProjectRealm = loaded.realm || "poe";
+    currentProjectLeague = loaded.league || "Standard";
+    workspaceState.activeProjectRealm = currentProjectRealm;
+    workspaceState.activeProjectLeague = currentProjectLeague;
+
+    // Restore camera from session memory if visited in session, else from saved file
+    const sessionCam = getSessionCamera(id);
+    const initialCam = sessionCam ??
+      loaded.camera ?? { scale: 1, offsetX: 0, offsetY: 0 };
+    scale = initialCam.scale || 1;
+    offsetX = initialCam.offsetX ?? 0;
+    offsetY = initialCam.offsetY ?? 0;
+    setSessionCamera(id, { scale, offsetX, offsetY });
+
+    const existingTab = openTabs.find((t) => t.id === id);
+    if (!existingTab) {
+      openTabs.push({
+        id: loaded.id,
+        name: currentProjectName,
+        realm: currentProjectRealm,
+        dirty: false,
+      });
+    } else {
+      existingTab.name = currentProjectName;
+      existingTab.realm = currentProjectRealm;
+    }
+
+    let idCounter = 1;
+    const hydratedTiles: TileState[] = [];
+    const hydratedAnnotations: CanvasAnnotation[] = [];
+
+    for (const item of loaded.items || []) {
+      if (isAnnotationItem(item)) {
+        const assignedId = item.id ? Number(item.id) : idCounter++;
+        idCounter = Math.max(idCounter, assignedId + 1);
+        hydratedAnnotations.push({
+          ...deepClone(item),
+          id: assignedId,
+          autoEdit: false,
+        });
+      } else {
+        const tileUniqueId = `${id}__tile_${idCounter++}`;
+        const tileRealm = item.realm || currentProjectRealm;
+        const tileLeague = item.league || currentProjectLeague;
+        const clonedPayload = deepClone(
+          item.full_payload ?? {
+            league: tileLeague,
+            query: {
+              status: { option: "securable" },
+              stats: [{ type: "and", filters: [] }],
+            },
+            sort: { price: "asc" },
+          },
+        );
+        hydratedTiles.push({
+          id: tileUniqueId,
+          x: item.x ?? 120,
+          y: item.y ?? 120,
+          w: item.w ?? 440,
+          h: item.h ?? 680,
+          realm: tileRealm,
+          league: tileLeague,
+          title: item.title || "",
+          displayName: item.title || "",
+          disabled: Boolean(item.disabled),
+          mode: item.mode ?? "regular",
+          loading: false,
+          results: [],
+          payload: deepClone(clonedPayload),
+          full_payload: clonedPayload,
+        });
+      }
+    }
+
+    nextId = idCounter;
+    tiles = hydratedTiles;
+    annotations = hydratedAnnotations;
+
+    await tick();
+    isHydratingProject = false;
+
+    // Run cached search & fetch (cache_ok = true) for all non-disabled tiles
+    for (const t of tiles) {
+      if (!t.disabled) {
+        tileRefs[t.id]?.executeSearch(undefined, true);
+      }
+    }
+  }
+
+  function buildProjectItems(onlySelected: boolean = false): ProjectItem[] {
+    const targetTiles = onlySelected
+      ? tiles.filter((t) => selectedIds.has(t.id))
+      : tiles;
+    const targetAnnotations = onlySelected
+      ? annotations.filter((a) => selectedIds.has(a.id))
+      : annotations;
+
+    return [
+      ...targetAnnotations.map(serializeAnnotationForSave),
+      ...targetTiles.map(serializeTileForSave),
+    ];
+  }
+
+  function buildShareCodePayload(
+    onlySelected: boolean = false,
+  ): ShareCodePayload {
+    return {
+      camera: { scale, offsetX, offsetY },
+      realm: currentProjectRealm,
+      league: currentProjectLeague,
+      items: buildProjectItems(onlySelected),
+    };
+  }
+
+  async function saveCurrentProject(): Promise<boolean> {
+    if (!currentProjectId) return false;
+
+    if (!currentProjectName.trim()) {
+      const enteredName = await requestProjectName();
+      if (!enteredName) return false;
+      currentProjectName = enteredName;
+    }
+
+    const payload: SavedProject = {
+      id: currentProjectId,
+      name: currentProjectName,
+      realm: currentProjectRealm,
+      league: currentProjectLeague,
+      camera: { scale, offsetX, offsetY },
+      updated_at: Date.now(),
+      items: buildProjectItems(false),
+    };
+    await saveProjectToBackend(payload);
+    setProjectDirty(currentProjectId, false);
+    return true;
+  }
+
+  function handleSetProjectDefaults(realm: string, league: string) {
+    currentProjectRealm = realm;
+    currentProjectLeague = league;
+    markDirty();
+  }
+
+  async function importElementsIntoCanvas(items: ProjectItem[]) {
+    if (!items.length) return;
+    saveSnapshot();
+
+    const newSelection = new Set<string | number>();
+    const addedTiles: TileState[] = [];
+    const addedAnnotations: CanvasAnnotation[] = [];
+
+    for (const item of items) {
+      if (isAnnotationItem(item)) {
+        const assignedId = nextId++;
+        newSelection.add(assignedId);
+        addedAnnotations.push({
+          ...deepClone(item),
+          id: assignedId,
+          x: snap((item.x ?? 120) + GRID_SIZE),
+          y: snap((item.y ?? 120) + GRID_SIZE),
+          autoEdit: false,
+        });
+      } else {
+        const assignedId = makeTileId();
+        newSelection.add(assignedId);
+        const tileRealm = item.realm || currentProjectRealm;
+        const tileLeague = item.league || currentProjectLeague;
+        const clonedPayload = deepClone(
+          item.full_payload ?? {
+            league: tileLeague,
+            query: {
+              status: { option: "securable" },
+              stats: [{ type: "and", filters: [] }],
+            },
+            sort: { price: "asc" },
+          },
+        );
+        addedTiles.push({
+          id: assignedId,
+          x: snap((item.x ?? 120) + GRID_SIZE),
+          y: snap((item.y ?? 120) + GRID_SIZE),
+          w: snap(item.w ?? 440),
+          h: snap(item.h ?? 680),
+          realm: tileRealm,
+          league: tileLeague,
+          title: item.title || "",
+          displayName: item.title || "",
+          disabled: Boolean(item.disabled),
+          mode: item.mode ?? "regular",
+          loading: false,
+          results: [],
+          payload: deepClone(clonedPayload),
+          full_payload: clonedPayload,
+        });
+      }
+    }
+
+    tiles = [...tiles, ...addedTiles];
+    annotations = [...annotations, ...addedAnnotations];
+    selectedIds = newSelection;
+
+    await tick();
+    for (const t of addedTiles) {
+      if (!t.disabled) {
+        tileRefs[t.id]?.executeSearch(undefined, true);
+      }
+    }
+  }
+
+  onMount(() => {
+    registerCanvasHandlers({
+      save: saveCurrentProject,
+      importElements: importElementsIntoCanvas,
+      exportPayload: buildShareCodePayload,
+      setProjectDefaults: handleSetProjectDefaults,
+    });
+
+    // Periodic Auto-Save for named projects with unsaved changes
+    autoSaveTimer = setInterval(async () => {
+      if (
+        currentProjectId &&
+        currentProjectName.trim().length > 0 &&
+        isProjectDirty(currentProjectId) &&
+        !isCreatingObject &&
+        !isPanning &&
+        dragInitialPositions.size === 0
+      ) {
+        await saveCurrentProject();
+      }
+    }, AUTOSAVE_INTERVAL_MS);
+  });
+
+  onDestroy(() => {
+    if (autoSaveTimer) clearInterval(autoSaveTimer);
+    unregisterCanvasHandlers();
+  });
+
+  function markDirty() {
+    if (!isHydratingProject && currentProjectId) {
+      setProjectDirty(currentProjectId, true);
+    }
+  }
 
   function saveSnapshot() {
+    markDirty();
     undoStack = [
       ...undoStack.slice(-(MAX_HISTORY - 1)),
       {
@@ -99,6 +382,7 @@
 
   function undo() {
     if (undoStack.length === 0) return;
+    markDirty();
     const prev = undoStack[undoStack.length - 1];
     undoStack = undoStack.slice(0, -1);
 
@@ -118,6 +402,7 @@
 
   function redo() {
     if (redoStack.length === 0) return;
+    markDirty();
     const next = redoStack[redoStack.length - 1];
     redoStack = redoStack.slice(0, -1);
 
@@ -172,7 +457,7 @@
     const offset = GRID_SIZE;
 
     const pastedTiles: TileState[] = clipboard.tiles.map((t) => {
-      const newId = nextId++;
+      const newId = makeTileId();
       newSelected.add(newId);
       return {
         ...deepClone(t),
@@ -197,7 +482,6 @@
       },
     );
 
-    // Shift clipboard slightly so repeated Ctrl+V cascades neatly
     clipboard = {
       tiles: clipboard.tiles.map((t) => ({
         ...t,
@@ -231,23 +515,19 @@
     contextMenu = null;
   }
 
-  // Marquee selection state
   let isSelecting: boolean = false;
   let marqueeStart = { x: 0, y: 0 };
   let marqueeEnd = { x: 0, y: 0 };
 
-  // Corner-to-corner creation state
   let isCreatingObject: boolean = false;
   let createStart = { x: 0, y: 0 };
   let creatingItemId: number | null = null;
 
-  // Group drag state
   let dragInitialPositions: Map<string | number, { x: number; y: number }> =
     new Map();
   let dragMoved: boolean = false;
   let preDragSnapshot: CanvasSnapshot | null = null;
 
-  // Right-click context menu state
   let contextMenu: {
     x: number;
     y: number;
@@ -273,33 +553,31 @@
     const rawX = center.x - 210;
     const rawY = center.y - 160;
 
+    const defaultPayload = {
+      league: currentProjectLeague,
+      query: {
+        status: { option: "securable" },
+        stats: [{ type: "and", filters: [] }],
+      },
+      sort: { price: "asc" },
+    };
+
     const newTile: TileState = {
-      id: nextId++,
+      id: makeTileId(),
       x: snap(rawX),
       y: snap(rawY),
       w: snap(440),
       h: snap(680),
       title: "",
       displayName: "",
-      realm: "poe",
-      league: "Standard",
+      realm: currentProjectRealm,
+      league: currentProjectLeague,
       disabled: false,
+      mode: "regular",
       loading: false,
       results: [],
-      payload: {
-        query: {
-          status: { option: "securable" },
-          stats: [{ type: "and", filters: [] }],
-        },
-        sort: { price: "asc" },
-      },
-      full_payload: {
-        query: {
-          status: { option: "securable" },
-          stats: [{ type: "and", filters: [] }],
-        },
-        sort: { price: "asc" },
-      },
+      payload: deepClone(defaultPayload),
+      full_payload: deepClone(defaultPayload),
     };
     tiles = [...tiles, newTile];
     selectedIds = new Set([newTile.id]);
@@ -351,6 +629,7 @@
   function moveGroupDrag(dx: number, dy: number) {
     if (!dragMoved && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) {
       dragMoved = true;
+      markDirty();
       if (preDragSnapshot) {
         undoStack = [...undoStack.slice(-(MAX_HISTORY - 1)), preDragSnapshot];
         redoStack = [];
@@ -433,7 +712,6 @@
 
     (document.activeElement as HTMLElement)?.blur();
 
-    // Middle mouse button (scroll click) pans the viewport
     if (e.button === 1) {
       if (isLocked) return;
       e.preventDefault();
@@ -478,14 +756,9 @@
         y: startY,
         w: GRID_SIZE,
         h: GRID_SIZE,
-        color: "#3a57e8", // Default blue for both titles and shapes
+        color: "#3a57e8",
         thickness: activeTool === "title" ? 4 : 3,
-        text:
-          activeTool === "title"
-            ? "New Title"
-            : activeTool === "richtext"
-              ? ""
-              : "",
+        text: activeTool === "title" ? "New Title" : "",
         flipX: false,
         flipY: false,
         autoEdit: activeTool === "title" || activeTool === "richtext",
@@ -597,7 +870,6 @@
   }
 
   function onWindowKeyDown(e: KeyboardEvent) {
-    // Allow Escape to close the FilterDrawer (saving without search) even if an input inside it is focused
     if (e.key === "Escape" && activeTileId !== null) {
       e.preventDefault();
       drawerRef?.saveWithoutSearch();
@@ -612,7 +884,13 @@
         activeEl.tagName === "TEXTAREA" ||
         (activeEl as HTMLElement).isContentEditable);
 
-    if (isTextInputFocused || activeTileId !== null) return;
+    if (
+      isTextInputFocused ||
+      activeTileId !== null ||
+      workspaceState.namePrompt !== null
+    ) {
+      return;
+    }
 
     const isMod = e.ctrlKey || e.metaKey;
 
@@ -659,7 +937,7 @@
       e.preventDefault();
       for (const t of tiles) {
         if (selectedIds.has(t.id) && !t.disabled) {
-          tileRefs[t.id]?.executeSearch();
+          tileRefs[t.id]?.executeSearch(undefined, false);
         }
       }
     }
@@ -681,8 +959,8 @@
       x: detail.clientX,
       y: detail.clientY,
       targetTileIds,
-      realm: primaryTile?.realm || "poe",
-      league: primaryTile?.league || "Standard",
+      realm: primaryTile?.realm || currentProjectRealm,
+      league: primaryTile?.league || currentProjectLeague,
     };
   }
 
@@ -730,17 +1008,18 @@
     const { title, displayName, realm, league, payload, full_payload } =
       e.detail;
 
+    const resolvedTitle = displayName?.trim() || title?.trim() || "";
     const effectivePayload = payload ? { ...payload, league } : payload;
     const effectiveFullPayload = full_payload
       ? { ...full_payload, league }
-      : full_payload;
+      : effectivePayload;
 
     tiles = tiles.map((t) =>
       t.id === activeTileId
         ? {
             ...t,
-            title: title ?? "",
-            displayName: displayName ?? "",
+            title: resolvedTitle,
+            displayName: resolvedTitle,
             realm,
             league: league ?? t.league,
             payload: effectivePayload,
@@ -757,17 +1036,18 @@
       e.detail;
     const targetId = activeTileId;
 
+    const resolvedTitle = displayName?.trim() || title?.trim() || "";
     const effectivePayload = payload ? { ...payload, league } : payload;
     const effectiveFullPayload = full_payload
       ? { ...full_payload, league }
-      : full_payload;
+      : effectivePayload;
 
     tiles = tiles.map((t) =>
       t.id === targetId
         ? {
             ...t,
-            title: title ?? "",
-            displayName: displayName ?? "",
+            title: resolvedTitle,
+            displayName: resolvedTitle,
             realm,
             league: league ?? t.league,
             payload: effectivePayload,
@@ -781,7 +1061,7 @@
     }
 
     const ref = tileRefs[targetId];
-    ref?.executeSearch(effectivePayload);
+    ref?.executeSearch(effectivePayload, false);
   }
 
   $: marqueeRect = {
@@ -887,6 +1167,7 @@
         on:dragmove={(e) => moveGroupDrag(e.detail.dx, e.detail.dy)}
         on:dragend={endGroupDrag}
         on:resize={saveSnapshot}
+        on:change={saveSnapshot}
         on:openfilters={(e) => handleOpenFilters(tile.id, e)}
         on:delete={() => removeTile(tile.id)}
         on:contextmenu={(e) => handleTileContextMenu(tile.id, e.detail)}
@@ -920,10 +1201,10 @@
     {#key activeTile.id}
       <FilterDrawer
         bind:this={drawerRef}
-        initialTitle={activeTile.title}
-        initialDisplayName={activeTile.displayName || ""}
+        initialTitle={activeTile.title || ""}
+        initialDisplayName={activeTile.displayName || activeTile.title || ""}
         initialRealm={activeTile.realm === "poe2" ? "poe2" : "poe"}
-        initialLeague={activeTile.league || ""}
+        initialLeague={activeTile.league || currentProjectLeague}
         initialPayload={activeTile.full_payload || activeTile.payload || null}
         on:close={() => (activeTileId = null)}
         on:save_only={handleSaveOnly}

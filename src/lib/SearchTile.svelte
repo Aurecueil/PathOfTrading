@@ -3,8 +3,10 @@
   import { createEventDispatcher, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import type { SearchTile, PoETradeItemEntry } from "$lib/types/types";
   import type {
+    SearchTile,
+    SearchMode,
+    PoETradeItemEntry,
     TileDisplayStyle,
     ResolvedDisplayStyle,
   } from "$lib/types/types";
@@ -25,10 +27,10 @@
     dragmove: { dx: number; dy: number };
     dragend: void;
     resize: void;
+    change: void;
     contextmenu: { clientX: number; clientY: number };
   }>();
 
-  type SearchMode = "regular" | "live" | "mixed";
   type ResizeDirection = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 
   interface DisplayEntry {
@@ -42,11 +44,12 @@
   const MIN_H = 180;
   const BATCH_SIZE = 10;
 
-  let mode: SearchMode = "regular";
+  let mode: SearchMode = tile.mode ?? "regular";
   let displayStyle: TileDisplayStyle = tile.displayStyle ?? "auto";
   let isLiveActive: boolean = false;
   let isLiveConnecting: boolean = false;
   let isFetchingMore: boolean = false;
+  let lastCacheOk: boolean = false;
 
   let itemsMap: Map<string, DisplayEntry> = new Map();
   let displayedItems: DisplayEntry[] = [];
@@ -55,9 +58,14 @@
   let unlistenStatus: UnlistenFn | null = null;
   let bodyElement: HTMLDivElement | null = null;
 
+  $: if (tile.mode && tile.mode !== mode) {
+    mode = tile.mode;
+  }
+
   $: {
     tile.displayStyle = displayStyle;
     tile.disabled = disabled;
+    tile.mode = mode;
   }
 
   $: if (disabled && (isLiveActive || isLiveConnecting)) {
@@ -83,13 +91,14 @@
     return snapToGrid ? Math.round(val / gridSize) * gridSize : Math.round(val);
   }
 
-  $: activePayload = tile.payload;
+  $: activePayload = tile.payload ?? tile.full_payload;
   $: currentLeague = tile.league ?? activePayload?.league ?? "";
 
   $: defaultRealmTitle =
     tile.realm?.toLowerCase() === "poe2" ? "PoE2 Trade" : "PoE Trade";
 
-  $: displayTitle = tile.displayName?.trim() || defaultRealmTitle;
+  $: displayTitle =
+    tile.displayName?.trim() || tile.title?.trim() || defaultRealmTitle;
 
   function getSortConfig(): { field: string; dir: "asc" | "desc" } {
     const sortObj = activePayload?.sort;
@@ -133,14 +142,16 @@
     });
   }
 
-  export async function executeSearch(payload?: any) {
-    if (disabled) return;
+  export async function executeSearch(payload?: any, cacheOk: boolean = false) {
+    if (disabled || tile.disabled) return;
     const payloadToRun = payload || activePayload;
     if (!payloadToRun) return;
 
     if (payload) {
       tile.payload = payload;
     }
+
+    lastCacheOk = cacheOk;
 
     if (isLiveActive || isLiveConnecting) {
       await stopLive();
@@ -152,7 +163,8 @@
       const rawResponse: string = await invoke("search_items", {
         realm: tile.realm,
         payload: payloadToRun,
-        cacheOk: false,
+        cacheOk,
+        cache_ok: cacheOk,
       });
 
       const data =
@@ -175,7 +187,7 @@
         displayedItems = [...displayedItems];
 
         if (initialBatch.length > 0 && tile.searchId) {
-          await fetchBatch(initialBatch, tile.searchId);
+          await fetchBatch(initialBatch, tile.searchId, false, cacheOk);
         }
       }
 
@@ -193,6 +205,7 @@
     ids: string[],
     queryId: string,
     isLiveItem: boolean = false,
+    cacheOk: boolean = false,
   ) {
     if (!ids.length) return;
 
@@ -205,7 +218,7 @@
           ids,
           min: minCount,
           wait_ms: 100,
-          cache_ok: false,
+          cache_ok: cacheOk,
           reservation: null,
           realm: tile.realm,
         },
@@ -277,7 +290,7 @@
       }
       displayedItems = [...displayedItems];
 
-      await fetchBatch(nextBatchIds, tile.searchId);
+      await fetchBatch(nextBatchIds, tile.searchId, false, lastCacheOk);
       isFetchingMore = false;
     }
   }
@@ -330,7 +343,7 @@
               }
               displayedItems = [...displayedItems];
             }
-            await fetchBatch(ids, tile.searchId, true);
+            await fetchBatch(ids, tile.searchId, true, false);
           }
         },
       );
@@ -371,7 +384,7 @@
       await stopLive();
     } else {
       if (!tile.searchId) {
-        await executeSearch();
+        await executeSearch(undefined, false);
       } else {
         await startLive();
       }
@@ -484,6 +497,12 @@
     e.stopPropagation();
     dispatch("contextmenu", { clientX: e.clientX, clientY: e.clientY });
   }
+
+  function handleModeChange(e: Event) {
+    (e.currentTarget as HTMLElement)?.blur();
+    tile.mode = mode;
+    dispatch("change");
+  }
 </script>
 
 <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -548,7 +567,7 @@
       <select
         class="mode-select"
         bind:value={mode}
-        on:change={(e) => (e.currentTarget as HTMLElement)?.blur()}
+        on:change={handleModeChange}
         disabled={disabled || tile.loading || isLiveConnecting}
         title="Search mode"
       >
@@ -583,7 +602,7 @@
           tile.loading ||
           isLiveConnecting ||
           !activePayload}
-        on:click|stopPropagation={() => executeSearch()}
+        on:click|stopPropagation={() => executeSearch(undefined, false)}
         title={disabled ? "Search is disabled on this tile" : "Execute search"}
       >
         {#if tile.loading}
@@ -678,6 +697,7 @@
 </div>
 
 <style>
+  /* Unchanged styles from existing SearchTile.svelte */
   .tile-root {
     position: absolute;
     top: 0;

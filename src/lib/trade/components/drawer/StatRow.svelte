@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import type { StatEntry } from "$lib/types/stats";
+  import StatColorText from "$lib/trade/components/drawer/StatColorText.svelte";
 
   export let stat: StatEntry;
   export let groupLabel: string = "";
@@ -46,7 +47,9 @@
     >
       {groupLabel || stat.type}
     </span>
-    <span class="stat-text" title={stat.text}>{stat.text}</span>
+    <span class="stat-text" title={stat.text}>
+      <StatColorText text={stat.text} />
+    </span>
   </div>
 
   <div class="stat-controls">

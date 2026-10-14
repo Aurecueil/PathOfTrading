@@ -1,4 +1,14 @@
-// src/lib/types.ts
+// src/lib/types/types.ts
+export type SearchMode = "regular" | "live" | "mixed";
+export type TileDisplayStyle = "auto" | "full" | "compact" | "minimal";
+export type ResolvedDisplayStyle = "full" | "compact" | "minimal";
+
+export interface CameraState {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+}
+
 export interface SearchTile {
   id: string | number;
   x: number;
@@ -16,30 +26,20 @@ export interface SearchTile {
   searchId?: string;
   results: string[];
   loading?: boolean;
+  mode?: SearchMode;
 }
 
-export type TileDisplayStyle = "auto" | "full" | "compact" | "minimal";
-export type ResolvedDisplayStyle = "full" | "compact" | "minimal";
-
-export interface PoETradeItemEntry {
-  id: string;
-  listing: {
-    price?: {
-      amount: number;
-      currency: string;
-    };
-    account?: {
-      name: string;
-      online?: boolean;
-    };
-  };
-  item: {
-    name: string;
-    typeLine: string;
-    icon?: string;
-    ilvl?: number;
-    explicitMods?: string[];
-  };
+export interface SavedSearchTile {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  realm: "poe" | "poe2" | string;
+  league: string;
+  title: string;
+  disabled: boolean;
+  full_payload: any;
+  mode: SearchMode;
 }
 
 export type ToolType =
@@ -64,6 +64,35 @@ export interface CanvasAnnotation {
   flipX?: boolean;
   flipY?: boolean;
   autoEdit?: boolean;
+}
+
+export type ProjectItem = SavedSearchTile | CanvasAnnotation;
+
+export interface SavedProject {
+  id: string;
+  name: string;
+  realm: "poe" | "poe2" | string;
+  league: string;
+  camera: CameraState;
+  updated_at?: number;
+  items: ProjectItem[];
+}
+
+export interface ProjectIndexEntry {
+  id: string;
+  name: string;
+  realm: string;
+  league: string;
+  updated_at: number;
+  tile_count: number;
+  annotation_count: number;
+}
+
+export interface ShareCodePayload {
+  camera?: CameraState;
+  realm?: string;
+  league?: string;
+  items: ProjectItem[];
 }
 
 export interface FormSubmitData {

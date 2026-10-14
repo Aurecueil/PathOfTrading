@@ -69,7 +69,8 @@ pub async fn refresh_poetoken_background(app: tauri::AppHandle) -> Result<String
 }
 
 // --- Check Session Status on Boot ---
-#[tauri::command]
 pub async fn check_auth_status() -> Result<bool, String> {
-    Ok(env::load_secret("poesessid")?.is_some())
+    Ok(env::load_secret("poesessid")?
+        .filter(|s| !s.trim().is_empty())
+        .is_some())
 }

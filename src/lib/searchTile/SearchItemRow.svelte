@@ -5,7 +5,7 @@
   import type { ResolvedDisplayStyle } from "$lib/types/types";
   import type { Item } from "$lib/types/tradeItem";
   import ItemIcon from "$lib/trade/components/item/ItemIcon.svelte";
-  import ItemStats from "$lib/trade/components/item/ItemStats.svelte";
+  import ItemStats from "$lib/trade/components/drawer/ItemStats.svelte";
   import ItemListing from "$lib/trade/components/item/ItemListing.svelte";
   import ItemJsonModal from "$lib/trade/components/item/ItemJsonModal.svelte";
 

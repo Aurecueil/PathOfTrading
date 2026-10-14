@@ -48,7 +48,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             auth::login::open_poe_login,
             auth::refresh::refresh_poetoken_background,
-            auth::refresh::check_auth_status,
+            auth::login::get_poe_auth_status,
+            auth::login::logout_poe,
             auth::env::load_secret,
             trade::search_items,
             trade::fetch_items,
@@ -61,6 +62,18 @@ pub fn run() {
             trade::live::stop_live_search,
             trade::whisper::whisper,
             trade::cdn::fetch_image_bytes,
+            project::load_project_index,
+            project::load_project,
+            project::save_project,
+            project::delete_project,
+            project::export_project_file,
+            project::encode_project_code,
+            project::decode_project_code,
+            auth::login::open_external_url,
+            project::window_minimize,
+            project::window_toggle_maximize,
+            project::window_start_dragging,
+            project::exit_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
