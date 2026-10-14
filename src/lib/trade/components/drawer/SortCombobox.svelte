@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { SortOptionItem } from "$lib/types";
+  import type { SortOptionItem } from "$lib/types/types";
   export let sortKey: string = "filter:price";
   export let sortDirection: "asc" | "desc" = "asc";
   export let allSortOptions: SortOptionItem[] = [];

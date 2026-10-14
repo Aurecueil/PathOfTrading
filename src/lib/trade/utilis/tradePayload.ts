@@ -1,4 +1,4 @@
-import type { ItemEntry } from "$lib/types/items";
+import type { ItemEntry } from "$lib/types/baseItem";
 import type { FilterGroup } from "$lib/types/filters";
 
 export interface StatGroupPayloadState {

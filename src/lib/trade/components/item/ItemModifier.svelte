@@ -1,6 +1,10 @@
 <!-- src/lib/components/item/ItemModifier.svelte -->
 <script lang="ts">
-  import type { ItemMod, ItemModInfo, ItemModFlags } from "$lib/types/item";
+  import type {
+    ItemMod,
+    ItemModInfo,
+    ItemModFlags,
+  } from "$lib/types/tradeItem";
 
   export let mod: string | ItemMod;
   export let category:

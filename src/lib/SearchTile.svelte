@@ -3,18 +3,29 @@
   import { createEventDispatcher, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import type { SearchTile, PoETradeItemEntry } from "$lib/types";
-  import type { TileDisplayStyle, ResolvedDisplayStyle } from "$lib/types";
-  import SearchItemRow from "./SearchItemRow.svelte";
+  import type { SearchTile, PoETradeItemEntry } from "$lib/types/types";
+  import type {
+    TileDisplayStyle,
+    ResolvedDisplayStyle,
+  } from "$lib/types/types";
+  import SearchItemRow from "$lib/searchTile/SearchItemRow.svelte";
 
   export let tile: SearchTile;
   export let scale: number = 1;
-  export let snapToGrid: boolean = false;
+  export let snapToGrid: boolean = true;
   export let gridSize: number = 40;
+  export let selected: boolean = false;
+  export let disabled: boolean = false;
 
   const dispatch = createEventDispatcher<{
     openfilters: void;
     delete: void;
+    select: { shiftKey: boolean };
+    dragstart: void;
+    dragmove: { dx: number; dy: number };
+    dragend: void;
+    resize: void;
+    contextmenu: { clientX: number; clientY: number };
   }>();
 
   type SearchMode = "regular" | "live" | "mixed";
@@ -32,7 +43,7 @@
   const BATCH_SIZE = 10;
 
   let mode: SearchMode = "regular";
-  let displayStyle: TileDisplayStyle = (tile as any).displayStyle ?? "auto";
+  let displayStyle: TileDisplayStyle = tile.displayStyle ?? "auto";
   let isLiveActive: boolean = false;
   let isLiveConnecting: boolean = false;
   let isFetchingMore: boolean = false;
@@ -44,12 +55,15 @@
   let unlistenStatus: UnlistenFn | null = null;
   let bodyElement: HTMLDivElement | null = null;
 
-  // Keep tile.displayStyle synced when changed
   $: {
-    (tile as any).displayStyle = displayStyle;
+    tile.displayStyle = displayStyle;
+    tile.disabled = disabled;
   }
 
-  // Dynamically resolve the effective item style from both explicit setting & tile dimensions
+  $: if (disabled && (isLiveActive || isLiveConnecting)) {
+    stopLive();
+  }
+
   $: effectiveStyle = ((): ResolvedDisplayStyle => {
     if (displayStyle === "minimal") return "minimal";
     if (displayStyle === "compact") {
@@ -58,7 +72,6 @@
     if (displayStyle === "full") {
       return tile.w < 320 ? "compact" : "full";
     }
-    // "auto" mode: adapt smoothly to tile width and height
     if (tile.w < 380 || tile.h < 240) return "minimal";
     if (tile.w < 560 || tile.h < 340) return "compact";
     return "full";
@@ -71,7 +84,7 @@
   }
 
   $: activePayload = tile.payload;
-  $: currentLeague = (tile as any)?.league ?? activePayload?.league ?? "";
+  $: currentLeague = tile.league ?? activePayload?.league ?? "";
 
   $: defaultRealmTitle =
     tile.realm?.toLowerCase() === "poe2" ? "PoE2 Trade" : "PoE Trade";
@@ -121,6 +134,7 @@
   }
 
   export async function executeSearch(payload?: any) {
+    if (disabled) return;
     const payloadToRun = payload || activePayload;
     if (!payloadToRun) return;
 
@@ -280,7 +294,7 @@
   }
 
   async function startLive() {
-    if (!tile.searchId) return;
+    if (!tile.searchId || disabled) return;
     cleanupListeners();
     isLiveConnecting = true;
 
@@ -352,6 +366,7 @@
   }
 
   async function toggleLiveButton() {
+    if (disabled) return;
     if (isLiveActive) {
       await stopLive();
     } else {
@@ -374,20 +389,35 @@
   function onHeaderPointerDown(e: PointerEvent) {
     if (e.button !== 0) return;
     e.stopPropagation();
+    (document.activeElement as HTMLElement)?.blur();
+
+    dispatch("select", { shiftKey: e.shiftKey });
+    dispatch("dragstart");
 
     const startX = e.clientX;
     const startY = e.clientY;
-    const initX = tile.x;
-    const initY = tile.y;
+    let hasDragged = false;
 
     function onPointerMove(ev: PointerEvent) {
-      tile.x = snap(initX + (ev.clientX - startX) / scale);
-      tile.y = snap(initY + (ev.clientY - startY) / scale);
+      const dist = Math.hypot(ev.clientX - startX, ev.clientY - startY);
+      if (dist > 4) {
+        hasDragged = true;
+      }
+      if (hasDragged) {
+        const dx = (ev.clientX - startX) / scale;
+        const dy = (ev.clientY - startY) / scale;
+        dispatch("dragmove", { dx, dy });
+      }
     }
 
     function onPointerUp() {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
+      dispatch("dragend");
+
+      if (!hasDragged) {
+        dispatch("openfilters");
+      }
     }
 
     window.addEventListener("pointermove", onPointerMove);
@@ -397,6 +427,7 @@
   function onResizePointerDown(e: PointerEvent, dir: ResizeDirection) {
     if (e.button !== 0) return;
     e.stopPropagation();
+    dispatch("resize");
 
     const startX = e.clientX;
     const startY = e.clientY;
@@ -447,16 +478,34 @@
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
   }
+
+  function handleContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    dispatch("contextmenu", { clientX: e.clientX, clientY: e.clientY });
+  }
 </script>
 
+<!-- svelte-ignore a11y-no-static-element-interactions -->
 <div
   class="tile-root style-{effectiveStyle}"
   class:live-active={isLiveActive}
+  class:selected
+  class:is-disabled={disabled}
   style:transform="translate({tile.x}px, {tile.y}px)"
   style:width="{tile.w}px"
   style:height="{tile.h}px"
+  on:pointerdown|stopPropagation={(e) => {
+    (document.activeElement as HTMLElement)?.blur();
+    dispatch("select", { shiftKey: e.shiftKey });
+  }}
+  on:contextmenu={handleContextMenu}
 >
-  <div class="tile-bar" on:pointerdown={onHeaderPointerDown}>
+  <div
+    class="tile-bar"
+    on:pointerdown={onHeaderPointerDown}
+    title="Click to configure filters, drag to move"
+  >
     <div class="bar-left">
       <span
         class="realm-badge"
@@ -464,6 +513,14 @@
       >
         {tile.realm}
       </span>
+      {#if currentLeague}
+        <span class="league-badge" title="League: {currentLeague}">
+          {currentLeague}
+        </span>
+      {/if}
+      {#if disabled}
+        <span class="disabled-badge">OFF</span>
+      {/if}
       <span class="title" title={displayTitle}>{displayTitle}</span>
       {#if displayedItems.length > 0 || (tile.results && tile.results.length > 0)}
         <span class="count-pill" title="Displayed / Total matched items">
@@ -474,10 +531,10 @@
     </div>
 
     <div class="actions" on:pointerdown|stopPropagation>
-      <!-- View Density / Style Selector -->
       <select
         class="style-select"
         bind:value={displayStyle}
+        on:change={(e) => (e.currentTarget as HTMLElement)?.blur()}
         title="Item display density ({displayStyle === 'auto'
           ? `Auto: ${effectiveStyle}`
           : displayStyle})"
@@ -488,11 +545,11 @@
         <option value="minimal">Minimal</option>
       </select>
 
-      <!-- Search Mode Selector -->
       <select
         class="mode-select"
         bind:value={mode}
-        disabled={tile.loading || isLiveConnecting}
+        on:change={(e) => (e.currentTarget as HTMLElement)?.blur()}
+        disabled={disabled || tile.loading || isLiveConnecting}
         title="Search mode"
       >
         <option value="regular">Regular</option>
@@ -505,7 +562,10 @@
           type="button"
           class="live-btn"
           class:active={isLiveActive}
-          disabled={tile.loading || isLiveConnecting || !activePayload}
+          disabled={disabled ||
+            tile.loading ||
+            isLiveConnecting ||
+            !activePayload}
           on:click|stopPropagation={toggleLiveButton}
           title={isLiveActive ? "Stop live listener" : "Start live listener"}
         >
@@ -519,23 +579,18 @@
       <button
         type="button"
         class="search-btn"
-        disabled={tile.loading || isLiveConnecting || !activePayload}
+        disabled={disabled ||
+          tile.loading ||
+          isLiveConnecting ||
+          !activePayload}
         on:click|stopPropagation={() => executeSearch()}
-        title="Execute search"
+        title={disabled ? "Search is disabled on this tile" : "Execute search"}
       >
         {#if tile.loading}
           <span class="spin">↻</span>
         {:else}
           🔍{#if !isNarrowHeader}&nbsp;Search{/if}
         {/if}
-      </button>
-
-      <button
-        type="button"
-        on:click|stopPropagation={() => dispatch("openfilters")}
-        title="Configure search filters"
-      >
-        ⚙️{#if !isNarrowHeader}&nbsp;Filters{/if}
       </button>
 
       <button
@@ -564,7 +619,9 @@
 
     {#if displayedItems.length === 0 && !tile.loading}
       <div class="status-msg empty">
-        {#if isLiveConnecting}
+        {#if disabled}
+          Search disabled (Right-click to enable).
+        {:else if isLiveConnecting}
           <span class="spin">↻</span> Connecting to live socket...
         {:else if isLiveActive}
           <span class="live-dot pulsing"></span> Waiting for live listings...
@@ -598,7 +655,6 @@
     {/if}
   </div>
 
-  <!-- Resizers -->
   <div class="edge n" on:pointerdown={(e) => onResizePointerDown(e, "n")}></div>
   <div class="edge s" on:pointerdown={(e) => onResizePointerDown(e, "s")}></div>
   <div class="edge e" on:pointerdown={(e) => onResizePointerDown(e, "e")}></div>
@@ -634,7 +690,19 @@
     border: 1px solid #283044;
     box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
     overflow: visible;
-    transition: border-color 0.2s ease;
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease,
+      opacity 0.15s ease;
+  }
+  .tile-root.selected {
+    border-color: #3a57e8;
+    box-shadow:
+      0 0 0 2px rgba(58, 87, 232, 0.45),
+      0 10px 28px rgba(0, 0, 0, 0.55);
+  }
+  .tile-root.is-disabled {
+    opacity: 0.68;
   }
   .tile-root.live-active {
     border-color: #7f1d1d;
@@ -652,7 +720,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 0 0.45rem;
-    cursor: grab;
+    cursor: pointer;
     user-select: none;
     flex-shrink: 0;
     gap: 0.35rem;
@@ -681,6 +749,28 @@
     background: #3b1d5e;
     color: #e9d5ff;
     border: 1px solid #581c87;
+  }
+  .league-badge {
+    font-size: 0.62rem;
+    background: #1e293b;
+    color: #93c5fd;
+    border: 1px solid #334155;
+    padding: 1px 5px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .disabled-badge {
+    font-size: 0.6rem;
+    font-weight: 700;
+    background: #7f1d1d;
+    color: #fecaca;
+    padding: 1px 4px;
+    border-radius: 3px;
+    flex-shrink: 0;
   }
   .title {
     font-size: 0.82rem;

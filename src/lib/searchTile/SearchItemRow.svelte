@@ -1,13 +1,13 @@
 <!-- src/lib/SearchItemRow.svelte -->
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import type { PoETradeItemEntry } from "$lib/types";
-  import type { ResolvedDisplayStyle } from "$lib/types";
-  import type { Item } from "$lib/types/item";
-  import ItemIcon from "$lib/trade/componenets/item/ItemIcon.svelte";
-  import ItemStats from "$lib/trade/componenets/item/ItemStats.svelte";
-  import ItemListing from "$lib/trade/componenets/item/ItemListing.svelte";
-  import ItemJsonModal from "$lib/trade/componenets/item/ItemJsonModal.svelte";
+  import type { PoETradeItemEntry } from "$lib/types/types";
+  import type { ResolvedDisplayStyle } from "$lib/types/types";
+  import type { Item } from "$lib/types/tradeItem";
+  import ItemIcon from "$lib/trade/components/item/ItemIcon.svelte";
+  import ItemStats from "$lib/trade/components/item/ItemStats.svelte";
+  import ItemListing from "$lib/trade/components/item/ItemListing.svelte";
+  import ItemJsonModal from "$lib/trade/components/item/ItemJsonModal.svelte";
 
   export let id: string;
   export let data: PoETradeItemEntry | null = null;
@@ -61,10 +61,11 @@
     isTraveling = true;
     travelError = null;
     try {
-      await invoke("travel_to_hideout", {
-        realm,
+      await invoke("whisper", {
         token,
-        whisper: listing.whisper ?? null,
+        realm,
+        league,
+        searchId,
       });
     } catch (err: any) {
       travelError = typeof err === "string" ? err : err?.message || "Failed";

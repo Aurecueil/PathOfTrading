@@ -1,6 +1,6 @@
 import { writable } from "svelte/store";
 import { invoke } from "@tauri-apps/api/core"; // For Tauri v2 (`@tauri-apps/api/tauri` in v1)
-import type { ItemCategory, ItemDataResponse } from "$lib/types/items";
+import type { ItemCategory, ItemDataResponse } from "$lib/types/baseItem";
 import type { FilterGroup, FilterDataResponse } from "$lib/types/filters";
 import type { StatGroup, StatsDataResponse } from "$lib/types/stats";
 import type { League, LeagueData } from "$lib/types/leagues";

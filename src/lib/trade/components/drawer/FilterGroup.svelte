@@ -2,7 +2,7 @@
   import { createEventDispatcher } from "svelte";
   import FilterRow from "./FilterRow.svelte";
   import type { FilterGroup as FilterGroupType } from "$lib/types/filters";
-  import type { ItemEntry } from "$lib/types/items";
+  import type { ItemEntry } from "$lib/types/baseItem";
 
   export let group: FilterGroupType;
   export let values: Record<string, any> = {};

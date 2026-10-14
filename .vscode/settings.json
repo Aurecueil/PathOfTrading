@@ -5,7 +5,11 @@
   "security.workspace.trust.enabled": false,
   "editor.formatOnSave": true,
   "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "js/ts.updateImportsOnFileMove.enabled": "always",
+  "svelte.plugin.svelte.rename.enable": true,
 
+  // Ensure rust-analyzer tracks file moves inside the nested src-tauri directory
+  "rust-analyzer.linkedProjects": ["./src-tauri/Cargo.toml"],
   "[rust]": {
     "editor.defaultFormatter": "rust-lang.rust-analyzer"
   },

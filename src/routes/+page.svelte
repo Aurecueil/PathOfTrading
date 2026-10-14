@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { openProject } from "../lib/projects.svelte";
+  import { openProject } from "../lib/project/projects.svelte";
   function handleOpenTest() {
     openProject({
       id: "test-123",

@@ -6,10 +6,10 @@
     ItemProperty,
     ItemMod,
     ItemSocket,
-  } from "$lib/types/item";
-  import type { ResolvedDisplayStyle } from "$lib/types";
+  } from "$lib/types/tradeItem";
+  import type { ResolvedDisplayStyle } from "$lib/types/types";
   import ItemModifier from "./ItemModifier.svelte";
-  import CdnImage from "$lib/trade/componenets/item/CdnImage.svelte";
+  import CdnImage from "./CdnImage.svelte";
 
   export let item: Item;
   export let realm: string = "poe";

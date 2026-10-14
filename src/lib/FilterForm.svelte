@@ -1,11 +1,11 @@
 <!-- src/lib/FilterDrawer.svelte -->
 <script lang="ts">
   import { createEventDispatcher, onDestroy } from "svelte";
-  import FilterGroup from "$lib/FilterGroup.svelte";
-  import DrawerHeader from "$lib/trade/componenets/DrawerHeader.svelte";
-  import ItemSearchCombobox from "$lib/trade/componenets/ItemSearchCombobox.svelte";
-  import SortCombobox from "$lib/trade/componenets/SortCombobox.svelte";
-  import StatGroupsSection from "$lib/trade/componenets/StatGroupsSection.svelte";
+  import FilterGroup from "$lib/trade/components/drawer/FilterGroup.svelte";
+  import DrawerHeader from "$lib/trade/components/drawer/DrawerHeader.svelte";
+  import ItemSearchCombobox from "$lib/trade/components/drawer/ItemSearchCombobox.svelte";
+  import SortCombobox from "$lib/trade/components/drawer/SortCombobox.svelte";
+  import StatGroupsSection from "$lib/trade/components/drawer/StatGroupsSection.svelte";
   import {
     computeDisplayName,
     getItemDisplayName,
@@ -24,9 +24,9 @@
     statsPoe2,
     leaguesPoe,
     leaguesPoe2,
-  } from "$lib/types/tradeStore";
-  import type { ItemEntry, ItemCategory } from "$lib/types/items";
-  import type { SortOptionItem } from "$lib/types";
+  } from "$lib/trade/tradeStore";
+  import type { ItemEntry, ItemCategory } from "$lib/types/baseItem";
+  import type { SortOptionItem } from "$lib/types/types";
   import type { FilterGroup as FilterGroupType } from "$lib/types/filters";
   import type { StatGroup as StatGroupType } from "$lib/types/stats";
   import type { League } from "$lib/types/leagues";

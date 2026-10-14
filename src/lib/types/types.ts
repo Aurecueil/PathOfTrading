@@ -1,3 +1,4 @@
+// src/lib/types.ts
 export interface SearchTile {
   id: string | number;
   x: number;
@@ -6,9 +7,12 @@ export interface SearchTile {
   h: number;
   realm: "poe" | "poe2" | string;
   league?: string;
+  title?: string;
   displayName?: string;
   displayStyle?: TileDisplayStyle;
+  disabled?: boolean;
   payload?: any;
+  full_payload?: any;
   searchId?: string;
   results: string[];
   loading?: boolean;
@@ -36,6 +40,30 @@ export interface PoETradeItemEntry {
     ilvl?: number;
     explicitMods?: string[];
   };
+}
+
+export type ToolType =
+  | "move"
+  | "title"
+  | "richtext"
+  | "arrow"
+  | "box"
+  | "circle";
+export type ShapeKind = "arrow" | "box" | "circle";
+
+export interface CanvasAnnotation {
+  id: number;
+  kind: "title" | "richtext" | ShapeKind;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+  thickness: number;
+  text?: string;
+  flipX?: boolean;
+  flipY?: boolean;
+  autoEdit?: boolean;
 }
 
 export interface FormSubmitData {

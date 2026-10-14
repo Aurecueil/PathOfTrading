@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { openTabs, closeProject } from "../lib/projects.svelte";
+  import { openTabs, closeProject } from "../lib/project/projects.svelte";
   import { onMount, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import { initItemData } from "$lib/types/tradeStore";
+  import { initItemData } from "$lib/trade/tradeStore";
 
   let { children } = $props();
 

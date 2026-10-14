@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import type { FilterEntry, FilterOptionEntry } from "$lib/types/filters";
-  import type { ItemEntry } from "$lib/types/items";
+  import type { ItemEntry } from "$lib/types/baseItem";
 
   export let filter: FilterEntry;
   export let value: Record<string, any> = {};

@@ -1,7 +1,7 @@
 <!-- src/lib/components/item/ItemListing.svelte -->
 <script lang="ts">
-  import type { ItemListing } from "$lib/types/item";
-  import type { ResolvedDisplayStyle } from "$lib/types";
+  import type { ItemListing } from "$lib/types/tradeItem";
+  import type { ResolvedDisplayStyle } from "$lib/types/types";
 
   export let listing: ItemListing | undefined;
   export let sortValue: any = null;

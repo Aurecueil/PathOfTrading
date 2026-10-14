@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
-  import StatGroupUI from "$lib/StatGroupUI.svelte";
+  import StatGroupUI from "$lib/trade/components/item/StatGroupUI.svelte";
   import type { StatGroup as StatGroupType, StatEntry } from "$lib/types/stats";
 
   export let statGroups: any[] = [];

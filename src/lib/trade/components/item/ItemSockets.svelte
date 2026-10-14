@@ -1,6 +1,6 @@
 <!-- src/lib/components/item/ItemSockets.svelte -->
 <script lang="ts">
-  import type { ItemSocket } from "$lib/types/item";
+  import type { ItemSocket } from "$lib/types/tradeItem";
 
   export let sockets: ItemSocket[] = [];
 

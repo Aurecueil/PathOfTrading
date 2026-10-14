@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ItemEntry } from "$lib/types/items";
+  import type { ItemEntry } from "$lib/types/baseItem";
   import { getItemDisplayName } from "$lib/trade/utilis/tradeDisplayName";
 
   export let allItemEntries: ItemEntry[] = [];

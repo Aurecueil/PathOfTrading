@@ -1,9 +1,9 @@
 <!-- src/lib/components/item/ItemIcon.svelte -->
 <script lang="ts">
-  import type { ResolvedDisplayStyle } from "$lib/types";
-  import type { Item } from "$lib/types/item";
+  import type { ResolvedDisplayStyle } from "$lib/types/types";
+  import type { Item } from "$lib/types/tradeItem";
   import ItemSockets from "./ItemSockets.svelte";
-  import CdnImage from "$lib/trade/componenets/item/CdnImage.svelte";
+  import CdnImage from "./CdnImage.svelte";
 
   export let item: Item;
   export let styleMode: ResolvedDisplayStyle = "full";
