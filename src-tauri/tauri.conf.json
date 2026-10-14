@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "path-of-trading",
+  "productName": "Path of Trading",
   "version": "0.1.0",
   "identifier": "com.aurecueil.path-of-trading",
   "build": {
