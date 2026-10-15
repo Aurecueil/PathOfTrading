@@ -4,6 +4,7 @@ import type { ItemCategory, ItemDataResponse } from "$lib/types/baseItem";
 import type { FilterGroup, FilterDataResponse } from "$lib/types/filters";
 import type { StatGroup, StatsDataResponse } from "$lib/types/stats";
 import type { League, LeagueData } from "$lib/types/leagues";
+import type { StaticCategory, StaticDataResponse } from "$lib/types/statics";
 
 export const itemsPoe = writable<ItemCategory[]>([]);
 export const itemsPoe2 = writable<ItemCategory[]>([]);
@@ -13,6 +14,8 @@ export const statsPoe = writable<StatGroup[]>([]);
 export const statsPoe2 = writable<StatGroup[]>([]);
 export const leaguesPoe = writable<League[]>([]);
 export const leaguesPoe2 = writable<League[]>([]);
+export const staticsPoe = writable<StaticCategory[]>([]);
+export const staticsPoe2 = writable<StaticCategory[]>([]);
 export const isLoading = writable<boolean>(false);
 export const loadError = writable<string | null>(null);
 
@@ -30,6 +33,8 @@ export async function initItemData(): Promise<void> {
       poe2Stats,
       PoeLeague,
       poe2Leagues,
+      poeStatics,
+      poe2Statics,
     ] = await Promise.allSettled([
       invoke<ItemDataResponse>("load_item_data", { realm: "poe" }),
       invoke<ItemDataResponse>("load_item_data", { realm: "poe2" }),
@@ -39,6 +44,8 @@ export async function initItemData(): Promise<void> {
       invoke<StatsDataResponse>("load_stats_data", { realm: "poe2" }),
       invoke<LeagueData>("load_league_data", { realm: "poe" }),
       invoke<LeagueData>("load_league_data", { realm: "poe2" }),
+      invoke<StaticDataResponse>("load_static_data", { realm: "poe" }),
+      invoke<StaticDataResponse>("load_static_data", { realm: "poe2" }),
     ]);
 
     const errors: string[] = [];
@@ -70,6 +77,14 @@ export async function initItemData(): Promise<void> {
     if (poe2Leagues.status === "fulfilled")
       leaguesPoe2.set(poe2Leagues.value.result);
     else errors.push(`PoE2 Stats: ${poe2Leagues.reason}`);
+
+    if (poeStatics.status === "fulfilled")
+      staticsPoe.set(poeStatics.value.result);
+    else errors.push(`PoE Statics: ${poeStatics.reason}`);
+
+    if (poe2Statics.status === "fulfilled")
+      staticsPoe2.set(poe2Statics.value.result);
+    else errors.push(`PoE2 Statics: ${poe2Statics.reason}`);
 
     if (errors.length > 0) {
       loadError.set(errors.join(" | "));

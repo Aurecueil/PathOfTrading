@@ -100,7 +100,17 @@
   $: y1 = item.flipY ? item.h : 0;
   $: x2 = item.flipX ? 0 : item.w;
   $: y2 = item.flipY ? 0 : item.h;
+  $: tip1Dir = ((item.flipY ? "s" : "n") +
+    (item.flipX ? "e" : "w")) as ResizeDirection;
+  $: tip2Dir = ((item.flipY ? "n" : "s") +
+    (item.flipX ? "w" : "e")) as ResizeDirection;
   $: hitWidth = Math.max(16, item.thickness + 12);
+  // Visible arrow body stops at the chevron's apex so it never pokes past the tip.
+  // The chevron's outer tip sits 1.35 stroke-widths beyond its apex.
+  $: arrowLen = Math.hypot(x2 - x1, y2 - y1) || 1;
+  $: arrowBack = Math.min(item.thickness * 1.35, arrowLen);
+  $: lx2 = x2 - ((x2 - x1) / arrowLen) * arrowBack;
+  $: ly2 = y2 - ((y2 - y1) / arrowLen) * arrowBack;
 
   // Safeguards for rect/ellipse rendering when dimensions are 0 or smaller than thickness
   $: rectX = item.w >= item.thickness ? item.thickness / 2 : item.w / 2;
@@ -114,6 +124,7 @@
 <div
   class="shape-root"
   class:selected
+  class:arrow={item.kind === "arrow"}
   style:transform="translate({item.x}px, {item.y}px)"
   style:width="{Math.max(item.w, 1)}px"
   style:height="{Math.max(item.h, 1)}px"
@@ -149,14 +160,23 @@
     <defs>
       <marker
         id="arrowhead-{item.id}"
+        viewBox="0 0 8 8"
         markerWidth="8"
         markerHeight="8"
-        refX="6"
+        refX="5"
         refY="4"
         orient="auto"
         markerUnits="strokeWidth"
+        overflow="visible"
       >
-        <path d="M 0 0 L 8 4 L 0 8 z" fill={item.color} />
+        <path
+          d="M 0.5 1 L 5 4 L 0.5 7"
+          fill="none"
+          stroke={item.color}
+          stroke-width="1.5"
+          stroke-linecap="butt"
+          stroke-linejoin="miter"
+        />
       </marker>
     </defs>
 
@@ -169,7 +189,6 @@
         fill="none"
         stroke={item.color}
         stroke-width={item.thickness}
-        rx="4"
         pointer-events="none"
       />
       <!-- Hit target only on the stroke line -->
@@ -182,7 +201,6 @@
         fill="none"
         stroke="transparent"
         stroke-width={hitWidth}
-        rx="4"
         pointer-events="stroke"
         on:pointerdown={onStrokePointerDown}
       />
@@ -214,15 +232,14 @@
       <line
         {x1}
         {y1}
-        {x2}
-        {y2}
+        x2={lx2}
+        y2={ly2}
         stroke={item.color}
         stroke-width={item.thickness}
-        stroke-linecap="round"
+        stroke-linecap="butt"
         marker-end="url(#arrowhead-{item.id})"
         pointer-events="none"
       />
-      <!-- Hit target only along the arrow line -->
       <line
         class="hit-stroke"
         {x1}
@@ -231,7 +248,7 @@
         {y2}
         stroke="transparent"
         stroke-width={hitWidth}
-        stroke-linecap="round"
+        stroke-linecap="butt"
         pointer-events="stroke"
         on:pointerdown={onStrokePointerDown}
       />
@@ -239,42 +256,75 @@
   </svg>
 
   {#if selected}
-    <div
-      class="edge n"
-      on:pointerdown={(e) => onResizePointerDown(e, "n")}
-    ></div>
-    <div
-      class="edge s"
-      on:pointerdown={(e) => onResizePointerDown(e, "s")}
-    ></div>
-    <div
-      class="edge e"
-      on:pointerdown={(e) => onResizePointerDown(e, "e")}
-    ></div>
-    <div
-      class="edge w"
-      on:pointerdown={(e) => onResizePointerDown(e, "w")}
-    ></div>
-    <div
-      class="corner nw"
-      on:pointerdown={(e) => onResizePointerDown(e, "nw")}
-    ></div>
-    <div
-      class="corner ne"
-      on:pointerdown={(e) => onResizePointerDown(e, "ne")}
-    ></div>
-    <div
-      class="corner sw"
-      on:pointerdown={(e) => onResizePointerDown(e, "sw")}
-    ></div>
-    <div
-      class="corner se"
-      on:pointerdown={(e) => onResizePointerDown(e, "se")}
-    ></div>
+    {#if item.kind === "arrow"}
+      <!-- Arrow: only two tip handles -->
+      <div
+        class="tip"
+        style:left="{x1}px"
+        style:top="{y1}px"
+        on:pointerdown={(e) => onResizePointerDown(e, tip1Dir)}
+      ></div>
+      <div
+        class="tip"
+        style:left="{x2}px"
+        style:top="{y2}px"
+        on:pointerdown={(e) => onResizePointerDown(e, tip2Dir)}
+      ></div>
+    {:else}
+      <div
+        class="edge n"
+        on:pointerdown={(e) => onResizePointerDown(e, "n")}
+      ></div>
+      <div
+        class="edge s"
+        on:pointerdown={(e) => onResizePointerDown(e, "s")}
+      ></div>
+      <div
+        class="edge e"
+        on:pointerdown={(e) => onResizePointerDown(e, "e")}
+      ></div>
+      <div
+        class="edge w"
+        on:pointerdown={(e) => onResizePointerDown(e, "w")}
+      ></div>
+      <div
+        class="corner nw"
+        on:pointerdown={(e) => onResizePointerDown(e, "nw")}
+      ></div>
+      <div
+        class="corner ne"
+        on:pointerdown={(e) => onResizePointerDown(e, "ne")}
+      ></div>
+      <div
+        class="corner sw"
+        on:pointerdown={(e) => onResizePointerDown(e, "sw")}
+      ></div>
+      <div
+        class="corner se"
+        on:pointerdown={(e) => onResizePointerDown(e, "se")}
+      ></div>
+    {/if}
   {/if}
 </div>
 
 <style>
+  .shape-root.selected:not(.arrow) {
+    outline: 1.5px dashed #3a57e8;
+    outline-offset: 2px;
+  }
+
+  .tip {
+    position: absolute;
+    z-index: 25;
+    width: 12px;
+    height: 12px;
+    transform: translate(-50%, -50%);
+    background: #3a57e8;
+    border: 1.5px solid #fff;
+    border-radius: 2px;
+    cursor: crosshair;
+    pointer-events: auto;
+  }
   .shape-root {
     position: absolute;
     top: 0;

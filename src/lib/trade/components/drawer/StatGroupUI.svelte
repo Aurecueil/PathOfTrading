@@ -57,15 +57,15 @@
 
   function getTagColor(label: string): string {
     const l = (label || "").toLowerCase();
-    if (l.includes("pseudo")) return "#38bdf8";
-    if (l.includes("explicit")) return "#a855f7";
-    if (l.includes("implicit")) return "#eab308";
-    if (l.includes("fractured")) return "#ca8a04";
-    if (l.includes("enchant")) return "#06b6d4";
-    if (l.includes("scourge")) return "#f97316";
-    if (l.includes("crucible")) return "#ef4444";
-    if (l.includes("mercenary")) return "#10b981";
-    return "#94a3b8";
+    if (l.includes("pseudo")) return "#66b2ff";
+    if (l.includes("explicit")) return "#e066ff";
+    if (l.includes("implicit")) return "#e6c200";
+    if (l.includes("fractured")) return "#e6c200";
+    if (l.includes("enchant")) return "#66b2ff";
+    if (l.includes("scourge")) return "#ff5555";
+    if (l.includes("crucible")) return "#ff5555";
+    if (l.includes("mercenary")) return "#55ff55";
+    return "#888888";
   }
 
   // Flattened entries for fast lookup and search
@@ -220,7 +220,7 @@
 
       {#if group.collapsed}
         <span class="collapsed-badge">
-          ({activeStatsCount} stats, disabled)
+          ({activeStatsCount} stats)
         </span>
       {/if}
     </div>
@@ -316,7 +316,7 @@
             >
               <span
                 class="stat-tag"
-                style="border-color: {tagCol}44; color: {tagCol};"
+                style="border-color: {tagCol}; color: {tagCol};"
               >
                 {statItem.groupLabel}
               </span>
@@ -331,20 +331,21 @@
 
 <style>
   .stat-group-card {
-    background: #1d212d;
-    border: 1px solid #2a3040;
-    border-radius: 4px;
+    background: #000000;
+    border: 1px solid #777777;
+    border-radius: 0px;
     display: flex;
     flex-direction: column;
-    gap: 0.45rem;
-    padding: 0.5rem;
+    gap: 0.35rem;
+    padding: 4px 6px;
     box-sizing: border-box;
     width: 100%;
-    transition: border-color 0.15s ease;
+    margin-top: 0;
   }
+
   .stat-group-card.is-collapsed {
-    background: #171a24;
-    border-color: #242836;
+    background: #000000;
+    border-color: #555555;
   }
 
   .group-header {
@@ -354,9 +355,12 @@
     gap: 0.4rem;
     cursor: pointer;
     user-select: none;
-    padding: 0.2rem 0.25rem;
-    border-radius: 3px;
-    transition: background 0.15s ease;
+    padding: 2px 4px;
+    height: 26px;
+    background: #050505;
+    border-bottom: none;
+    border-radius: 0px;
+    box-sizing: border-box;
   }
 
   .header-left {
@@ -366,9 +370,9 @@
   }
 
   .collapsed-badge {
-    font-size: 0.7rem;
-    color: #64748b;
-    font-style: italic;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 11px;
+    color: #888888;
   }
 
   .header-right {
@@ -378,38 +382,52 @@
   }
 
   .group-type-select {
-    background: #232838;
-    border: 1px solid #333c52;
-    color: #e2e8f0;
-    font-size: 0.775rem;
-    font-weight: 600;
-    padding: 0.2rem 0.4rem;
-    border-radius: 4px;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 11px;
+    line-height: 1.15;
+    height: 22px;
+    background: #000000;
+    border: 1px solid #7f7f7f;
+    border-radius: 0px;
+    color: #ffffff;
+    padding: 0 4px;
     outline: none;
-    height: 26px;
-    cursor: default;
+    cursor: pointer;
   }
+
+  .group-type-select:hover,
   .group-type-select:focus {
-    border-color: #3b82f6;
+    border-color: #ffffff;
+  }
+
+  .group-type-select option {
+    background-color: #000000;
+    color: #ffffff;
   }
 
   .group-value-inputs {
     display: flex;
     gap: 0.2rem;
   }
+
   .group-value-inputs input {
-    width: 50px;
-    background: #232838;
-    border: 1px solid #333c52;
-    color: #fff;
-    padding: 0.15rem 0.3rem;
-    border-radius: 4px;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 11px;
+    width: 48px;
+    height: 22px;
+    background: #000000;
+    border: 1px solid #7f7f7f;
+    border-radius: 0px;
+    color: #ffffff;
+    padding: 0 4px;
     outline: none;
-    font-size: 0.72rem;
-    height: 24px;
     text-align: center;
     box-sizing: border-box;
-    cursor: text;
+  }
+
+  .group-value-inputs input:hover,
+  .group-value-inputs input:focus {
+    border-color: #ffffff;
   }
 
   input[type="number"]::-webkit-outer-spin-button,
@@ -417,29 +435,38 @@
     -webkit-appearance: none;
     margin: 0;
   }
+
   input[type="number"] {
     -moz-appearance: textfield;
     appearance: textfield;
   }
 
+  /* Delete group button - borderless ✕ icon */
   .delete-group-btn {
+    font-family: "Fontin", monospace, sans-serif;
     background: transparent;
     border: none;
-    color: #64748b;
+    border-radius: 0px;
+    color: #888888;
     cursor: pointer;
-    font-size: 0.75rem;
-    padding: 2px 6px;
-    border-radius: 3px;
+    font-size: 11px;
+    height: 22px;
+    padding: 0 4px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
+
   .delete-group-btn:hover {
-    color: #ef4444;
-    background: rgba(239, 68, 68, 0.15);
+    color: #ff5555;
+    background: transparent;
   }
 
   .group-stats {
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
+    gap: 0.25rem;
   }
 
   .add-stat-container {
@@ -448,24 +475,29 @@
   }
 
   .add-stat-input {
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 12px;
+    line-height: 1.15;
+    height: 26px;
     width: 100%;
-    background: #161822;
-    border: 1px dashed #333c52;
-    color: #fff;
-    padding: 0.3rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.76rem;
-    height: 28px;
+    background: #000000;
+    border: 1px dashed #7f7f7f;
+    border-radius: 0px;
+    color: #ffffff;
+    padding: 0 6px;
     box-sizing: border-box;
     outline: none;
     text-align: left;
   }
+
   .add-stat-input:placeholder-shown {
     text-align: center;
   }
+
+  .add-stat-input:hover,
   .add-stat-input:focus {
     border-style: solid;
-    border-color: #3b82f6;
+    border-color: #ffffff;
     text-align: left;
   }
 
@@ -474,49 +506,62 @@
     top: 100%;
     left: 0;
     right: 0;
-    max-height: 280px;
+    max-height: 260px;
     overflow-y: auto;
     overscroll-behavior: contain;
-    background: #181b24;
-    border: 1px solid #333c52;
-    border-radius: 4px;
+    background: #000000;
+    border: 1px solid #ffffff;
+    border-radius: 0px;
     list-style: none;
-    padding: 0;
-    margin: 3px 0 0 0;
+    padding: 2px 0;
+    margin: 2px 0 0 0;
     z-index: 1000;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65);
-    scrollbar-width: none;
-    -ms-overflow-style: none;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
+    scrollbar-width: thin;
+    scrollbar-color: #555555 #000000;
   }
+
   .stat-dropdown::-webkit-scrollbar {
-    display: none;
+    width: 6px;
+  }
+
+  .stat-dropdown::-webkit-scrollbar-track {
+    background: #000000;
+  }
+
+  .stat-dropdown::-webkit-scrollbar-thumb {
+    background: #555555;
   }
 
   .stat-dropdown li {
-    padding: 0.4rem 0.6rem;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 12px;
+    line-height: 1.15;
+    padding: 1px 4px;
     cursor: pointer;
-    font-size: 0.75rem;
-    color: #cbd5e1;
-    border-bottom: 1px solid #232838;
+    color: #9a9a9a;
+    background: #000000;
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.35rem;
     white-space: nowrap;
     overflow: hidden;
   }
+
   .stat-dropdown li:hover,
   .stat-dropdown li.highlighted {
-    background: #232838;
+    background: #262626;
+    color: #ffffff;
   }
 
   .stat-tag {
-    font-size: 0.65rem;
-    font-weight: 600;
+    font-size: 10px;
+    font-weight: normal;
     text-transform: capitalize;
-    padding: 0.1rem 0.35rem;
+    padding: 0px 3px;
     border: 1px solid;
-    border-radius: 3px;
-    background: rgba(0, 0, 0, 0.25);
+    border-radius: 0px;
+    background: #000000;
     white-space: nowrap;
     flex-shrink: 0;
   }

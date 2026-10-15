@@ -3,15 +3,15 @@ use reqwest::header::{CONTENT_TYPE, COOKIE, USER_AGENT};
 use reqwest::{Client, Response};
 use serde_json::Value;
 
-pub async fn search_items_trade(payload: Value, realm: String) -> Result<Response, String> {
+pub async fn search_items_trade(
+    payload: Value,
+    realm: String,
+    league: String,
+) -> Result<Response, String> {
     let client = Client::new();
     let endpoint = super::ENDPOINT;
     let trade_path = if realm == "poe2" { "trade2" } else { "trade" };
-    let league = if realm == "poe2" {
-        "Forbidden%20Rites"
-    } else {
-        "Allflame"
-    };
+
     let url = format!("{endpoint}/api/{trade_path}/search/{league}");
 
     // Propagate load errors, then ensure the secret was actually found

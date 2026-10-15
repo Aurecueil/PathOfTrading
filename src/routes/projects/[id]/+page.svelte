@@ -34,10 +34,8 @@
     ShareCodePayload,
   } from "$lib/types/types";
 
-  type TileState = SearchTile;
-
   interface CanvasSnapshot {
-    tiles: TileState[];
+    tiles: SearchTile[];
     annotations: CanvasAnnotation[];
   }
 
@@ -65,10 +63,11 @@
   }
 
   function deepClone<T>(obj: T): T {
+    if (obj === undefined || obj === null) return obj;
     return JSON.parse(JSON.stringify(obj));
   }
 
-  let tiles: TileState[] = [];
+  let tiles: SearchTile[] = [];
   let annotations: CanvasAnnotation[] = [];
   let nextId = 1;
   let tileRefs: Record<string | number, Tile> = {};
@@ -84,7 +83,33 @@
   let autoSaveTimer: ReturnType<typeof setInterval> | undefined;
 
   function makeTileId(): string {
-    return `${currentProjectId}__tile_${nextId++}`;
+    if (
+      typeof crypto !== "undefined" &&
+      typeof crypto.randomUUID === "function"
+    ) {
+      return crypto.randomUUID();
+    }
+    return `tile_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  }
+
+  function syncNextId(currentAnnotations: CanvasAnnotation[]) {
+    for (const a of currentAnnotations) {
+      if (typeof a.id === "number" && a.id >= nextId) {
+        nextId = a.id + 1;
+      }
+    }
+  }
+
+  function blurActiveInput() {
+    const activeEl = document.activeElement as HTMLElement | null;
+    if (
+      activeEl &&
+      activeEl !== viewportEl &&
+      !activeEl.closest(".drawer") &&
+      !activeEl.closest(".context-menu")
+    ) {
+      activeEl.blur();
+    }
   }
 
   // Sync camera movements into session memory without marking project dirty
@@ -106,6 +131,8 @@
     selectedIds = new Set();
     undoStack = [];
     redoStack = [];
+    tiles = [];
+    annotations = [];
     tileRefs = {};
 
     let loaded: SavedProject;
@@ -153,7 +180,7 @@
     }
 
     let idCounter = 1;
-    const hydratedTiles: TileState[] = [];
+    const hydratedTiles: SearchTile[] = [];
     const hydratedAnnotations: CanvasAnnotation[] = [];
 
     for (const item of loaded.items || []) {
@@ -166,10 +193,10 @@
           autoEdit: false,
         });
       } else {
-        const tileUniqueId = `${id}__tile_${idCounter++}`;
+        const tileUniqueId = makeTileId();
         const tileRealm = item.realm || currentProjectRealm;
         const tileLeague = item.league || currentProjectLeague;
-        const clonedPayload = deepClone(
+        const clonedFullPayload = deepClone(
           item.full_payload ?? {
             league: tileLeague,
             query: {
@@ -179,6 +206,13 @@
             sort: { price: "asc" },
           },
         );
+        if (
+          tileLeague &&
+          clonedFullPayload &&
+          typeof clonedFullPayload === "object"
+        ) {
+          clonedFullPayload.league = tileLeague;
+        }
         hydratedTiles.push({
           id: tileUniqueId,
           x: item.x ?? 120,
@@ -190,11 +224,11 @@
           title: item.title || "",
           displayName: item.title || "",
           disabled: Boolean(item.disabled),
-          mode: item.mode ?? "regular",
+          mode: item.mode ?? "live",
           loading: false,
           results: [],
-          payload: deepClone(clonedPayload),
-          full_payload: clonedPayload,
+          payload: "",
+          full_payload: clonedFullPayload,
         });
       }
     }
@@ -273,7 +307,7 @@
     saveSnapshot();
 
     const newSelection = new Set<string | number>();
-    const addedTiles: TileState[] = [];
+    const addedTiles: SearchTile[] = [];
     const addedAnnotations: CanvasAnnotation[] = [];
 
     for (const item of items) {
@@ -292,7 +326,7 @@
         newSelection.add(assignedId);
         const tileRealm = item.realm || currentProjectRealm;
         const tileLeague = item.league || currentProjectLeague;
-        const clonedPayload = deepClone(
+        const clonedFullPayload = deepClone(
           item.full_payload ?? {
             league: tileLeague,
             query: {
@@ -302,6 +336,13 @@
             sort: { price: "asc" },
           },
         );
+        if (
+          tileLeague &&
+          clonedFullPayload &&
+          typeof clonedFullPayload === "object"
+        ) {
+          clonedFullPayload.league = tileLeague;
+        }
         addedTiles.push({
           id: assignedId,
           x: snap((item.x ?? 120) + GRID_SIZE),
@@ -316,8 +357,8 @@
           mode: item.mode ?? "regular",
           loading: false,
           results: [],
-          payload: deepClone(clonedPayload),
-          full_payload: clonedPayload,
+          payload: "",
+          full_payload: clonedFullPayload,
         });
       }
     }
@@ -368,56 +409,89 @@
     }
   }
 
+  function createCurrentSnapshot(): CanvasSnapshot {
+    return {
+      tiles: deepClone(tiles.map((t) => ({ ...t, loading: false }))),
+      annotations: deepClone(
+        annotations.map((a) => ({ ...a, autoEdit: false })),
+      ),
+    };
+  }
+
   function saveSnapshot() {
     markDirty();
     undoStack = [
       ...undoStack.slice(-(MAX_HISTORY - 1)),
-      {
-        tiles: deepClone(tiles.map((t) => ({ ...t, loading: false }))),
-        annotations: deepClone(annotations),
-      },
+      createCurrentSnapshot(),
     ];
     redoStack = [];
   }
 
-  function undo() {
+  async function undo() {
     if (undoStack.length === 0) return;
     markDirty();
     const prev = undoStack[undoStack.length - 1];
     undoStack = undoStack.slice(0, -1);
 
-    redoStack = [
-      ...redoStack,
-      {
-        tiles: deepClone(tiles.map((t) => ({ ...t, loading: false }))),
-        annotations: deepClone(annotations),
-      },
-    ];
+    redoStack = [...redoStack, createCurrentSnapshot()];
 
-    tiles = prev.tiles;
-    annotations = prev.annotations;
+    const existingMap = new Map(tiles.map((t) => [t.id, t]));
+    tiles = prev.tiles.map((snapTile) => {
+      const live = existingMap.get(snapTile.id);
+      const restored = deepClone(snapTile);
+      // Preserve live search results if the tile was already on the canvas
+      if (live && live.results?.length) {
+        restored.results = live.results;
+      }
+      return restored;
+    });
+    annotations = deepClone(prev.annotations);
+    syncNextId(annotations);
+    if (activeTileId !== null && !tiles.some((t) => t.id === activeTileId)) {
+      activeTileId = null;
+    }
     selectedIds = new Set();
     contextMenu = null;
+
+    await tick();
+    for (const t of tiles) {
+      if (!t.disabled && (!t.results || t.results.length === 0)) {
+        tileRefs[t.id]?.executeSearch(undefined, true);
+      }
+    }
   }
 
-  function redo() {
+  async function redo() {
     if (redoStack.length === 0) return;
     markDirty();
     const next = redoStack[redoStack.length - 1];
     redoStack = redoStack.slice(0, -1);
 
-    undoStack = [
-      ...undoStack,
-      {
-        tiles: deepClone(tiles.map((t) => ({ ...t, loading: false }))),
-        annotations: deepClone(annotations),
-      },
-    ];
+    undoStack = [...undoStack, createCurrentSnapshot()];
 
-    tiles = next.tiles;
-    annotations = next.annotations;
+    const existingMap = new Map(tiles.map((t) => [t.id, t]));
+    tiles = next.tiles.map((snapTile) => {
+      const live = existingMap.get(snapTile.id);
+      const restored = deepClone(snapTile);
+      if (live && live.results?.length) {
+        restored.results = live.results;
+      }
+      return restored;
+    });
+    annotations = deepClone(next.annotations);
+    syncNextId(annotations);
+    if (activeTileId !== null && !tiles.some((t) => t.id === activeTileId)) {
+      activeTileId = null;
+    }
     selectedIds = new Set();
     contextMenu = null;
+
+    await tick();
+    for (const t of tiles) {
+      if (!t.disabled && (!t.results || t.results.length === 0)) {
+        tileRefs[t.id]?.executeSearch(undefined, true);
+      }
+    }
   }
 
   function copySelected() {
@@ -428,12 +502,15 @@
         .map((t) => ({
           ...t,
           loading: false,
-          searchId: undefined,
-          results: [],
         })),
     );
     const copiedAnnotations = deepClone(
-      annotations.filter((a) => selectedIds.has(a.id)),
+      annotations
+        .filter((a) => selectedIds.has(a.id))
+        .map((a) => ({
+          ...a,
+          autoEdit: false,
+        })),
     );
     if (copiedTiles.length === 0 && copiedAnnotations.length === 0) return;
     clipboard = { tiles: copiedTiles, annotations: copiedAnnotations };
@@ -445,7 +522,7 @@
     deleteSelected();
   }
 
-  function pasteClipboard() {
+  async function pasteClipboard() {
     if (!clipboard) return;
     if (clipboard.tiles.length === 0 && clipboard.annotations.length === 0) {
       return;
@@ -456,15 +533,17 @@
     const newSelected = new Set<string | number>();
     const offset = GRID_SIZE;
 
-    const pastedTiles: TileState[] = clipboard.tiles.map((t) => {
+    const pastedTiles: SearchTile[] = clipboard.tiles.map((t) => {
       const newId = makeTileId();
       newSelected.add(newId);
+      const cloned = deepClone(t);
       return {
-        ...deepClone(t),
+        ...cloned,
         id: newId,
         x: snap(t.x + offset),
         y: snap(t.y + offset),
         loading: false,
+        results: cloned.results ? deepClone(cloned.results) : [],
       };
     });
 
@@ -498,19 +577,24 @@
     tiles = [...tiles, ...pastedTiles];
     annotations = [...annotations, ...pastedAnnotations];
     selectedIds = newSelected;
+
+    await tick();
+    for (const t of pastedTiles) {
+      if (!t.disabled && (!t.results || t.results.length === 0)) {
+        tileRefs[t.id]?.executeSearch(undefined, true);
+      }
+    }
   }
 
   function deleteSelected() {
     if (selectedIds.size === 0) return;
     saveSnapshot();
-    for (const id of selectedIds) {
-      if (activeTileId === id) {
-        activeTileId = null;
-      }
-      delete tileRefs[id];
+    const toDelete = new Set(selectedIds);
+    if (activeTileId !== null && toDelete.has(activeTileId)) {
+      activeTileId = null;
     }
-    tiles = tiles.filter((t) => !selectedIds.has(t.id));
-    annotations = annotations.filter((a) => !selectedIds.has(a.id));
+    tiles = tiles.filter((t) => !toDelete.has(t.id));
+    annotations = annotations.filter((a) => !toDelete.has(a.id));
     selectedIds = new Set();
     contextMenu = null;
   }
@@ -518,6 +602,7 @@
   let isSelecting: boolean = false;
   let marqueeStart = { x: 0, y: 0 };
   let marqueeEnd = { x: 0, y: 0 };
+  let marqueeAdditiveBase: Set<string | number> = new Set();
 
   let isCreatingObject: boolean = false;
   let createStart = { x: 0, y: 0 };
@@ -536,25 +621,44 @@
     league: string;
   } | null = null;
 
-  function screenToWorld(sx: number, sy: number) {
+  let viewportEl: HTMLDivElement;
+
+  function getViewportCoords(clientX: number, clientY: number) {
+    if (!viewportEl) return { x: clientX, y: clientY };
+    const rect = viewportEl.getBoundingClientRect();
     return {
-      x: (sx - offsetX) / scale,
-      y: (sy - offsetY) / scale,
+      x: clientX - rect.left,
+      y: clientY - rect.top,
     };
   }
-  let viewportEl: HTMLDivElement;
+
+  function screenToWorld(clientX: number, clientY: number) {
+    const vp = getViewportCoords(clientX, clientY);
+    return {
+      x: (vp.x - offsetX) / scale,
+      y: (vp.y - offsetY) / scale,
+    };
+  }
 
   function addTile() {
     saveSnapshot();
-    const width = viewportEl?.clientWidth ?? window.innerWidth;
-    const height = viewportEl?.clientHeight ?? window.innerHeight;
-    const center = screenToWorld(width / 2, height / 2);
+    const rect = viewportEl?.getBoundingClientRect();
+    const centerClientX = rect
+      ? rect.left + rect.width / 2
+      : window.innerWidth / 2;
+    const centerClientY = rect
+      ? rect.top + rect.height / 2
+      : window.innerHeight / 2;
+    const center = screenToWorld(centerClientX, centerClientY);
 
     const rawX = center.x - 210;
     const rawY = center.y - 160;
 
-    const defaultPayload = {
-      league: currentProjectLeague,
+    const tileRealm = currentProjectRealm;
+    const tileLeague = currentProjectLeague;
+
+    const defaultFullPayload = {
+      league: tileLeague,
       query: {
         status: { option: "securable" },
         stats: [{ type: "and", filters: [] }],
@@ -562,7 +666,7 @@
       sort: { price: "asc" },
     };
 
-    const newTile: TileState = {
+    const newTile: SearchTile = {
       id: makeTileId(),
       x: snap(rawX),
       y: snap(rawY),
@@ -570,17 +674,17 @@
       h: snap(680),
       title: "",
       displayName: "",
-      realm: currentProjectRealm,
-      league: currentProjectLeague,
+      realm: tileRealm,
+      league: tileLeague,
       disabled: false,
       mode: "regular",
       loading: false,
       results: [],
-      payload: deepClone(defaultPayload),
-      full_payload: deepClone(defaultPayload),
+      payload: "",
+      full_payload: deepClone(defaultFullPayload),
     };
     tiles = [...tiles, newTile];
-    selectedIds = new Set([newTile.id]);
+    blurActiveInput();
   }
 
   function removeTile(id: string | number) {
@@ -588,32 +692,41 @@
     if (activeTileId === id) {
       activeTileId = null;
     }
-    tiles = tiles.filter((t) => t.id !== id);
+    // Clean up refs and runtime cache so they don't bleed into other tiles
     delete tileRefs[id];
+    // If you can import cloneTileRuntimeCache or clear cache, do it here:
+    // tileRuntimeCache.delete(id);
+
+    tiles = tiles.filter((t) => t.id !== id);
     selectedIds.delete(id);
-    selectedIds = new Set(selectedIds);
   }
 
   function selectItem(id: string | number, shiftKey: boolean = false) {
+    contextMenu = null;
+    blurActiveInput();
     if (shiftKey) {
-      if (selectedIds.has(id)) {
-        selectedIds.delete(id);
+      const next = new Set(selectedIds);
+      if (next.has(id)) {
+        next.delete(id);
       } else {
-        selectedIds.add(id);
+        next.add(id);
       }
-      selectedIds = new Set(selectedIds);
+      selectedIds = next;
     } else if (!selectedIds.has(id)) {
       selectedIds = new Set([id]);
     }
   }
 
-  function startGroupDrag() {
+  function startGroupDrag(draggedId?: string | number) {
+    blurActiveInput();
+    if (draggedId !== undefined && !selectedIds.has(draggedId)) {
+      selectedIds = new Set([draggedId]);
+    }
+
     dragMoved = false;
-    preDragSnapshot = {
-      tiles: deepClone(tiles.map((t) => ({ ...t, loading: false }))),
-      annotations: deepClone(annotations),
-    };
+    preDragSnapshot = createCurrentSnapshot();
     dragInitialPositions.clear();
+
     for (const t of tiles) {
       if (selectedIds.has(t.id)) {
         dragInitialPositions.set(t.id, { x: t.x, y: t.y });
@@ -627,34 +740,36 @@
   }
 
   function moveGroupDrag(dx: number, dy: number) {
+    if (dragInitialPositions.size === 0) return;
+
     if (!dragMoved && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) {
       dragMoved = true;
       markDirty();
       if (preDragSnapshot) {
         undoStack = [...undoStack.slice(-(MAX_HISTORY - 1)), preDragSnapshot];
         redoStack = [];
+        preDragSnapshot = null;
       }
     }
 
-    tiles = tiles.map((t) => {
+    // Mutate x/y in place on the existing objects so child component instances & state are never recreated
+    for (const t of tiles) {
       const init = dragInitialPositions.get(t.id);
-      if (!init) return t;
-      return {
-        ...t,
-        x: snap(init.x + dx),
-        y: snap(init.y + dy),
-      };
-    });
+      if (init) {
+        t.x = snap(init.x + dx);
+        t.y = snap(init.y + dy);
+      }
+    }
+    tiles = tiles;
 
-    annotations = annotations.map((a) => {
+    for (const a of annotations) {
       const init = dragInitialPositions.get(a.id);
-      if (!init) return a;
-      return {
-        ...a,
-        x: snap(init.x + dx),
-        y: snap(init.y + dy),
-      };
-    });
+      if (init) {
+        a.x = snap(init.x + dx);
+        a.y = snap(init.y + dy);
+      }
+    }
+    annotations = annotations;
   }
 
   function endGroupDrag() {
@@ -684,11 +799,13 @@
       e.preventDefault();
       const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
       const newScale = Math.min(Math.max(0.2, scale * zoomFactor), 4);
-      const world = screenToWorld(e.clientX, e.clientY);
+      const vp = getViewportCoords(e.clientX, e.clientY);
+      const worldX = (vp.x - offsetX) / scale;
+      const worldY = (vp.y - offsetY) / scale;
 
       scale = newScale;
-      offsetX = e.clientX - world.x * scale;
-      offsetY = e.clientY - world.y * scale;
+      offsetX = vp.x - worldX * scale;
+      offsetY = vp.y - worldY * scale;
     }
 
     node.addEventListener("wheel", handleWheel, { passive: false });
@@ -710,13 +827,14 @@
       return;
     }
 
-    (document.activeElement as HTMLElement)?.blur();
+    blurActiveInput();
 
     if (e.button === 1) {
       if (isLocked) return;
       e.preventDefault();
       isPanning = true;
-      panStart = { x: e.clientX - offsetX, y: e.clientY - offsetY };
+      const vp = getViewportCoords(e.clientX, e.clientY);
+      panStart = { x: vp.x - offsetX, y: vp.y - offsetY };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       return;
     }
@@ -724,6 +842,7 @@
     if (e.button !== 0) return;
 
     const isCanvasBg =
+      target === viewportEl ||
       target.classList.contains("viewport") ||
       target.classList.contains("world");
 
@@ -735,7 +854,10 @@
       isSelecting = true;
       marqueeStart = { x: worldPt.x, y: worldPt.y };
       marqueeEnd = { x: worldPt.x, y: worldPt.y };
-      if (!e.shiftKey) {
+      if (e.shiftKey) {
+        marqueeAdditiveBase = new Set(selectedIds);
+      } else {
+        marqueeAdditiveBase = new Set();
         selectedIds = new Set();
       }
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -757,7 +879,7 @@
         w: GRID_SIZE,
         h: GRID_SIZE,
         color: "#3a57e8",
-        thickness: activeTool === "title" ? 4 : 3,
+        thickness: activeTool === "title" ? 4 : 12,
         text: activeTool === "title" ? "New Title" : "",
         flipX: false,
         flipY: false,
@@ -772,8 +894,9 @@
 
   function onPointerMove(e: PointerEvent) {
     if (isPanning) {
-      offsetX = e.clientX - panStart.x;
-      offsetY = e.clientY - panStart.y;
+      const vp = getViewportCoords(e.clientX, e.clientY);
+      offsetX = vp.x - panStart.x;
+      offsetY = vp.y - panStart.y;
       return;
     }
 
@@ -784,7 +907,7 @@
       const minY = Math.min(marqueeStart.y, marqueeEnd.y);
       const maxY = Math.max(marqueeStart.y, marqueeEnd.y);
 
-      const nextSelected = new Set<string | number>();
+      const nextSelected = new Set<string | number>(marqueeAdditiveBase);
 
       for (const t of tiles) {
         if (
@@ -841,6 +964,7 @@
     }
     if (isSelecting) {
       isSelecting = false;
+      marqueeAdditiveBase = new Set();
     }
     if (isCreatingObject) {
       isCreatingObject = false;
@@ -870,31 +994,38 @@
   }
 
   function onWindowKeyDown(e: KeyboardEvent) {
-    if (e.key === "Escape" && activeTileId !== null) {
-      e.preventDefault();
-      drawerRef?.saveWithoutSearch();
-      activeTileId = null;
-      return;
-    }
-
-    const activeEl = document.activeElement;
+    const activeEl = document.activeElement as HTMLElement | null;
     const isTextInputFocused =
       activeEl &&
       (activeEl.tagName === "INPUT" ||
         activeEl.tagName === "TEXTAREA" ||
-        (activeEl as HTMLElement).isContentEditable);
+        activeEl.tagName === "SELECT" ||
+        activeEl.isContentEditable ||
+        Boolean(activeEl.closest?.('[contenteditable="true"]')));
 
-    if (
-      isTextInputFocused ||
-      activeTileId !== null ||
-      workspaceState.namePrompt !== null
-    ) {
+    if (isTextInputFocused || workspaceState.namePrompt !== null) {
       return;
     }
 
-    const isMod = e.ctrlKey || e.metaKey;
+    // If FilterDrawer is open, FilterForm handles Escape itself
+    if (e.key === "Escape") {
+      if (activeTileId !== null) return;
+      if (contextMenu !== null) {
+        contextMenu = null;
+        return;
+      }
+      if (selectedIds.size > 0) {
+        selectedIds = new Set();
+        return;
+      }
+    }
 
-    if (isMod && e.key.toLowerCase() === "z") {
+    const isInsideDrawer = Boolean(activeEl?.closest?.(".drawer"));
+    const isMod = e.ctrlKey || e.metaKey;
+    const key = e.key.toLowerCase();
+    const code = e.code;
+
+    if (isMod && (key === "z" || code === "KeyZ")) {
       e.preventDefault();
       if (e.shiftKey) {
         redo();
@@ -904,36 +1035,37 @@
       return;
     }
 
-    if (isMod && e.key.toLowerCase() === "y") {
+    if (isMod && (key === "y" || code === "KeyY")) {
       e.preventDefault();
       redo();
       return;
     }
 
-    if (isMod && e.key.toLowerCase() === "c") {
+    if (isMod && (key === "c" || code === "KeyC")) {
       e.preventDefault();
       copySelected();
       return;
     }
 
-    if (isMod && e.key.toLowerCase() === "x") {
+    if (isMod && (key === "x" || code === "KeyX")) {
       e.preventDefault();
       cutSelected();
       return;
     }
 
-    if (isMod && e.key.toLowerCase() === "v") {
+    if (isMod && (key === "v" || code === "KeyV")) {
       e.preventDefault();
       pasteClipboard();
       return;
     }
 
     if (e.key === "Delete" || e.key === "Backspace") {
-      if (selectedIds.size === 0) return;
+      if (selectedIds.size === 0 || isInsideDrawer) return;
       e.preventDefault();
       deleteSelected();
     } else if (e.key === "Enter") {
-      if (selectedIds.size === 0) return;
+      // If drawer is open and focused, let FilterForm handle Enter/Shift+Enter
+      if (isInsideDrawer || selectedIds.size === 0) return;
       e.preventDefault();
       for (const t of tiles) {
         if (selectedIds.has(t.id) && !t.disabled) {
@@ -947,6 +1079,7 @@
     tileId: string | number,
     detail: { clientX: number; clientY: number },
   ) {
+    blurActiveInput();
     if (!selectedIds.has(tileId)) {
       selectedIds = new Set([tileId]);
     }
@@ -973,9 +1106,12 @@
       .every((t) => t.disabled);
 
     const nextDisabled = !allDisabled;
-    tiles = tiles.map((t) =>
-      targets.has(t.id) ? { ...t, disabled: nextDisabled } : t,
-    );
+    for (const t of tiles) {
+      if (targets.has(t.id)) {
+        t.disabled = nextDisabled;
+      }
+    }
+    tiles = tiles;
     contextMenu = null;
   }
 
@@ -987,49 +1123,50 @@
     const targets = new Set(contextMenu.targetTileIds);
     const { realm, league } = e.detail;
 
-    tiles = tiles.map((t) => {
-      if (!targets.has(t.id)) return t;
-      return {
-        ...t,
-        realm,
-        league,
-        payload: t.payload ? { ...t.payload, league } : t.payload,
-        full_payload: t.full_payload
-          ? { ...t.full_payload, league }
-          : t.full_payload,
-      };
-    });
+    for (const t of tiles) {
+      if (targets.has(t.id)) {
+        t.realm = realm;
+        t.league = league;
+        t.payload = "";
+        if (t.full_payload && typeof t.full_payload === "object") {
+          t.full_payload = { ...t.full_payload, league };
+        }
+      }
+    }
+    tiles = tiles;
     contextMenu = null;
   }
 
   function handleSaveOnly(e: CustomEvent<any>) {
     if (activeTileId === null) return;
-    saveSnapshot();
+    markDirty();
     const { title, displayName, realm, league, payload, full_payload } =
       e.detail;
 
     const resolvedTitle = displayName?.trim() || title?.trim() || "";
-    const effectivePayload = payload ? { ...payload, league } : payload;
-    const effectiveFullPayload = full_payload
-      ? { ...full_payload, league }
-      : effectivePayload;
+    const effectiveLeague = league || currentProjectLeague;
+    const effectivePayload =
+      payload && typeof payload === "object"
+        ? { ...payload, league: effectiveLeague }
+        : payload;
+    const effectiveFullPayload =
+      full_payload && typeof full_payload === "object"
+        ? { ...full_payload, league: effectiveLeague }
+        : effectivePayload;
 
-    tiles = tiles.map((t) =>
-      t.id === activeTileId
-        ? {
-            ...t,
-            title: resolvedTitle,
-            displayName: resolvedTitle,
-            realm,
-            league: league ?? t.league,
-            payload: effectivePayload,
-            full_payload: effectiveFullPayload,
-          }
-        : t,
-    );
+    const target = tiles.find((t) => t.id === activeTileId);
+    if (target) {
+      target.title = resolvedTitle;
+      target.displayName = resolvedTitle;
+      target.realm = realm || target.realm;
+      target.league = effectiveLeague;
+      target.payload = effectivePayload;
+      target.full_payload = effectiveFullPayload;
+      tiles = tiles;
+    }
   }
 
-  function handleFormSubmit(e: CustomEvent<any>) {
+  async function handleFormSubmit(e: CustomEvent<any>) {
     if (activeTileId === null) return;
     saveSnapshot();
     const { title, displayName, realm, league, payload, full_payload, close } =
@@ -1037,29 +1174,32 @@
     const targetId = activeTileId;
 
     const resolvedTitle = displayName?.trim() || title?.trim() || "";
-    const effectivePayload = payload ? { ...payload, league } : payload;
-    const effectiveFullPayload = full_payload
-      ? { ...full_payload, league }
-      : effectivePayload;
+    const effectiveLeague = league || currentProjectLeague;
+    const effectivePayload =
+      payload && typeof payload === "object"
+        ? { ...payload, league: effectiveLeague }
+        : payload;
+    const effectiveFullPayload =
+      full_payload && typeof full_payload === "object"
+        ? { ...full_payload, league: effectiveLeague }
+        : effectivePayload;
 
-    tiles = tiles.map((t) =>
-      t.id === targetId
-        ? {
-            ...t,
-            title: resolvedTitle,
-            displayName: resolvedTitle,
-            realm,
-            league: league ?? t.league,
-            payload: effectivePayload,
-            full_payload: effectiveFullPayload,
-          }
-        : t,
-    );
+    const target = tiles.find((t) => t.id === targetId);
+    if (target) {
+      target.title = resolvedTitle;
+      target.displayName = resolvedTitle;
+      target.realm = realm || target.realm;
+      target.league = effectiveLeague;
+      target.payload = effectivePayload;
+      target.full_payload = effectiveFullPayload;
+      tiles = tiles;
+    }
 
     if (close !== false) {
       activeTileId = null;
     }
 
+    await tick();
     const ref = tileRefs[targetId];
     ref?.executeSearch(effectivePayload, false);
   }
@@ -1094,6 +1234,8 @@
   on:pointerdown={onPointerDown}
   on:pointermove={onPointerMove}
   on:pointerup={onPointerUp}
+  on:pointercancel={onPointerUp}
+  on:dragstart|preventDefault
   on:contextmenu|preventDefault
   style:background-size="{GRID_SIZE * scale}px {GRID_SIZE * scale}px"
   style:background-position="{offsetX}px {offsetY}px"
@@ -1108,18 +1250,18 @@
 
   <div
     class="world"
-    style:transform="translate({offsetX}px, {offsetY}px) scale({scale})"
+    style:transform="translate3d({offsetX}px, {offsetY}px, 0) scale({scale})"
   >
     {#each annotations as item (item.id)}
       {#if item.kind === "arrow" || item.kind === "box" || item.kind === "circle"}
         <CanvasShape
-          bind:item
+          {item}
           {scale}
           {snapToGrid}
           gridSize={GRID_SIZE}
           selected={selectedIds.has(item.id)}
-          on:select={(e) => selectItem(item.id, e.detail.shiftKey)}
-          on:dragstart={startGroupDrag}
+          on:select={(e) => selectItem(item.id, e.detail?.shiftKey)}
+          on:dragstart={() => startGroupDrag(item.id)}
           on:dragmove={(e) => moveGroupDrag(e.detail.dx, e.detail.dy)}
           on:dragend={endGroupDrag}
           on:change={saveSnapshot}
@@ -1131,8 +1273,8 @@
           {snapToGrid}
           gridSize={GRID_SIZE}
           selected={selectedIds.has(item.id)}
-          on:select={(e) => selectItem(item.id, e.detail.shiftKey)}
-          on:dragstart={startGroupDrag}
+          on:select={(e) => selectItem(item.id, e.detail?.shiftKey)}
+          on:dragstart={() => startGroupDrag(item.id)}
           on:dragmove={(e) => moveGroupDrag(e.detail.dx, e.detail.dy)}
           on:dragend={endGroupDrag}
           on:change={saveSnapshot}
@@ -1144,8 +1286,8 @@
           {snapToGrid}
           gridSize={GRID_SIZE}
           selected={selectedIds.has(item.id)}
-          on:select={(e) => selectItem(item.id, e.detail.shiftKey)}
-          on:dragstart={startGroupDrag}
+          on:select={(e) => selectItem(item.id, e.detail?.shiftKey)}
+          on:dragstart={() => startGroupDrag(item.id)}
           on:dragmove={(e) => moveGroupDrag(e.detail.dx, e.detail.dy)}
           on:dragend={endGroupDrag}
           on:change={saveSnapshot}
@@ -1155,15 +1297,14 @@
 
     {#each tiles as tile (tile.id)}
       <Tile
-        bind:this={tileRefs[tile.id]}
-        bind:tile
+        {tile}
         {scale}
         {snapToGrid}
         gridSize={GRID_SIZE}
         selected={selectedIds.has(tile.id)}
         disabled={tile.disabled ?? false}
-        on:select={(e) => selectItem(tile.id, e.detail.shiftKey)}
-        on:dragstart={startGroupDrag}
+        on:select={(e) => selectItem(tile.id, e.detail?.shiftKey)}
+        on:dragstart={() => startGroupDrag(tile.id)}
         on:dragmove={(e) => moveGroupDrag(e.detail.dx, e.detail.dy)}
         on:dragend={endGroupDrag}
         on:resize={saveSnapshot}
@@ -1174,10 +1315,10 @@
       />
     {/each}
 
-    {#if isSelecting}
+    {#if isSelecting && (marqueeRect.w > 1 || marqueeRect.h > 1)}
       <div
         class="marquee-box"
-        style:transform="translate({marqueeRect.x}px, {marqueeRect.y}px)"
+        style:transform="translate3d({marqueeRect.x}px, {marqueeRect.y}px, 0)"
         style:width="{marqueeRect.w}px"
         style:height="{marqueeRect.h}px"
       ></div>
@@ -1205,7 +1346,7 @@
         initialDisplayName={activeTile.displayName || activeTile.title || ""}
         initialRealm={activeTile.realm === "poe2" ? "poe2" : "poe"}
         initialLeague={activeTile.league || currentProjectLeague}
-        initialPayload={activeTile.full_payload || activeTile.payload || null}
+        initialPayload={activeTile.full_payload ?? null}
         on:close={() => (activeTileId = null)}
         on:save_only={handleSaveOnly}
         on:save_and_search={handleFormSubmit}
@@ -1215,6 +1356,37 @@
 </div>
 
 <style>
+  :global(*) {
+    font-family: "Fontin", sans-serif !important;
+    box-sizing: border-box;
+    /* Firefox custom scrollbar */
+    scrollbar-width: thin;
+    scrollbar-color: #555555 #000000;
+  }
+
+  /* Custom WebKit Scrollbar styling matching PoB standard */
+  :global(*::-webkit-scrollbar) {
+    width: 12px;
+    height: 12px;
+  }
+
+  :global(*::-webkit-scrollbar-track) {
+    background: #000000;
+  }
+
+  :global(*::-webkit-scrollbar-thumb) {
+    background: #555555;
+    border-radius: 0px !important;
+  }
+
+  :global(*::-webkit-scrollbar-thumb:hover) {
+    background: #777777;
+  }
+
+  :global(*::-webkit-scrollbar-corner) {
+    background: #000000;
+  }
+
   .viewport {
     position: absolute;
     inset: 0;
@@ -1222,43 +1394,56 @@
     height: 100%;
     overflow: hidden;
     user-select: none;
+    -webkit-user-select: none;
     touch-action: none;
-    background-color: #12151c;
+    background-color: #080b10;
     background-image: radial-gradient(
       circle,
-      rgba(255, 255, 255, 0.16) 1.5px,
+      rgba(255, 255, 255, 0.12) 1.5px,
       transparent 1.5px
     );
+    font-family: "Fontin", sans-serif;
+    color: #d3d3d3;
+    font-size: 11px;
+    line-height: 1.2;
     cursor: default;
     outline: none;
     scrollbar-width: none;
     -ms-overflow-style: none;
   }
+
   .viewport.panning {
     cursor: grabbing;
   }
+
   .viewport.crosshair {
     cursor: crosshair;
   }
+
   .viewport::-webkit-scrollbar {
     display: none;
   }
+
   .world {
     position: absolute;
     top: 0;
     left: 0;
     transform-origin: 0 0;
-    width: 0;
-    height: 0;
+    width: 1px;
+    height: 1px;
+    will-change: transform;
   }
+
   .marquee-box {
     position: absolute;
     top: 0;
     left: 0;
-    background: rgba(58, 87, 232, 0.18);
-    border: 1.5px solid #3a57e8;
-    border-radius: 2px;
+    background: rgba(224, 224, 224, 0.12);
+    border: 1px solid #777777;
+    border-radius: 0px;
     pointer-events: none;
     z-index: 90;
+    will-change: transform, width, height;
+    backface-visibility: hidden;
   }
 </style>

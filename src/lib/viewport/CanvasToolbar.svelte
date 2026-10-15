@@ -71,25 +71,25 @@
     {#if isLocked}
       <svg
         viewBox="0 0 24 24"
-        width="16"
-        height="16"
+        width="14"
+        height="14"
         fill="none"
         stroke="currentColor"
         stroke-width="2"
       >
-        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+        <rect x="3" y="11" width="18" height="11" rx="0" ry="0" />
         <path d="M7 11V7a5 5 0 0 1 10 0v4" />
       </svg>
     {:else}
       <svg
         viewBox="0 0 24 24"
-        width="16"
-        height="16"
+        width="14"
+        height="14"
         fill="none"
         stroke="currentColor"
         stroke-width="2"
       >
-        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+        <rect x="3" y="11" width="18" height="11" rx="0" ry="0" />
         <path d="M7 11V7a5 5 0 0 1 9.9-1" />
       </svg>
     {/if}
@@ -99,66 +99,109 @@
 <style>
   .toolbar {
     position: absolute;
-    top: 1rem;
-    right: 1rem;
+    top: 0.75rem;
+    right: 0.75rem;
     z-index: 100;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    background: #1e222d;
-    padding: 0.5rem;
-    border-radius: 8px;
-    border: 1px solid #2e3444;
+    gap: 0.35rem;
+    background: #050505;
+    padding: 4px;
+    border-radius: 0px;
+    border: 1px solid #777777;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.85);
   }
+
   .tool-select {
-    background: #2b3040;
-    color: #fff;
-    border: 1px solid #3b4257;
-    padding: 0.42rem 0.65rem;
-    border-radius: 4px;
-    font-size: 0.82rem;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 12px;
+    line-height: 1.15;
+    height: 26px;
+    background: #000000;
+    color: #ffffff;
+    border: 1px solid #7f7f7f;
+    padding: 0 6px;
+    border-radius: 0px;
     cursor: pointer;
     outline: none;
+    box-sizing: border-box;
   }
-  .tool-select:hover {
-    background: #3b4257;
+
+  .tool-select:hover,
+  .tool-select:focus {
+    border-color: #ffffff;
   }
+
+  .tool-select option {
+    background-color: #000000;
+    color: #ffffff;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 12px;
+  }
+
   button {
-    background: #2b3040;
-    color: #fff;
-    border: none;
-    padding: 0.45rem 0.75rem;
-    border-radius: 4px;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 12px;
+    line-height: 1.15;
+    height: 26px;
+    background: #000000;
+    color: #ffffff;
+    border: 1px solid #7f7f7f;
+    padding: 0 8px;
+    border-radius: 0px;
     cursor: pointer;
-    font-size: 0.82rem;
-    transition: background 0.15s ease;
+    outline: none;
+    transition:
+      background 0.1s ease,
+      border-color 0.1s ease;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    box-sizing: border-box;
   }
-  button:hover {
-    background: #3b4257;
+
+  button:hover,
+  button:focus {
+    border-color: #ffffff;
+    background: #111111;
   }
+
   button.active {
-    background: #238636;
+    background: #111111;
+    color: #55ff55;
+    border-color: #ffffff;
   }
+
   button.active:hover {
-    background: #2ea043;
+    background: #1a1a1a;
   }
+
   .btn-primary {
-    background: #3a57e8;
+    background: #000000;
+    border-color: #7f7f7f;
+    color: #ffffff;
   }
+
   .btn-primary:hover {
-    background: #2d45c5;
+    background: #111111;
+    border-color: #ffffff;
   }
+
   .icon-square-btn {
-    width: 34px;
-    height: 34px;
+    width: 26px;
+    height: 26px;
     padding: 0;
-    border-radius: 4px;
+    border-radius: 0px;
   }
+
   .icon-square-btn.locked {
-    background: #b91c1c;
-    color: #fecaca;
+    background: #000000;
+    color: #ff5555;
+    border-color: #ff5555;
+  }
+
+  .icon-square-btn.locked:hover {
+    background: #220000;
+    border-color: #ff5555;
   }
 </style>

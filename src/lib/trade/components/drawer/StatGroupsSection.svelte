@@ -124,64 +124,84 @@
   .stats-section {
     display: flex;
     flex-direction: column;
-    gap: 0.45rem;
+    gap: 0.35rem;
     width: 100%;
     min-width: 0;
     box-sizing: border-box;
   }
+
   .stats-list {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.35rem;
   }
+
   .add-group-row {
     display: flex;
     justify-content: flex-end;
-    margin-top: 0.2rem;
+    margin-top: 0.1rem;
   }
+
   .add-group-menu-wrapper {
     position: relative;
   }
+
+  /* Retro Button Control Styling */
   .add-stat-group-btn {
-    background: #232838;
-    border: 1px solid #333c52;
-    color: #94a3b8;
-    font-size: 0.74rem;
-    font-weight: 500;
-    padding: 0.3rem 0.65rem;
-    border-radius: 4px;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 12px;
+    line-height: 1.15;
+    height: 26px;
+    background: #000000;
+    border: 1px solid #7f7f7f;
+    border-radius: 0px;
+    color: #ffffff;
+    padding: 0 8px;
     cursor: pointer;
-    transition: all 0.15s ease;
+    outline: none;
+    transition:
+      background 0.1s ease,
+      border-color 0.1s ease;
   }
-  .add-stat-group-btn:hover {
-    background: #2d354a;
-    border-color: #3b82f6;
-    color: #fff;
+
+  .add-stat-group-btn:hover,
+  .add-stat-group-btn:focus {
+    border-color: #ffffff;
+    background: #111111;
   }
+
+  /* Expanded Dropdown Popover Styling */
   .add-group-dropdown {
     position: absolute;
     bottom: 100%;
     right: 0;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
     width: 170px;
-    background: #181b24;
-    border: 1px solid #333c52;
-    border-radius: 4px;
+    background: #000000;
+    border: 1px solid #ffffff;
+    border-radius: 0px;
     list-style: none;
-    padding: 0;
+    padding: 2px 0;
     z-index: 1000;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
     overflow: hidden;
   }
+
   .add-group-dropdown li {
-    padding: 0.4rem 0.65rem;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 12px;
+    line-height: 1.15;
+    padding: 1px 4px;
     cursor: pointer;
-    font-size: 0.75rem;
-    color: #cbd5e1;
-    border-bottom: 1px solid #232838;
+    color: #9a9a9a;
+    background: #000000;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
+
   .add-group-dropdown li:hover {
-    background: #232838;
-    color: #38bdf8;
+    background: #262626;
+    color: #ffffff;
   }
 </style>

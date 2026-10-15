@@ -31,7 +31,7 @@ pub fn run() {
                     Ok(true) => {
                         println!("Existing session found. Refreshing POETOKEN...");
                         match auth::refresh::refresh_poetoken_background(app_handle).await {
-                            Ok(token) => println!("POETOKEN refreshed successfully: {token}"),
+                            Ok(_) => println!("POETOKEN refreshed successfully"),
                             Err(err) => eprintln!("Background POETOKEN refresh failed: {err}"),
                         }
                     }
@@ -54,6 +54,7 @@ pub fn run() {
             trade::search_items,
             trade::fetch_items,
             trade::get_limiter_state,
+            trade::cancel_ui_jobs,
             trade::items::load_item_data,
             trade::filters::load_filters_data,
             trade::stats::load_stats_data,
@@ -62,6 +63,7 @@ pub fn run() {
             trade::live::stop_live_search,
             trade::whisper::whisper,
             trade::cdn::fetch_image_bytes,
+            trade::statics::load_static_data,
             project::load_project_index,
             project::load_project,
             project::save_project,

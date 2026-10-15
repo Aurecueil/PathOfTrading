@@ -43,7 +43,7 @@
   ondblclick={onTitlebarDblClick}
 >
   <div class="brand-group" data-tauri-drag-region>
-    <img src="/pot.ico" alt="" class="app-icon" />
+    <img src="/favicon.png" alt="" class="app-icon" />
     <span class="app-brand" data-tauri-drag-region>Path of Trading</span>
   </div>
 
@@ -76,15 +76,22 @@
 </div>
 
 <style>
+  :global(*) {
+    font-family: "Fontin", sans-serif !important;
+    box-sizing: border-box;
+  }
+
   .titlebar-row {
-    height: 26px;
+    height: 29px;
     min-height: 26px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding-left: 8px;
     background: #000000;
+    border-bottom: none;
     box-sizing: border-box;
+    user-select: none;
   }
 
   .brand-group {
@@ -94,16 +101,16 @@
   }
 
   .app-icon {
-    width: 15px;
-    height: 15px;
+    width: 17px;
+    height: 17px;
     object-fit: contain;
     pointer-events: none;
   }
 
   .app-brand {
-    font-size: 12px;
-    font-weight: 700;
-    color: #cbd5e1;
+    font-family: "Fontin", sans-serif;
+    font-size: 13px;
+    color: #e0e0e0;
     letter-spacing: 0.3px;
     white-space: nowrap;
   }
@@ -117,34 +124,34 @@
   }
 
   .win-btn {
+    font-family: "Fontin", sans-serif;
     width: 36px;
     height: 100%;
     background: transparent;
     border: none;
+    border-radius: 0px;
     outline: none;
     box-shadow: none;
-    color: #cbd5e1;
-    font-size: 13px;
+    color: #d3d3d3;
+    font-size: 12px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition:
-      background-color 0.12s,
-      color 0.12s;
+    padding: 0;
   }
 
   .win-btn:hover {
-    background-color: #222222;
+    background-color: #2a2a2a;
     color: #ffffff;
   }
 
   .win-btn.win-close {
-    font-size: 16px;
+    font-size: 15px;
   }
 
   .win-btn.win-close:hover {
-    background-color: #dc2626;
-    color: #ffffff;
+    background-color: #330000;
+    color: #ff3333;
   }
 </style>

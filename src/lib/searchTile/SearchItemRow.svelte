@@ -1,20 +1,20 @@
-<!-- src/lib/SearchItemRow.svelte -->
+<!-- src/lib/searchTile/SearchItemRow.svelte -->
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import type { PoETradeItemEntry } from "$lib/types/types";
   import type { ResolvedDisplayStyle } from "$lib/types/types";
-  import type { Item } from "$lib/types/tradeItem";
+  import type { Item, TradeFetchResult } from "$lib/types/tradeItem";
   import ItemIcon from "$lib/trade/components/item/ItemIcon.svelte";
   import ItemStats from "$lib/trade/components/drawer/ItemStats.svelte";
   import ItemListing from "$lib/trade/components/item/ItemListing.svelte";
   import ItemJsonModal from "$lib/trade/components/item/ItemJsonModal.svelte";
 
   export let id: string;
-  export let data: PoETradeItemEntry | null = null;
+  export let payload: any = null;
+  export let league: string = "";
+  export let data: TradeFetchResult | null = null;
   export let sortValue: any = null;
   export let isLive: boolean = false;
   export let realm: string = "poe";
-  export let league: string = "";
   export let searchId: string = "";
   export let effectiveStyle: ResolvedDisplayStyle = "full";
   export let tileWidth: number = 600;
@@ -76,7 +76,7 @@
 </script>
 
 {#if !data || !item}
-  <div class="item-row skeleton-row mode-{effectiveStyle}">
+  <div class="item-row skeleton-row mode-{effectiveStyle}" data-item-id={id}>
     {#if effectiveStyle !== "compact"}
       <div class="skel-icon"></div>
     {/if}
@@ -127,6 +127,7 @@
         {isTraveling}
         {isQueued}
         {travelError}
+        {realm}
         {league}
         {searchId}
         styleMode={effectiveStyle}

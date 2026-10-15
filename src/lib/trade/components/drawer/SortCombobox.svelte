@@ -160,47 +160,63 @@
     width: 100%;
     min-width: 0;
   }
+
   input {
-    background: #232838;
-    border: 1px solid #333c52;
-    color: #fff;
-    padding: 0.3rem 4.2rem 0.3rem 0.45rem;
-    border-radius: 4px;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 12px;
+    line-height: 1.15;
+    height: 26px;
+    background: #000000;
+    border: 1px solid #7f7f7f;
+    border-radius: 0px;
+    color: #ffffff;
+    padding: 0 4.2rem 0 6px;
     outline: none;
-    font-size: 0.78rem;
-    height: 30px;
     width: 100%;
     box-sizing: border-box;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  input:hover,
   input:focus {
-    border-color: #3b82f6;
+    border-color: #ffffff;
   }
+
+  /* Direction Toggle Button inside Input */
   .sort-arrow-btn {
+    font-family: "Fontin", monospace, sans-serif;
     position: absolute;
     right: 4px;
     top: 50%;
     transform: translateY(-50%);
     background: transparent;
     border: none;
-    color: #38bdf8;
+    color: #888888;
     cursor: pointer;
-    padding: 2px 4px;
-    border-radius: 3px;
+    padding: 1px 3px;
+    border-radius: 0px;
     line-height: 1;
     display: flex;
     align-items: center;
     gap: 0.2rem;
-    font-size: 0.68rem;
-    font-weight: 700;
+    font-size: 10px;
+    font-weight: normal;
   }
+
+  .sort-arrow-btn:hover {
+    color: #ffffff;
+  }
+
   .sort-dir-text {
-    font-size: 0.65rem;
+    font-size: 10px;
   }
+
   .sort-dir-arrow {
-    font-size: 0.7rem;
+    font-size: 9px;
   }
+
+  /* Dropdown Popover Panel with 1px Solid White Border */
   .sort-dropdown {
     position: absolute;
     top: 100%;
@@ -209,25 +225,39 @@
     max-height: 260px;
     overflow-y: auto;
     overscroll-behavior: contain;
-    background: #1e2230;
-    border: 1px solid #333c52;
-    border-radius: 4px;
+    background: #000000;
+    border: 1px solid #ffffff;
+    border-radius: 0px;
     list-style: none;
-    padding: 0;
+    padding: 2px 0;
     margin: 2px 0 0 0;
     z-index: 1000;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-    scrollbar-width: none;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
+    scrollbar-width: thin;
+    scrollbar-color: #555555 #000000;
   }
+
   .sort-dropdown::-webkit-scrollbar {
-    display: none;
+    width: 6px;
   }
+
+  .sort-dropdown::-webkit-scrollbar-track {
+    background: #000000;
+  }
+
+  .sort-dropdown::-webkit-scrollbar-thumb {
+    background: #555555;
+  }
+
+  /* Option Items */
   .sort-dropdown li {
-    padding: 0.35rem 0.5rem;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 12px;
+    line-height: 1.15;
+    padding: 1px 4px;
     cursor: pointer;
-    font-size: 0.775rem;
-    color: #cbd5e1;
-    border-bottom: 1px solid #282e40;
+    color: #9a9a9a;
+    background: #000000;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -235,22 +265,36 @@
     align-items: center;
     gap: 0.35rem;
   }
+
   .sort-dropdown li:hover,
   .sort-dropdown li.highlighted {
-    background: #293044;
+    background: #262626;
+    color: #ffffff;
   }
+
   .sort-dropdown li.selected {
-    color: #38bdf8;
+    color: #ffffff;
   }
+
+  /* Tag Badge for Stats */
   .sort-tag-badge {
-    font-size: 0.65rem;
-    font-weight: 600;
-    padding: 0.05rem 0.3rem;
-    border-radius: 3px;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 10px;
+    font-weight: normal;
+    padding: 0px 3px;
+    border-radius: 0px;
     flex-shrink: 0;
   }
+
   .sort-tag-stat {
-    color: #eab308;
-    background: rgba(234, 179, 8, 0.12);
+    color: #e6c200;
+    background: #000000;
+    border: 1px solid #e6c200;
+  }
+
+  .dropdown-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 </style>

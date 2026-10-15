@@ -566,26 +566,6 @@ export async function createNewProject(options: {
     offsetY: 0,
   };
 
-  const defaultTile: SavedSearchTile = {
-    x: 120,
-    y: 120,
-    w: 440,
-    h: 680,
-    realm,
-    league,
-    title: "",
-    disabled: false,
-    mode: "regular",
-    full_payload: {
-      league,
-      query: {
-        status: { option: "securable" },
-        stats: [{ type: "and", filters: [] }],
-      },
-      sort: { price: "asc" },
-    },
-  };
-
   const project: SavedProject = {
     id,
     name,
@@ -593,7 +573,7 @@ export async function createNewProject(options: {
     league,
     camera,
     updated_at: Date.now(),
-    items: options.initialItems ?? [defaultTile],
+    items: [],
   };
 
   sessionCameras.set(id, { ...camera });

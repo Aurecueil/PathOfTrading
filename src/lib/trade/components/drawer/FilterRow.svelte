@@ -331,14 +331,16 @@
     justify-content: flex-start;
     gap: 0.25rem;
     position: relative;
-    min-height: 26px;
+    min-height: 24px;
     min-width: 0;
     width: 100%;
     box-sizing: border-box;
   }
+
   .filter-row:focus-within {
     z-index: 45;
   }
+
   .filter-row.full-row {
     grid-column: 1 / -1;
   }
@@ -349,8 +351,9 @@
     display: flex;
     align-items: center;
     gap: 0.2rem;
-    font-size: 0.73rem;
-    color: #94a3b8;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 11px;
+    color: #d3d3d3;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -362,8 +365,9 @@
     min-width: 0;
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.25rem;
   }
+
   .filter-controls > select,
   .filter-controls > input,
   .filter-controls > .combobox-wrapper,
@@ -377,17 +381,19 @@
     flex: 0 0 25%;
     max-width: 28%;
   }
+
   .filter-row.full-row:not(.socket-row) .filter-controls {
     flex: 1 1 auto;
     max-width: 75%;
     display: flex;
-    gap: 0.35rem;
+    gap: 0.25rem;
   }
 
   .filter-row.socket-row .filter-label {
     flex: 0 0 22%;
     max-width: 25%;
   }
+
   .filter-row.socket-row .filter-controls {
     flex: 1 1 auto;
     max-width: 78%;
@@ -400,27 +406,41 @@
     width: 100%;
     min-width: 0;
   }
+
   .min-max-controls input {
     width: 100%;
     min-width: 0;
   }
 
+  /* Retro Controls Input & Select Styling */
   input,
   select {
-    background: #232838;
-    border: 1px solid #333c52;
-    color: #fff;
-    padding: 0.2rem 0.4rem;
-    border-radius: 4px;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 11px;
+    line-height: 1.15;
+    height: 24px;
+    background: #000000;
+    border: 1px solid #777777;
+    border-radius: 0px;
+    color: #ffffff;
+    padding: 1px 4px;
     outline: none;
-    font-size: 0.775rem;
-    height: 26px;
     min-width: 0;
     box-sizing: border-box;
   }
+
+  input:hover,
   input:focus,
+  select:hover,
   select:focus {
-    border-color: #3b82f6;
+    border-color: #ffffff;
+  }
+
+  select option {
+    background-color: #000000;
+    color: #ffffff;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 11px;
   }
 
   input[type="number"]::-webkit-outer-spin-button,
@@ -428,6 +448,7 @@
     -webkit-appearance: none;
     margin: 0;
   }
+
   input[type="number"] {
     -moz-appearance: textfield;
     appearance: textfield;
@@ -438,71 +459,89 @@
     width: 100%;
     min-width: 0;
   }
+
   .combobox-wrapper:focus-within {
     z-index: 50;
   }
+
   .combobox-wrapper input {
     width: 100%;
-    padding-right: 1.5rem;
+    padding-right: 1.25rem;
     min-width: 0;
   }
 
   .clear-opt-btn {
     position: absolute;
-    right: 4px;
+    right: 2px;
     top: 50%;
     transform: translateY(-50%);
     background: transparent;
     border: none;
-    color: #64748b;
+    color: #777777;
     cursor: pointer;
-    font-size: 0.7rem;
+    font-size: 10px;
     padding: 1px 3px;
   }
+
   .clear-opt-btn:hover {
-    color: #cbd5e1;
+    color: #ffffff;
   }
 
+  /* Dropdown Popover Container with 3px White Border & Compact Items */
   .dropdown {
     position: absolute;
     top: 100%;
     left: 0;
     right: 0;
-    max-height: 260px;
+    max-height: 240px;
     overflow-y: auto;
     overscroll-behavior: contain;
-    background: #1e2230;
-    border: 1px solid #333c52;
-    border-radius: 4px;
+    background: #000000;
+    border: 1px solid #ffffff;
+    border-radius: 0px;
     list-style: none;
-    padding: 0;
+    padding: 2px 0;
     margin: 2px 0 0 0;
     z-index: 1000;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-    /* Hide scrollbars across browsers */
-    scrollbar-width: none;
-    -ms-overflow-style: none;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
+    scrollbar-width: thin;
+    scrollbar-color: #555555 #000000;
   }
+
   .dropdown::-webkit-scrollbar {
-    display: none;
+    width: 6px;
+  }
+
+  .dropdown::-webkit-scrollbar-track {
+    background: #000000;
+  }
+
+  .dropdown::-webkit-scrollbar-thumb {
+    background: #555555;
   }
 
   .dropdown li {
-    padding: 0.35rem 0.5rem;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 11px;
+    line-height: 1.15;
+    padding: 1px 4px;
     cursor: pointer;
-    font-size: 0.775rem;
-    color: #cbd5e1;
-    border-bottom: 1px solid #282e40;
+    color: #9a9a9a;
+    background: #000000;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
   .dropdown li:hover,
   .dropdown li.highlighted {
-    background: #293044;
+    background: #545454;
+    color: #ffffff;
   }
+
   .dropdown li.selected {
-    color: #38bdf8;
+    color: #ffffff;
+    background: #000000;
   }
 
   .tooltip-icon {
@@ -511,14 +550,16 @@
     align-items: center;
     width: 12px;
     height: 12px;
-    border-radius: 50%;
-    background: #333c52;
-    color: #94a3b8;
-    font-size: 0.62rem;
+    border-radius: 0px;
+    background: #111111;
+    border: 1px solid #777777;
+    color: #888888;
+    font-size: 9px;
     cursor: help;
     flex-shrink: 0;
   }
 
+  /* Sockets Control Panel */
   .sockets-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -526,42 +567,49 @@
     width: 100%;
     min-width: 0;
   }
+
   .socket-input {
     display: flex;
     align-items: center;
-    border: 1px solid #333c52;
-    border-radius: 4px;
-    background: #232838;
-    height: 26px;
+    border: 1px solid #777777;
+    border-radius: 0px;
+    background: #000000;
+    height: 24px;
     min-width: 0;
   }
+
   .socket-input span {
-    padding: 0 0.2rem;
+    padding: 0 0.25rem;
     font-weight: bold;
-    font-size: 0.65rem;
+    font-size: 10px;
     flex-shrink: 0;
   }
+
   .sock-r span {
-    color: #ef4444;
+    color: #ff5555;
   }
+
   .sock-g span {
-    color: #22c55e;
+    color: #55ff55;
   }
+
   .sock-b span {
-    color: #3b82f6;
+    color: #66b2ff;
   }
+
   .sock-w span {
-    color: #f8fafc;
+    color: #ffffff;
   }
+
   .socket-input input {
     width: 100%;
     min-width: 0;
     border: none;
-    border-left: 1px solid #333c52;
+    border-left: 1px solid #777777;
     background: transparent;
-    padding: 0.15rem;
+    padding: 0.1rem;
     text-align: center;
     height: 100%;
-    border-radius: 0;
+    border-radius: 0px;
   }
 </style>

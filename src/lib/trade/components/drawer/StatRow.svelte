@@ -25,15 +25,15 @@
 
   function getTagColor(label: string): string {
     const l = (label || "").toLowerCase();
-    if (l.includes("pseudo")) return "#38bdf8"; // Light Blue
-    if (l.includes("explicit")) return "#a855f7"; // Purple
-    if (l.includes("implicit")) return "#eab308"; // Gold
-    if (l.includes("fractured")) return "#ca8a04"; // Amber
-    if (l.includes("enchant")) return "#06b6d4"; // Cyan
-    if (l.includes("scourge")) return "#f97316"; // Orange
-    if (l.includes("crucible")) return "#ef4444"; // Red
-    if (l.includes("mercenary")) return "#10b981"; // Emerald
-    return "#94a3b8"; // Slate gray default
+    if (l.includes("pseudo")) return "#66b2ff";
+    if (l.includes("explicit")) return "#e066ff";
+    if (l.includes("implicit")) return "#e6c200";
+    if (l.includes("fractured")) return "#e6c200";
+    if (l.includes("enchant")) return "#66b2ff";
+    if (l.includes("scourge")) return "#ff5555";
+    if (l.includes("crucible")) return "#ff5555";
+    if (l.includes("mercenary")) return "#55ff55";
+    return "#888888";
   }
 
   $: tagColor = getTagColor(groupLabel || stat.type);
@@ -41,10 +41,7 @@
 
 <div class="stat-row">
   <div class="stat-info">
-    <span
-      class="stat-tag"
-      style="border-color: {tagColor}44; color: {tagColor};"
-    >
+    <span class="stat-tag" style="border-color: {tagColor}; color: {tagColor};">
       {groupLabel || stat.type}
     </span>
     <span class="stat-text" title={stat.text}>
@@ -112,12 +109,12 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.4rem;
-    padding: 0.35rem 0.5rem;
-    background: #141722;
-    border: 1px solid #252b3b;
-    border-radius: 4px;
-    min-height: 28px;
+    gap: 0.35rem;
+    padding: 2px 4px;
+    background: #000000;
+    border: 1px solid #555555;
+    border-radius: 0px;
+    min-height: 24px;
     box-sizing: border-box;
   }
 
@@ -131,20 +128,22 @@
   }
 
   .stat-tag {
-    font-size: 0.65rem;
-    font-weight: 600;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 10px;
+    font-weight: normal;
     text-transform: capitalize;
-    padding: 0.1rem 0.35rem;
+    padding: 0px 3px;
     border: 1px solid;
-    border-radius: 3px;
-    background: rgba(0, 0, 0, 0.25);
+    border-radius: 0px;
+    background: #000000;
     white-space: nowrap;
     flex-shrink: 0;
   }
 
   .stat-text {
-    font-size: 0.74rem;
-    color: #cbd5e1;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 11px;
+    color: #d3d3d3;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -153,55 +152,78 @@
   .stat-controls {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.25rem;
     flex: 0 0 auto;
   }
 
   .weight-input {
-    width: 58px;
-    background: #232838;
-    border: 1px solid #333c52;
-    color: #fff;
-    padding: 0.15rem 0.3rem;
-    border-radius: 4px;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 11px;
+    width: 52px;
+    height: 22px;
+    background: #000000;
+    border: 1px solid #7f7f7f;
+    border-radius: 0px;
+    color: #ffffff;
+    padding: 0 4px;
     outline: none;
-    font-size: 0.72rem;
-    height: 24px;
     text-align: center;
     box-sizing: border-box;
   }
+
+  .weight-input:hover,
   .weight-input:focus {
-    border-color: #3b82f6;
+    border-color: #ffffff;
   }
 
   select {
-    background: #232838;
-    border: 1px solid #333c52;
-    color: #fff;
-    padding: 0.2rem 0.4rem;
-    border-radius: 4px;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 11px;
+    line-height: 1.15;
+    height: 22px;
+    background: #000000;
+    border: 1px solid #7f7f7f;
+    border-radius: 0px;
+    color: #ffffff;
+    padding: 0 4px;
     outline: none;
-    font-size: 0.72rem;
-    height: 24px;
     max-width: 140px;
+    cursor: pointer;
+  }
+
+  select:hover,
+  select:focus {
+    border-color: #ffffff;
+  }
+
+  select option {
+    background-color: #000000;
+    color: #ffffff;
   }
 
   .min-max-controls {
     display: flex;
     gap: 0.2rem;
   }
+
   .min-max-controls input {
-    width: 50px;
-    background: #232838;
-    border: 1px solid #333c52;
-    color: #fff;
-    padding: 0.15rem 0.3rem;
-    border-radius: 4px;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 11px;
+    width: 48px;
+    height: 22px;
+    background: #000000;
+    border: 1px solid #7f7f7f;
+    border-radius: 0px;
+    color: #ffffff;
+    padding: 0 4px;
     outline: none;
-    font-size: 0.72rem;
-    height: 24px;
     text-align: center;
     box-sizing: border-box;
+  }
+
+  .min-max-controls input:hover,
+  .min-max-controls input:focus {
+    border-color: #ffffff;
   }
 
   input[type="number"]::-webkit-outer-spin-button,
@@ -209,22 +231,31 @@
     -webkit-appearance: none;
     margin: 0;
   }
+
   input[type="number"] {
     -moz-appearance: textfield;
     appearance: textfield;
   }
 
+  /* Borderless ✕ remove button */
   .remove-btn {
+    font-family: "Fontin", monospace, sans-serif;
     background: transparent;
     border: none;
-    color: #64748b;
+    border-radius: 0px;
+    color: #888888;
     cursor: pointer;
-    font-size: 0.7rem;
-    padding: 2px 4px;
-    border-radius: 3px;
+    font-size: 11px;
+    height: 22px;
+    padding: 0 4px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
+
   .remove-btn:hover {
-    color: #ef4444;
-    background: rgba(239, 68, 68, 0.15);
+    color: #ff5555;
+    background: transparent;
   }
 </style>

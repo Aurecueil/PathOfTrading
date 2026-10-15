@@ -12,7 +12,6 @@
     exportProjectToDisk,
     openExternalUrl,
     encodeSharePayloadToCode,
-    decodeSharePayloadFromCode,
     workspaceState,
   } from "$lib/project/projects.svelte";
   import { leaguesPoe, leaguesPoe2 } from "$lib/trade/tradeStore";
@@ -20,19 +19,12 @@
 
   let loading = $state(true);
   let searchQuery = $state("");
-  let newProjectName = $state("");
   let newProjectRealm = $state<"poe" | "poe2">("poe");
   let newProjectLeague = $state("");
 
-  let shareCodeInput = $state("");
-  let importCodeProjectName = $state("");
-  let importError = $state("");
-  let showCodePanel = $state(false);
   let editingId = $state<string | null>(null);
   let editingName = $state("");
-  let statusMsg = $state<string | null>(null);
-
-  let fileInputEl: HTMLInputElement | null = null;
+  let confirmingDeleteEntry = $state<ProjectIndexEntry | null>(null);
 
   // Filter PoE 1 leagues to only ones with realm/realms === "pc"
   const poe1PcLeagues = $derived(
@@ -71,105 +63,17 @@
     loading = false;
   });
 
-  function notify(msg: string) {
-    statusMsg = msg;
-    setTimeout(() => {
-      if (statusMsg === msg) statusMsg = null;
-    }, 3500);
-  }
-
-  async function handleCreateProject(e: Event) {
-    e.preventDefault();
+  async function handleCreateProject() {
     const created = await createNewProject({
-      name: newProjectName.trim(),
+      name: "",
       realm: newProjectRealm,
       league: newProjectLeague || "Standard",
     });
-    newProjectName = "";
     openProject({
       id: created.id,
       name: created.name,
       realm: created.realm,
     });
-  }
-
-  async function handleImportFromCode(e: Event) {
-    e.preventDefault();
-    importError = "";
-    try {
-      const decoded = await decodeSharePayloadFromCode(shareCodeInput);
-      const created = await createNewProject({
-        name: importCodeProjectName.trim(),
-        realm: decoded.realm || newProjectRealm,
-        league: decoded.league || newProjectLeague || "Standard",
-        camera: decoded.camera,
-        initialItems: decoded.items,
-      });
-      shareCodeInput = "";
-      importCodeProjectName = "";
-      showCodePanel = false;
-      openProject({
-        id: created.id,
-        name: created.name,
-        realm: created.realm,
-      });
-    } catch (err: any) {
-      importError = err?.message || String(err);
-    }
-  }
-
-  async function handleFileSelected(e: Event) {
-    const input = e.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
-
-    importError = "";
-    try {
-      const text = await file.text();
-      let items: any[] = [];
-      let importedName = file.name.replace(/\.(pot|json|txt)$/i, "");
-      let importedRealm = newProjectRealm;
-      let importedLeague = newProjectLeague || "Standard";
-      let importedCamera = undefined;
-
-      try {
-        const parsed = JSON.parse(text);
-        if (Array.isArray(parsed)) {
-          items = parsed;
-        } else if (parsed && Array.isArray(parsed.items)) {
-          items = parsed.items;
-          if (typeof parsed.name === "string") importedName = parsed.name;
-          if (parsed.realm) importedRealm = parsed.realm;
-          if (parsed.league) importedLeague = parsed.league;
-          if (parsed.camera) importedCamera = parsed.camera;
-        } else {
-          throw new Error("Unrecognized project file format.");
-        }
-      } catch {
-        const decoded = await decodeSharePayloadFromCode(text);
-        items = decoded.items;
-        if (decoded.realm) importedRealm = decoded.realm as "poe" | "poe2";
-        if (decoded.league) importedLeague = decoded.league;
-        if (decoded.camera) importedCamera = decoded.camera;
-      }
-
-      const created = await createNewProject({
-        name: importedName,
-        realm: importedRealm,
-        league: importedLeague,
-        camera: importedCamera,
-        initialItems: items,
-      });
-      openProject({
-        id: created.id,
-        name: created.name,
-        realm: created.realm,
-      });
-    } catch (err: any) {
-      importError = `File import failed: ${err?.message || String(err)}`;
-    } finally {
-      input.value = "";
-    }
   }
 
   async function handleCopyShareCode(entry: ProjectIndexEntry, e: MouseEvent) {
@@ -183,23 +87,17 @@
         items: proj.items,
       });
       await navigator.clipboard.writeText(code);
-      notify(`Copied share code for "${entry.name}"`);
     } catch (err) {
-      console.error(err);
-      notify("Failed to copy share code");
+      console.error("Failed to copy share code", err);
     }
   }
 
   async function handleExportPotFile(entry: ProjectIndexEntry, e: MouseEvent) {
     e.stopPropagation();
     try {
-      const savedPath = await exportProjectToDisk(entry.id);
-      if (savedPath) {
-        notify(`Exported to ${savedPath}`);
-      }
+      await exportProjectToDisk(entry.id);
     } catch (err: any) {
-      console.error(err);
-      notify(`Failed to export file: ${err?.message || err}`);
+      console.error("Failed to export file:", err);
     }
   }
 
@@ -219,101 +117,40 @@
       const proj: SavedProject = await loadProjectFromBackend(entry.id);
       proj.name = trimmed;
       await saveProjectToBackend(proj);
-      notify(`Renamed to "${trimmed}"`);
     } catch (err) {
-      console.error(err);
+      console.error("Failed to rename project:", err);
     }
   }
 
-  async function handleDelete(entry: ProjectIndexEntry, e: MouseEvent) {
+  async function handleDeleteClick(entry: ProjectIndexEntry, e: MouseEvent) {
     e.stopPropagation();
-    if (!confirm(`Delete project "${entry.name}" permanently?`)) return;
-    await deleteProjectFromBackend(entry.id);
-    notify(`Deleted "${entry.name}"`);
+    // Ctrl+Click or Cmd+Click deletes immediately without prompt
+    if (e.ctrlKey || e.metaKey) {
+      await deleteProjectFromBackend(entry.id);
+      return;
+    }
+    // Otherwise open custom styled confirmation prompt
+    confirmingDeleteEntry = entry;
   }
 
-  function formatTimestamp(ms: number): string {
-    if (!ms) return "Unknown";
-    return new Date(ms).toLocaleString();
+  async function confirmDelete() {
+    if (!confirmingDeleteEntry) return;
+    const targetId = confirmingDeleteEntry.id;
+    confirmingDeleteEntry = null;
+    await deleteProjectFromBackend(targetId);
   }
 </script>
 
 <div class="hub-wrapper">
   <div class="hub-container">
-    <header class="hub-header">
-      <div>
-        <h1>Path of Trading Projects</h1>
-        <p class="subtitle">
-          Select a recent workspace, create a new project with default realm &
-          league, or import from file / code.
-        </p>
+    <!-- Header with Icon + Title (Left) and Realm / League / New Project (Right) -->
+    <header class="pob-groupbox hub-header">
+      <div class="header-left">
+        <img src="/favicon.png" alt="Icon" class="header-icon" />
+        <h1>Path of Trading</h1>
       </div>
 
-      <div class="header-buttons">
-        <input
-          type="file"
-          accept=".pot,.json,.txt"
-          bind:this={fileInputEl}
-          onchange={handleFileSelected}
-          style="display: none;"
-        />
-        <button
-          type="button"
-          class="btn-outline"
-          onclick={() => fileInputEl?.click()}
-        >
-          Import File (.pot)
-        </button>
-        <button
-          type="button"
-          class="btn-outline"
-          onclick={() => (showCodePanel = !showCodePanel)}
-        >
-          {showCodePanel ? "Hide Code Import" : "Import from Code"}
-        </button>
-      </div>
-    </header>
-
-    {#if statusMsg}
-      <div class="status-banner">{statusMsg}</div>
-    {/if}
-
-    {#if importError}
-      <div class="error-banner">{importError}</div>
-    {/if}
-
-    {#if showCodePanel}
-      <form class="code-import-panel" onsubmit={handleImportFromCode}>
-        <div class="code-panel-row">
-          <input
-            type="text"
-            class="text-input"
-            bind:value={importCodeProjectName}
-            placeholder="Project Name (optional)"
-          />
-          <button type="submit" class="btn-primary">
-            Create Project from Code
-          </button>
-        </div>
-        <textarea
-          class="code-textarea"
-          rows="3"
-          bind:value={shareCodeInput}
-          placeholder="Paste compressed Base64 project code here..."
-          required
-        ></textarea>
-      </form>
-    {/if}
-
-    <section class="create-bar">
-      <form class="create-form" onsubmit={handleCreateProject}>
-        <input
-          type="text"
-          class="text-input create-input"
-          bind:value={newProjectName}
-          placeholder="New project name (optional)"
-        />
-
+      <div class="header-right">
         <select
           class="select-input"
           bind:value={newProjectRealm}
@@ -337,25 +174,32 @@
           {/if}
         </select>
 
-        <button type="submit" class="btn-primary">+ New Project</button>
-      </form>
+        <button
+          type="button"
+          class="pob-button btn-primary"
+          onclick={handleCreateProject}
+        >
+          + New Project
+        </button>
+      </div>
+    </header>
 
-      <input
-        type="search"
-        class="text-input filter-input"
-        bind:value={searchQuery}
-        placeholder="Filter projects..."
-      />
-    </section>
+    <!-- Standalone Filter Box -->
+    <input
+      type="search"
+      class="text-input standalone-filter"
+      bind:value={searchQuery}
+      placeholder="Filter projects..."
+    />
 
-    <section class="project-list-section">
+    <!-- Flexible Static/Scrollable Projects Box -->
+    <section class="pob-groupbox all-projects-box">
       {#if loading}
         <div class="empty-state">Loading projects from disk...</div>
       {:else if filteredProjects.length === 0}
         <div class="empty-state">
           {#if projectIndex.length === 0}
-            No saved projects yet. Create a project above or import one from a
-            .pot file or share code.
+            No saved projects yet. Create a project above.
           {:else}
             No projects match "{searchQuery}".
           {/if}
@@ -367,7 +211,7 @@
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div
               class="project-card"
-              onclick={() =>
+              ondblclick={() =>
                 openProject({
                   id: entry.id,
                   name: entry.name,
@@ -394,6 +238,7 @@
                       bind:value={editingName}
                       autofocus
                       onclick={(e) => e.stopPropagation()}
+                      ondblclick={(e) => e.stopPropagation()}
                       onblur={() => commitRename(entry)}
                       onkeydown={(e) => {
                         if (e.key === "Enter") commitRename(entry);
@@ -404,20 +249,16 @@
                     <span class="project-name">{entry.name}</span>
                   {/if}
                 </div>
-
-                <div class="project-meta">
-                  <span>{entry.tile_count} Search Tile(s)</span>
-                  <span>•</span>
-                  <span>{entry.annotation_count} Annotation(s)</span>
-                  <span>•</span>
-                  <span>Updated {formatTimestamp(entry.updated_at)}</span>
-                </div>
               </div>
 
-              <div class="card-actions" onclick={(e) => e.stopPropagation()}>
+              <div
+                class="card-actions"
+                onclick={(e) => e.stopPropagation()}
+                ondblclick={(e) => e.stopPropagation()}
+              >
                 <button
                   type="button"
-                  class="card-btn"
+                  class="pob-button card-btn"
                   title="Rename project"
                   onclick={(e) => startRename(entry, e)}
                 >
@@ -425,7 +266,7 @@
                 </button>
                 <button
                   type="button"
-                  class="card-btn"
+                  class="pob-button card-btn"
                   title="Copy Zlib+Base64 share code"
                   onclick={(e) => handleCopyShareCode(entry, e)}
                 >
@@ -433,7 +274,7 @@
                 </button>
                 <button
                   type="button"
-                  class="card-btn"
+                  class="pob-button card-btn"
                   title="Export .pot file"
                   onclick={(e) => handleExportPotFile(entry, e)}
                 >
@@ -441,9 +282,9 @@
                 </button>
                 <button
                   type="button"
-                  class="card-btn danger"
-                  title="Delete project"
-                  onclick={(e) => handleDelete(entry, e)}
+                  class="pob-button card-btn danger"
+                  title="Delete project (Ctrl+Click to bypass confirmation)"
+                  onclick={(e) => handleDeleteClick(entry, e)}
                 >
                   Delete
                 </button>
@@ -454,12 +295,11 @@
       {/if}
     </section>
 
-    <!-- Promotional Banner underneath the Project List -->
+    <!-- Promotional Banner Anchored to Bottom -->
     <section class="promo-banner-section">
       <button
         type="button"
         class="promo-banner-btn"
-        title="Open pathofexile.com/purchase in your browser"
         onclick={() => openExternalUrl("https://www.pathofexile.com/purchase")}
       >
         <img
@@ -472,207 +312,299 @@
   </div>
 </div>
 
+<!-- Custom Styled Deletion Confirmation Modal -->
+{#if confirmingDeleteEntry}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="modal-backdrop" onclick={() => (confirmingDeleteEntry = null)}>
+    <div class="pob-groupbox modal-box" onclick={(e) => e.stopPropagation()}>
+      <div class="modal-header">Confirm Deletion</div>
+      <p class="modal-text">
+        Are you sure you want to delete project <strong class="highlight-name"
+          >"{confirmingDeleteEntry.name}"</strong
+        > permanently?
+      </p>
+      <div class="modal-actions">
+        <button
+          type="button"
+          class="pob-button card-btn danger"
+          onclick={confirmDelete}
+        >
+          Delete
+        </button>
+        <button
+          type="button"
+          class="pob-button card-btn"
+          onclick={() => (confirmingDeleteEntry = null)}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
+  :global(*) {
+    font-family: "Fontin", sans-serif !important;
+    box-sizing: border-box;
+    scrollbar-width: thin;
+    scrollbar-color: #555555 #000000;
+  }
+
+  /* Custom WebKit / Chromium Scrollbar Theme */
+  :global(*::-webkit-scrollbar) {
+    width: 12px;
+    height: 12px;
+  }
+
+  :global(*::-webkit-scrollbar-track) {
+    background: #000000;
+    border-radius: 0px !important;
+  }
+
+  :global(*::-webkit-scrollbar-thumb) {
+    background: #555555;
+    border-radius: 0px !important;
+  }
+
+  :global(*::-webkit-scrollbar-thumb:hover) {
+    background: #777777;
+  }
+
+  :global(*::-webkit-scrollbar-corner) {
+    background: #000000;
+    border-radius: 0px !important;
+  }
+
+  /* --------------------------------------------------------------------------
+     Child Popover / Dropdown Menu Overrides (Only expanded popover panels get WHITE BORDER)
+     -------------------------------------------------------------------------- */
+  :global(.combobox-dropdown),
+  :global(.autocomplete-dropdown),
+  :global(.dropdown-menu),
+  :global(.popover-menu),
+  :global(.select-dropdown) {
+    background: #000000 !important;
+    border: 3px solid #ffffff !important;
+    border-radius: 0px !important;
+    padding: 2px 0 !important;
+    z-index: 1000 !important;
+    box-sizing: border-box !important;
+  }
+
+  :global(.combobox-option),
+  :global(.autocomplete-option),
+  :global(.dropdown-item),
+  :global(.option-row) {
+    font-family: "Fontin", monospace, sans-serif !important;
+    font-size: 12px !important;
+    color: #9a9a9a !important;
+    background: #000000 !important;
+    padding: 1px 4px !important;
+    line-height: 1.15 !important;
+    cursor: pointer !important;
+    border-radius: 0px !important;
+  }
+
+  :global(.combobox-option.selected),
+  :global(.combobox-option[aria-selected="true"]),
+  :global(.autocomplete-option.selected),
+  :global(.dropdown-item.selected) {
+    background: #000000 !important;
+    color: #ffffff !important;
+  }
+
+  :global(.combobox-option:hover),
+  :global(.combobox-option:focus),
+  :global(.autocomplete-option:hover),
+  :global(.autocomplete-option:focus),
+  :global(.dropdown-item:hover),
+  :global(.dropdown-item:focus),
+  :global(.option-row:hover) {
+    background: #545454 !important;
+    color: #ffffff !important;
+  }
+
   .hub-wrapper {
     position: absolute;
     inset: 0;
-    overflow-y: auto;
-    background: radial-gradient(circle at top, #171c2b 0%, #0d1017 100%);
-    padding: 2.2rem 1.5rem;
-    color: #e2e8f0;
+    overflow: hidden;
+    background-color: #040608;
+    padding: 1rem;
+    color: #d3d3d3;
+    font-family: "Fontin", sans-serif;
+    font-size: 13px;
+    line-height: 1.2;
   }
 
   .hub-container {
     max-width: 940px;
+    height: 100%;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: 8px;
   }
 
+  /* Fieldset / Groupbox Layout */
+  .pob-groupbox {
+    border: 1px solid #777777;
+    border-radius: 0px;
+    padding: 6px 8px;
+    background-color: #050505;
+    margin: 0;
+  }
+
+  /* Header */
   .hub-header {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
-    gap: 1rem;
+    align-items: center;
+    gap: 8px;
     flex-wrap: wrap;
-    border-bottom: 1px solid #262f45;
-    padding-bottom: 1rem;
+    flex-shrink: 0;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .header-icon {
+    width: 28px;
+    height: 28px;
+    object-fit: contain;
   }
 
   h1 {
     margin: 0;
-    font-size: 1.45rem;
-    color: #f8fafc;
+    font-size: 21px;
+    font-weight: bold;
+    color: #e0e0e0;
+    line-height: 1;
   }
 
-  .subtitle {
-    margin: 0.3rem 0 0;
-    font-size: 0.85rem;
-    color: #94a3b8;
-  }
-
-  .header-buttons {
+  .header-right {
     display: flex;
-    gap: 0.5rem;
-  }
-
-  .status-banner {
-    background: rgba(37, 99, 235, 0.18);
-    border: 1px solid #3b82f6;
-    color: #bfdbfe;
-    padding: 0.55rem 0.85rem;
-    border-radius: 6px;
-    font-size: 0.82rem;
-  }
-
-  .error-banner {
-    background: rgba(127, 29, 29, 0.3);
-    border: 1px solid #ef4444;
-    color: #fecaca;
-    padding: 0.55rem 0.85rem;
-    border-radius: 6px;
-    font-size: 0.82rem;
-  }
-
-  .code-import-panel {
-    background: #131824;
-    border: 1px solid #2e3a59;
-    border-radius: 8px;
-    padding: 0.9rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.65rem;
-  }
-
-  .code-panel-row {
-    display: flex;
-    gap: 0.6rem;
-  }
-
-  .code-textarea {
-    background: #0b0e16;
-    border: 1px solid #28324e;
-    border-radius: 6px;
-    color: #e2e8f0;
-    padding: 0.6rem;
-    font-family: ui-monospace, monospace;
-    font-size: 0.78rem;
-    resize: vertical;
-  }
-
-  .create-bar {
-    display: flex;
-    justify-content: space-between;
-    gap: 0.75rem;
+    align-items: center;
+    gap: 6px;
     flex-wrap: wrap;
   }
 
-  .create-form {
-    display: flex;
-    gap: 0.5rem;
-    flex: 1;
-    min-width: 320px;
-    flex-wrap: wrap;
+  /* Standalone Filter */
+  .standalone-filter {
+    width: 100%;
+    flex-shrink: 0;
   }
 
+  /* Inputs & Controls */
   .text-input,
   .select-input {
-    background: #111520;
-    border: 1px solid #2b344b;
-    color: #f8fafc;
-    padding: 0.5rem 0.75rem;
-    border-radius: 6px;
-    font-size: 0.85rem;
+    font-family: "Fontin", sans-serif;
+    background: #000000;
+    border: 1px solid #777777;
+    border-radius: 0px;
+    color: #ffffff;
+    padding: 3px 6px;
+    font-size: 12px;
     outline: none;
   }
 
   .text-input:focus,
   .select-input:focus {
-    border-color: #3a57e8;
+    border-color: #aaaaaa;
+  }
+
+  .select-input option {
+    background-color: #000000 !important;
+    color: #ffffff !important;
   }
 
   .league-select {
-    min-width: 140px;
+    min-width: 130px;
   }
 
-  .create-input {
-    flex: 1;
-    min-width: 180px;
-  }
-
-  .filter-input {
-    width: 200px;
-  }
-
-  .btn-primary {
-    background: #2563eb;
-    border: 1px solid #3b82f6;
-    color: #ffffff;
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    font-size: 0.84rem;
-    font-weight: 600;
+  /* Buttons */
+  .pob-button {
+    font-family: "Fontin", sans-serif;
+    background: #111111;
+    border: 1px solid #777777;
+    border-radius: 0px;
+    color: #d3d3d3;
+    padding: 3px 10px;
+    font-size: 12px;
     cursor: pointer;
     white-space: nowrap;
+    text-align: center;
+    font-weight: normal;
+  }
+
+  .pob-button:hover {
+    background: #2a2a2a;
+    border-color: #aaaaaa;
+    color: #ffffff;
+  }
+
+  /* Primary "+ New Project" Button: Black background (#000000), normal font weight, gray border (#777777) */
+  .btn-primary {
+    background: #000000;
+    border: 1px solid #777777;
+    color: #ffffff;
+    font-weight: normal;
   }
 
   .btn-primary:hover {
-    background: #1d4ed8;
+    background: #2a2a2a;
+    border-color: #aaaaaa;
+    color: #ffffff;
   }
 
-  .btn-outline {
-    background: #161b29;
-    border: 1px solid #334155;
-    color: #cbd5e1;
-    padding: 0.48rem 0.85rem;
-    border-radius: 6px;
-    font-size: 0.8rem;
-    cursor: pointer;
-  }
-
-  .btn-outline:hover {
-    border-color: #64748b;
-    background: #1e2538;
+  /* Projects Container Box */
+  .all-projects-box {
+    background-color: #000000;
+    flex: 1;
+    min-height: 100px;
+    overflow-y: auto;
+    padding: 0px;
   }
 
   .project-grid {
     display: flex;
     flex-direction: column;
-    gap: 0.6rem;
+    gap: 0px;
   }
 
+  /* Project Tile */
   .project-card {
-    background: #131722;
-    border: 1px solid #262f45;
-    border-radius: 8px;
-    padding: 0.85rem 1rem;
+    background: #050505;
+    border: 1px solid #777777;
+    border-radius: 0px;
+    padding: 4px 8px;
+    margin: 0px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
+    gap: 8px;
     cursor: pointer;
-    transition:
-      border-color 0.14s ease,
-      background-color 0.14s ease;
   }
 
   .project-card:hover {
-    border-color: #3a57e8;
-    background: #171d2c;
+    background: #111111;
+    border-color: #aaaaaa;
   }
 
   .card-main {
     display: flex;
-    flex-direction: column;
-    gap: 0.32rem;
+    align-items: center;
     min-width: 0;
   }
 
   .title-row {
     display: flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: 6px;
   }
 
   .project-realm-icon {
@@ -683,77 +615,63 @@
   }
 
   .league-tag {
-    font-size: 0.65rem;
-    background: #1e293b;
-    color: #93c5fd;
-    border: 1px solid #334155;
-    padding: 1px 6px;
-    border-radius: 3px;
+    font-size: 11px;
+    background: #000000;
+    color: #ffffff;
+    border: 1px solid #777777;
+    padding: 1px 5px;
+    border-radius: 0px;
   }
 
   .project-name {
-    font-size: 0.96rem;
-    font-weight: 600;
-    color: #f1f5f9;
+    font-size: 13px;
+    color: #e0e0e0;
   }
 
   .rename-input {
-    background: #0b0e16;
-    border: 1px solid #3a57e8;
+    background: #000000;
+    border: 1px solid #aaaaaa;
     color: #ffffff;
-    font-size: 0.92rem;
-    padding: 2px 6px;
-    border-radius: 4px;
-  }
-
-  .project-meta {
-    display: flex;
-    gap: 0.45rem;
-    font-size: 0.75rem;
-    color: #94a3b8;
-    flex-wrap: wrap;
+    font-size: 12px;
+    padding: 1px 4px;
+    border-radius: 0px;
   }
 
   .card-actions {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 3px;
     flex-shrink: 0;
   }
 
   .card-btn {
-    background: #1e2536;
-    border: 1px solid #334155;
-    color: #cbd5e1;
-    font-size: 0.74rem;
-    padding: 0.28rem 0.55rem;
-    border-radius: 4px;
-    cursor: pointer;
+    background: #000000;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-weight: normal;
   }
 
-  .card-btn:hover {
-    background: #2b354d;
-    color: #ffffff;
+  .card-btn.danger {
+    color: #ff6666;
   }
 
   .card-btn.danger:hover {
-    background: #7f1d1d;
-    border-color: #dc2626;
-    color: #fecaca;
+    background: #330000;
+    border-color: #ff3333;
+    color: #ff3333;
   }
 
   .empty-state {
     text-align: center;
-    padding: 3rem 1rem;
-    background: rgba(19, 23, 34, 0.6);
-    border: 1px dashed #2e3852;
-    border-radius: 8px;
-    color: #94a3b8;
-    font-size: 0.88rem;
+    padding: 2rem 1rem;
+    background: #000000;
+    color: #888888;
+    font-size: 12px;
   }
 
+  /* Anchored to Page Bottom */
   .promo-banner-section {
-    margin-top: 0.5rem;
+    flex-shrink: 0;
     display: flex;
     justify-content: center;
   }
@@ -761,18 +679,15 @@
   .promo-banner-btn {
     padding: 0;
     background: transparent;
-    border: 1px solid #262f45;
-    border-radius: 8px;
+    border: 1px solid #777777;
+    border-radius: 0px;
     overflow: hidden;
     cursor: pointer;
     width: 100%;
-    transition:
-      border-color 0.15s ease,
-      transform 0.15s ease;
   }
 
   .promo-banner-btn:hover {
-    border-color: #3a57e8;
+    border-color: #aaaaaa;
   }
 
   .promo-banner-img {
@@ -780,5 +695,54 @@
     width: 100%;
     height: auto;
     object-fit: cover;
+  }
+
+  /* Custom Confirmation Modal Styling */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .modal-box {
+    width: 380px;
+    max-width: 90vw;
+    background: #050505;
+    border: 1px solid #777777;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.9);
+  }
+
+  .modal-header {
+    font-size: 14px;
+    font-weight: bold;
+    color: #ff5555;
+    border-bottom: 1px solid #333333;
+    padding-bottom: 4px;
+  }
+
+  .modal-text {
+    margin: 0;
+    font-size: 12px;
+    color: #d3d3d3;
+    line-height: 1.4;
+  }
+
+  .highlight-name {
+    color: #ffffff;
+  }
+
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 4px;
   }
 </style>

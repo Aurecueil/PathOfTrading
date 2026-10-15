@@ -1,6 +1,6 @@
-<!-- src/lib/FilterDrawer.svelte -->
+<!-- src/lib/FilterForm.svelte -->
 <script lang="ts">
-  import { createEventDispatcher, onDestroy } from "svelte";
+  import { createEventDispatcher, onDestroy, tick } from "svelte";
   import FilterGroup from "$lib/trade/components/drawer/FilterGroup.svelte";
   import DrawerHeader from "$lib/trade/components/drawer/DrawerHeader.svelte";
   import ItemSearchCombobox from "$lib/trade/components/drawer/ItemSearchCombobox.svelte";
@@ -40,7 +40,7 @@
   let title: string = initialTitle;
   let realm: "poe" | "poe2" = initialRealm;
   let previousRealm: "poe" | "poe2" = realm;
-  let league: string = initialLeague;
+  let league: string = initialLeague || initialPayload?.league || "";
 
   // Sorting state
   let sortKey: string = "filter:price";
@@ -74,6 +74,7 @@
 
   let hasHydrated: boolean = false;
   let itemHydrated: boolean = false;
+  let isReadyForAutoSave: boolean = false;
 
   let itemComboboxRef: ItemSearchCombobox;
 
@@ -193,17 +194,29 @@
   }
 
   $: {
+    let fvChanged = false;
+    let gcChanged = false;
     for (const group of currentFilterGroups) {
       if (group.id === "status_filters") continue;
-      if (!filterValues[group.id]) filterValues[group.id] = {};
-      if (groupCollapsed[group.id] === undefined)
+      if (!filterValues[group.id]) {
+        filterValues[group.id] = {};
+        fvChanged = true;
+      }
+      if (groupCollapsed[group.id] === undefined) {
         groupCollapsed[group.id] = Boolean(group.hidden);
+        gcChanged = true;
+      }
       if (Array.isArray(group.filters)) {
         for (const f of group.filters) {
-          if (!filterValues[group.id][f.id]) filterValues[group.id][f.id] = {};
+          if (!filterValues[group.id][f.id]) {
+            filterValues[group.id][f.id] = {};
+            fvChanged = true;
+          }
         }
       }
     }
+    if (fvChanged) filterValues = { ...filterValues };
+    if (gcChanged) groupCollapsed = { ...groupCollapsed };
   }
 
   // Sorting Options Catalog
@@ -265,9 +278,41 @@
     allKnownFilterGroups,
   );
 
-  function hydrateFromPayload() {
+  function tryHydrateItem() {
+    if (itemHydrated) return;
+    if (!initialPayload?.query) {
+      itemHydrated = true;
+      return;
+    }
+    const { name, type } = initialPayload.query;
+    if (!name && !type) {
+      itemHydrated = true;
+      return;
+    }
+    if (!allItemEntries || allItemEntries.length === 0) return;
+
+    const targetType = typeof type === "object" ? type?.option : type;
+    const targetDisc =
+      typeof type === "object" ? type?.discriminator : undefined;
+    const matched = allItemEntries.find((entry) => {
+      const matchName = name ? entry.name === name : !entry.name;
+      const matchType = entry.type === targetType;
+      const matchDisc = targetDisc ? entry.disc === targetDisc : !entry.disc;
+      return matchName && matchType && matchDisc;
+    });
+    if (matched) {
+      selectedItem = matched;
+      searchQuery = getItemDisplayName(matched);
+    }
+    itemHydrated = true;
+  }
+
+  async function hydrateFromPayload() {
     if (!initialPayload) {
       hasHydrated = true;
+      itemHydrated = true;
+      await tick();
+      isReadyForAutoSave = true;
       return;
     }
 
@@ -294,6 +339,7 @@
         }
       }
       filterValues = { ...filterValues };
+      groupCollapsed = { ...groupCollapsed };
     }
 
     if (initialPayload.query?.stats !== undefined) {
@@ -318,7 +364,6 @@
       }
     }
 
-    // Sort is hydrated exclusively from initialPayload.sort
     const rawSort = initialPayload.sort;
     if (rawSort && typeof rawSort === "object") {
       const [sField, sDir] = Object.entries(rawSort)[0] || [];
@@ -337,35 +382,18 @@
       }
     }
 
+    tryHydrateItem();
     hasHydrated = true;
+    await tick();
+    isReadyForAutoSave = true;
   }
 
   $: if (!hasHydrated) {
-    if (initialPayload) hydrateFromPayload();
-    else hasHydrated = true;
+    hydrateFromPayload();
   }
 
-  $: if (
-    allItemEntries.length > 0 &&
-    initialPayload?.query &&
-    !itemHydrated &&
-    !selectedItem
-  ) {
-    const { name, type } = initialPayload.query;
-    const targetType = typeof type === "object" ? type?.option : type;
-    const targetDisc =
-      typeof type === "object" ? type?.discriminator : undefined;
-    const matched = allItemEntries.find((entry) => {
-      const matchName = name ? entry.name === name : !entry.name;
-      const matchType = entry.type === targetType;
-      const matchDisc = targetDisc ? entry.disc === targetDisc : !entry.disc;
-      return matchName && matchType && matchDisc;
-    });
-    if (matched) {
-      selectedItem = matched;
-      searchQuery = getItemDisplayName(matched);
-    }
-    itemHydrated = true;
+  $: if (!itemHydrated && allItemEntries.length > 0) {
+    tryHydrateItem();
   }
 
   function startResize(e: PointerEvent) {
@@ -429,13 +457,13 @@
 
   let autoSaveTimeout: ReturnType<typeof setTimeout>;
   function autoSave() {
-    if (!hasHydrated) return;
+    if (!hasHydrated || !isReadyForAutoSave) return;
     clearTimeout(autoSaveTimeout);
-    autoSaveTimeout = setTimeout(() => saveWithoutSearch(), 40);
+    autoSaveTimeout = setTimeout(() => saveWithoutSearch(), 60);
   }
 
   $: if (
-    hasHydrated &&
+    isReadyForAutoSave &&
     (title !== undefined ||
       realm !== undefined ||
       league !== undefined ||
@@ -451,6 +479,7 @@
   }
 
   function handleSearchAndClose() {
+    clearTimeout(autoSaveTimeout);
     const { payload, full_payload } = getPayloads();
     dispatch("save_and_search", {
       title,
@@ -465,6 +494,7 @@
   }
 
   function handleSearchOnly() {
+    clearTimeout(autoSaveTimeout);
     const { payload, full_payload } = getPayloads();
     dispatch("save_and_search", {
       title,
@@ -478,6 +508,7 @@
   }
 
   export function saveWithoutSearch() {
+    clearTimeout(autoSaveTimeout);
     const { payload, full_payload } = getPayloads();
     dispatch("save_only", {
       title,
@@ -506,24 +537,29 @@
   }
 
   function handleWindowKeyDown(e: KeyboardEvent) {
-    const target = e.target as HTMLElement;
-    if (!target.closest(".drawer")) return;
+    const target =
+      (e.target as HTMLElement) || (document.activeElement as HTMLElement);
+    const isInsideDrawer = Boolean(target?.closest?.(".drawer"));
 
     if (e.key === "Escape") {
       if (isEditingTitle) {
         isEditingTitle = false;
+        e.preventDefault();
         return;
       }
       if (isItemDropdownOpen) {
         isItemDropdownOpen = false;
+        e.preventDefault();
         return;
       }
       if (isSortDropdownOpen) {
         isSortDropdownOpen = false;
+        e.preventDefault();
         return;
       }
       if (isAddGroupMenuOpen) {
         isAddGroupMenuOpen = false;
+        e.preventDefault();
         return;
       }
       e.preventDefault();
@@ -531,14 +567,13 @@
       return;
     }
 
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && isInsideDrawer) {
       if (isEditingTitle) {
         isEditingTitle = false;
         e.preventDefault();
         return;
       }
       if (isItemDropdownOpen || isSortDropdownOpen) {
-        e.preventDefault();
         return;
       }
       e.preventDefault();
@@ -640,8 +675,10 @@
                 values={filterValues[group.id] || {}}
                 collapsed={groupCollapsed[group.id] ?? Boolean(group.hidden)}
                 {uniqueItems}
-                on:toggle={() =>
-                  (groupCollapsed[group.id] = !groupCollapsed[group.id])}
+                on:toggle={() => {
+                  groupCollapsed[group.id] = !groupCollapsed[group.id];
+                  groupCollapsed = { ...groupCollapsed };
+                }}
                 on:change={(e) =>
                   handleFilterChange(
                     group.id,
@@ -700,6 +737,7 @@
 </aside>
 
 <style>
+  /* Base Drawer Container */
   .drawer {
     position: absolute;
     top: 0;
@@ -707,22 +745,27 @@
     height: 100%;
     min-width: 460px;
     max-width: 95vw;
-    background: #181b24;
-    border-right: 1px solid #2e3444;
+    background-color: #000000;
+    border-right: 1px solid #777777;
+    border-radius: 0px;
     z-index: 500;
-    box-shadow: 6px 0 24px rgba(0, 0, 0, 0.55);
+    box-shadow: 6px 0 24px rgba(0, 0, 0, 0.85);
     display: flex;
     flex-direction: column;
-    color: #fff;
+    color: #d3d3d3;
+    font-family: monospace, sans-serif;
+    font-size: 12px;
+    line-height: 1.15;
     box-sizing: border-box;
     overscroll-behavior: contain;
     container-type: inline-size;
     container-name: drawer;
   }
+
   .resize-handle {
     position: absolute;
     top: 0;
-    right: -3px;
+    right: -4px;
     width: 7px;
     height: 100%;
     cursor: col-resize;
@@ -730,10 +773,12 @@
     background: transparent;
     transition: background 0.15s ease;
   }
+
   .resize-handle:hover,
   .resize-handle:active {
-    background: #3b82f6;
+    background: #777777;
   }
+
   form {
     display: flex;
     flex-direction: column;
@@ -741,31 +786,48 @@
     overflow: hidden;
     width: 100%;
   }
+
   .scroll-area {
-    padding: 0.75rem 1rem;
+    padding: 0.5rem;
     overflow-y: auto;
     overscroll-behavior: contain;
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: 0.5rem;
     flex: 1;
     width: 100%;
     box-sizing: border-box;
   }
+
+  .scroll-area::-webkit-scrollbar {
+    width: 6px;
+  }
+  .scroll-area::-webkit-scrollbar-track {
+    background: #000000;
+  }
+  .scroll-area::-webkit-scrollbar-thumb {
+    background: #555555;
+  }
+
+  /* --------------------------------------------------------------------------
+     Top Controls Container (Layout Only — No backgrounds, frames, or borders)
+     -------------------------------------------------------------------------- */
   .top-bar {
     display: flex;
     flex-direction: column;
-    gap: 0.45rem;
-    background: #1b1e2a;
-    padding: 0.65rem 0.75rem;
-    border-radius: 4px;
-    border: 1px solid #252a3a;
+    gap: 0.4rem;
+    background: transparent !important;
+    padding: 0 !important;
+    border: none !important;
+    border-radius: 0px;
     width: 100%;
     box-sizing: border-box;
   }
+
   .top-row-1 {
     width: 100%;
   }
+
   .top-row-2 {
     display: flex;
     gap: 0.4rem;
@@ -773,106 +835,230 @@
     width: 100%;
     min-width: 0;
   }
+
   .top-field {
     display: flex;
     min-width: 0;
   }
+
   .flex-realm {
     flex: 0 0 75px;
     min-width: 65px;
   }
+
   .flex-league {
     flex: 1.2 1 115px;
     min-width: 85px;
   }
+
   .flex-status {
     flex: 1.3 1 125px;
     min-width: 95px;
   }
+
   .flex-sort {
     flex: 1.4 1 135px;
     min-width: 110px;
   }
+
   select {
-    background: #232838;
-    border: 1px solid #333c52;
-    color: #fff;
-    padding: 0.3rem 0.45rem;
-    border-radius: 4px;
+    font-family: monospace, sans-serif !important;
+    font-size: 12px !important;
+    height: 26px !important;
+    line-height: 1.15 !important;
+    background-color: #000000 !important;
+    border: 1px solid #7f7f7f !important;
+    border-radius: 0px !important;
+    color: #ffffff !important;
+    padding: 0 4px !important;
     outline: none;
-    font-size: 0.78rem;
-    height: 30px;
     min-width: 0;
     width: 100%;
     box-sizing: border-box;
     text-overflow: ellipsis;
     white-space: nowrap;
+    cursor: pointer;
   }
+
+  select:hover,
   select:focus {
-    border-color: #3b82f6;
+    border-color: #ffffff !important;
   }
+
+  select option {
+    background-color: #000000 !important;
+    color: #9a9a9a !important;
+    font-family: monospace, sans-serif !important;
+    font-size: 12px !important;
+    padding: 1px 3px !important;
+  }
+
+  select option:checked,
+  select option[selected] {
+    background-color: #000000 !important;
+    color: #ffffff !important;
+  }
+
+  select option:hover {
+    background-color: #545454 !important;
+    color: #ffffff !important;
+  }
+
+  /* Main Grid Columns (Layout Only) */
   .main-columns {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: 0.65rem;
+    gap: 0.5rem;
     width: 100%;
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
     box-sizing: border-box;
   }
+
   @container drawer (min-width: 820px) {
     .main-columns {
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       align-items: start;
     }
   }
-  .groups-section {
-    display: flex;
-    flex-direction: column;
-    gap: 0.45rem;
-    width: 100%;
-    min-width: 0;
-    box-sizing: border-box;
-  }
+
+  .groups-section,
   .filter-groups {
     display: flex;
     flex-direction: column;
-    gap: 0.45rem;
+    gap: 0.4rem;
     width: 100%;
     min-width: 0;
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    box-sizing: border-box;
   }
+
+  /* --------------------------------------------------------------------------
+     Expanded Child Popover / Dropdown Menu Styles (1px White Border)
+     -------------------------------------------------------------------------- */
+  .drawer :global(.combobox-dropdown),
+  .drawer :global(.autocomplete-dropdown),
+  .drawer :global(.dropdown-menu),
+  .drawer :global(.sort-dropdown),
+  .drawer :global(.popover-menu),
+  .drawer :global(.dropdown) {
+    background: #000000 !important;
+    border: 1px solid #ffffff !important;
+    border-radius: 0px !important;
+    padding: 1px 0 !important;
+    z-index: 1000 !important;
+    box-sizing: border-box !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85) !important;
+  }
+
+  .drawer :global(.combobox-option),
+  .drawer :global(.autocomplete-option),
+  .drawer :global(.dropdown-item),
+  .drawer :global(.option-row),
+  .drawer :global(.dropdown li) {
+    font-family: "Fontin", monospace, sans-serif !important;
+    font-size: 12px !important;
+    color: #9a9a9a !important;
+    background: #000000 !important;
+    padding: 1px 3px !important;
+    line-height: 1.15 !important;
+    cursor: pointer !important;
+    border-radius: 0px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  /* Currently Selected Item: White Text */
+  .drawer :global(.combobox-option.selected),
+  .drawer :global(.combobox-option[aria-selected="true"]),
+  .drawer :global(.autocomplete-option.selected),
+  .drawer :global(.dropdown-item.selected),
+  .drawer :global(.dropdown li.selected) {
+    background: #000000 !important;
+    color: #ffffff !important;
+  }
+
+  /* Hovered or Highlighted Item: #545454 Background & White Text */
+  .drawer :global(.combobox-option:hover),
+  .drawer :global(.combobox-option:focus),
+  .drawer :global(.autocomplete-option:hover),
+  .drawer :global(.autocomplete-option:focus),
+  .drawer :global(.dropdown-item:hover),
+  .drawer :global(.dropdown-item:focus),
+  .drawer :global(.option-row:hover),
+  .drawer :global(.dropdown li:hover),
+  .drawer :global(.dropdown li.highlighted) {
+    background: #545454 !important;
+    color: #ffffff !important;
+  }
+
+  .drawer :global(.dropdown li.unique) {
+    color: #9a5521 !important;
+  }
+
+  .drawer :global(.dropdown li.unique:hover),
+  .drawer :global(.dropdown li.unique.highlighted) {
+    background: #545454 !important;
+    color: #db792f !important;
+  }
+
+  /* --------------------------------------------------------------------------
+     Footer Action Buttons
+     -------------------------------------------------------------------------- */
   .actions {
-    padding: 0.6rem 1rem;
-    background: #181b24;
-    border-top: 1px solid #232838;
+    padding: 0.5rem;
+    background: #000000;
+    border-top: 1px solid #777777;
     display: flex;
     gap: 0.5rem;
     flex-shrink: 0;
   }
+
   .actions button {
+    font-family: "Fontin", monospace, sans-serif !important;
+    font-size: 12px;
+    height: 26px;
+    line-height: 1;
     flex: 1;
-    padding: 0.45rem;
-    border-radius: 4px;
+    padding: 2px 8px;
+    border-radius: 0px !important;
     cursor: pointer;
-    border: 1px solid #333c52;
-    background: #232838;
-    color: #cbd5e1;
-    font-size: 0.775rem;
-    font-weight: 500;
-    transition: all 0.15s ease;
+    border: 1px solid #7f7f7f;
+    background: #000000;
+    color: #ffffff;
+    text-align: center;
+    transition:
+      background 0.1s ease,
+      border-color 0.1s ease;
   }
-  .actions button:hover {
-    background: #2d354a;
-    color: #fff;
+
+  .actions button:hover,
+  .actions button:focus {
+    border-color: #ffffff;
+    outline: none;
   }
+
   .actions button.btn-search-close {
-    border-color: #333c52;
+    background: #000000;
+    color: #ffffff;
+    border-color: #7f7f7f;
   }
+
+  /* Pitch White Primary Search Button */
   .actions button.primary {
-    background: #3b82f6;
-    border-color: #3b82f6;
-    color: #fff;
+    background-color: #000000 !important;
+    border: 1px solid #ffffff !important;
+    color: #ffffff !important;
   }
-  .actions button.primary:hover {
-    background: #2563eb;
-    border-color: #2563eb;
+
+  .actions button.primary:hover,
+  .actions button.primary:focus {
+    background-color: #000000 !important;
+    border-color: #ffffff !important;
+    color: #ffffff !important;
   }
 </style>

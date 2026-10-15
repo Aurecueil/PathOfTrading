@@ -1,15 +1,18 @@
 <!-- src/lib/SearchTile.svelte -->
 <script lang="ts">
-  import { createEventDispatcher, onDestroy } from "svelte";
+  import { createEventDispatcher, onDestroy, tick } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import { buildRegularPayload } from "$lib/trade/utilis/tradePayload";
   import type {
     SearchTile,
     SearchMode,
-    PoETradeItemEntry,
-    TileDisplayStyle,
     ResolvedDisplayStyle,
   } from "$lib/types/types";
+  import type {
+    TradeFetchResult,
+    TradeFetchResponse,
+  } from "$lib/types/tradeItem";
   import SearchItemRow from "$lib/searchTile/SearchItemRow.svelte";
 
   export let tile: SearchTile;
@@ -34,71 +37,145 @@
   type ResizeDirection = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 
   interface DisplayEntry {
+    uid: string;
     id: string;
-    data: PoETradeItemEntry | null;
+    payload: any;
+    league: string;
+    data: TradeFetchResult | null;
     sortValue: any;
     isLive?: boolean;
+  }
+
+  interface LiveTokenMessage {
+    result: string;
+    count: number;
   }
 
   const MIN_W = 260;
   const MIN_H = 180;
   const BATCH_SIZE = 10;
+  const MAX_RETRIES_PER_VIEW = 3;
 
-  let mode: SearchMode = tile.mode ?? "regular";
-  let displayStyle: TileDisplayStyle = tile.displayStyle ?? "auto";
+  if (!tile.mode) {
+    tile.mode = "regular";
+  }
+
+  const initialUiId = String(tile.id);
+  let isDestroyed: boolean = false;
+
+  let mode: SearchMode = tile.mode;
   let isLiveActive: boolean = false;
   let isLiveConnecting: boolean = false;
   let isFetchingMore: boolean = false;
   let lastCacheOk: boolean = false;
+  let uidCounter: number = 1;
 
   let itemsMap: Map<string, DisplayEntry> = new Map();
+  let orderedEntries: DisplayEntry[] = [];
   let displayedItems: DisplayEntry[] = [];
+  let visibleCount: number = 0;
+
+  let inFlightIds: Set<string> = new Set();
+  let inViewRetryCounts: Map<string, number> = new Map();
 
   let unlistenItems: UnlistenFn | null = null;
   let unlistenStatus: UnlistenFn | null = null;
   let bodyElement: HTMLDivElement | null = null;
 
-  $: if (tile.mode && tile.mode !== mode) {
-    mode = tile.mode;
-  }
-
   $: {
-    tile.displayStyle = displayStyle;
+    tile.displayStyle = "auto";
     tile.disabled = disabled;
-    tile.mode = mode;
   }
 
-  $: if (disabled && (isLiveActive || isLiveConnecting)) {
-    stopLive();
+  $: if (disabled) {
+    if (isLiveActive || isLiveConnecting) {
+      stopLive();
+    }
+    if (inFlightIds.size > 0) {
+      cancelUiJobs(String(tile.id));
+    }
   }
 
   $: effectiveStyle = ((): ResolvedDisplayStyle => {
-    if (displayStyle === "minimal") return "minimal";
-    if (displayStyle === "compact") {
-      return tile.w < 310 ? "minimal" : "compact";
-    }
-    if (displayStyle === "full") {
-      return tile.w < 320 ? "compact" : "full";
-    }
     if (tile.w < 380 || tile.h < 240) return "minimal";
     if (tile.w < 560 || tile.h < 340) return "compact";
     return "full";
   })();
 
-  $: isNarrowHeader = tile.w < 440;
+  $: isNarrowHeader = tile.w < 360;
 
   function snap(val: number): number {
     return snapToGrid ? Math.round(val / gridSize) * gridSize : Math.round(val);
   }
 
-  $: activePayload = tile.payload ?? tile.full_payload;
-  $: currentLeague = tile.league ?? activePayload?.league ?? "";
+  $: activePayload =
+    tile.payload && typeof tile.payload === "object"
+      ? tile.payload
+      : tile.full_payload;
+  $: currentLeague = tile.league || activePayload?.league || "";
 
   $: defaultRealmTitle =
     tile.realm?.toLowerCase() === "poe2" ? "PoE2 Trade" : "PoE Trade";
 
   $: displayTitle =
     tile.displayName?.trim() || tile.title?.trim() || defaultRealmTitle;
+
+  async function cancelUiJobs(
+    targetUiId: string = String(tile.id || initialUiId),
+  ) {
+    if (!targetUiId) return;
+    try {
+      await invoke("cancel_ui_jobs", {
+        uiId: targetUiId,
+        ui_id: targetUiId,
+      });
+    } catch (err) {
+      console.error(
+        `[SearchTile ${targetUiId}] Failed to cancel UI jobs:`,
+        err,
+      );
+    }
+  }
+
+  function getEstimatedRowHeight(style: ResolvedDisplayStyle): number {
+    if (style === "minimal") return 56;
+    if (style === "compact") return 82;
+    return 160;
+  }
+
+  function getViewportCapacity(): number {
+    const viewH = bodyElement?.clientHeight || Math.max(120, tile.h - 36);
+    const rowH = getEstimatedRowHeight(effectiveStyle);
+    return Math.max(1, Math.ceil(viewH / rowH));
+  }
+
+  function syncDisplayedSlice() {
+    const minVisible = Math.min(orderedEntries.length, getViewportCapacity());
+    if (visibleCount < minVisible) {
+      visibleCount = minVisible;
+    } else if (visibleCount > orderedEntries.length) {
+      visibleCount = orderedEntries.length;
+    }
+    displayedItems = orderedEntries.slice(0, visibleCount);
+  }
+
+  // Re-evaluate visible capacity when tile dimensions or effectiveStyle change
+  $: if (
+    !isDestroyed &&
+    tile.w &&
+    tile.h &&
+    effectiveStyle &&
+    orderedEntries.length > 0
+  ) {
+    const cap = getViewportCapacity();
+    if (visibleCount < cap && visibleCount < orderedEntries.length) {
+      visibleCount = Math.min(orderedEntries.length, cap);
+      displayedItems = orderedEntries.slice(0, visibleCount);
+      tick().then(() => {
+        ensureInViewItemsFetched();
+      });
+    }
+  }
 
   function getSortConfig(): { field: string; dir: "asc" | "desc" } {
     const sortObj = activePayload?.sort;
@@ -112,7 +189,7 @@
     };
   }
 
-  function extractSortValue(entry: PoETradeItemEntry, field: string): any {
+  function extractSortValue(entry: TradeFetchResult, field: string): any {
     if (!entry) return null;
     if (field === "price") {
       return entry.listing?.price?.amount ?? null;
@@ -124,9 +201,9 @@
     return null;
   }
 
-  function sortDisplayList() {
+  function sortOrderedList() {
     const { dir } = getSortConfig();
-    displayedItems = [...displayedItems].sort((a, b) => {
+    orderedEntries = [...orderedEntries].sort((a, b) => {
       const valA = a.sortValue;
       const valB = b.sortValue;
 
@@ -140,95 +217,281 @@
         ? String(valA).localeCompare(String(valB))
         : String(valB).localeCompare(String(valA));
     });
+    syncDisplayedSlice();
+  }
+
+  function getInViewState(): {
+    inViewEntries: DisplayEntry[];
+    firstInViewIndex: number;
+  } {
+    if (displayedItems.length === 0) {
+      return { inViewEntries: [], firstInViewIndex: 0 };
+    }
+
+    if (!bodyElement) {
+      return {
+        inViewEntries: displayedItems.slice(0, getViewportCapacity()),
+        firstInViewIndex: 0,
+      };
+    }
+
+    const scrollTop = bodyElement.scrollTop;
+    const clientHeight = bodyElement.clientHeight || Math.max(120, tile.h - 36);
+    const viewBottom = scrollTop + clientHeight;
+
+    const rowNodes = bodyElement.querySelectorAll<HTMLElement>(
+      ".item-list > .item-row",
+    );
+
+    if (rowNodes.length === 0) {
+      const rowH = getEstimatedRowHeight(effectiveStyle);
+      const startIdx = Math.max(0, Math.floor(scrollTop / rowH));
+      const endIdx = Math.min(
+        displayedItems.length,
+        Math.ceil(viewBottom / rowH),
+      );
+      return {
+        inViewEntries: displayedItems.slice(
+          startIdx,
+          Math.max(startIdx + 1, endIdx),
+        ),
+        firstInViewIndex: startIdx,
+      };
+    }
+
+    const inViewEntries: DisplayEntry[] = [];
+    let firstInViewIndex = -1;
+
+    for (let i = 0; i < rowNodes.length && i < displayedItems.length; i++) {
+      const node = rowNodes[i];
+      const top = node.offsetTop;
+      const bottom = top + node.offsetHeight;
+
+      if (bottom > scrollTop && top < viewBottom) {
+        if (firstInViewIndex === -1) firstInViewIndex = i;
+        inViewEntries.push(displayedItems[i]);
+      }
+    }
+
+    if (inViewEntries.length === 0) {
+      return {
+        inViewEntries: displayedItems.slice(0, getViewportCapacity()),
+        firstInViewIndex: 0,
+      };
+    }
+
+    return {
+      inViewEntries,
+      firstInViewIndex: Math.max(0, firstInViewIndex),
+    };
+  }
+
+  async function ensureInViewItemsFetched() {
+    if (isDestroyed || !tile.searchId || disabled || tile.disabled) return;
+    if (orderedEntries.length === 0) return;
+
+    const { inViewEntries, firstInViewIndex } = getInViewState();
+
+    const missingInView = inViewEntries.filter(
+      (entry) =>
+        !entry.isLive &&
+        entry.data === null &&
+        !inFlightIds.has(entry.id) &&
+        (inViewRetryCounts.get(entry.id) ?? 0) < MAX_RETRIES_PER_VIEW,
+    );
+
+    if (missingInView.length === 0) return;
+
+    const batchIds: string[] = [];
+    const batchSet = new Set<string>();
+
+    // 1. Prioritize items currently in view (top-to-bottom)
+    for (const entry of missingInView) {
+      if (batchIds.length >= BATCH_SIZE) break;
+      batchIds.push(entry.id);
+      batchSet.add(entry.id);
+      inViewRetryCounts.set(
+        entry.id,
+        (inViewRetryCounts.get(entry.id) ?? 0) + 1,
+      );
+    }
+
+    // 2. Fill remaining batch capacity (up to 10) top-to-bottom from firstInViewIndex onwards
+    for (
+      let i = firstInViewIndex;
+      i < orderedEntries.length && batchIds.length < BATCH_SIZE;
+      i++
+    ) {
+      const candidate = orderedEntries[i];
+      if (
+        !candidate.isLive &&
+        candidate.data === null &&
+        !inFlightIds.has(candidate.id) &&
+        !batchSet.has(candidate.id)
+      ) {
+        batchIds.push(candidate.id);
+        batchSet.add(candidate.id);
+      }
+    }
+
+    if (batchIds.length === 0) return;
+
+    await fetchRegularBatch(batchIds, tile.searchId, lastCacheOk);
   }
 
   export async function executeSearch(payload?: any, cacheOk: boolean = false) {
-    if (disabled || tile.disabled) return;
-    const payloadToRun = payload || activePayload;
-    if (!payloadToRun) return;
+    if (isDestroyed || disabled || tile.disabled) return;
 
-    if (payload) {
+    if (payload && typeof payload === "object") {
       tile.payload = payload;
+    } else if (!tile.payload || tile.payload === "") {
+      if (!tile.full_payload) return;
+      const generatedPayload = buildRegularPayload(
+        tile.full_payload,
+        tile.realm || "poe",
+      );
+      if (
+        currentLeague &&
+        generatedPayload &&
+        typeof generatedPayload === "object"
+      ) {
+        generatedPayload.league = currentLeague;
+      }
+      tile.payload = generatedPayload;
+    }
+
+    const payloadToRun = tile.payload;
+    if (!payloadToRun || typeof payloadToRun !== "object") return;
+
+    const effectiveLeague =
+      tile.league || payloadToRun.league || tile.full_payload?.league || "";
+    if (effectiveLeague && payloadToRun.league !== effectiveLeague) {
+      payloadToRun.league = effectiveLeague;
     }
 
     lastCacheOk = cacheOk;
+    const uiId = String(tile.id);
+
+    // Cancel any existing queued/in-flight jobs for this tile before starting a fresh search
+    await cancelUiJobs(uiId);
 
     if (isLiveActive || isLiveConnecting) {
       await stopLive();
     }
 
+    if (isDestroyed) return;
     tile.loading = true;
 
     try {
       const rawResponse: string = await invoke("search_items", {
         realm: tile.realm,
         payload: payloadToRun,
+        league: effectiveLeague,
         cacheOk,
         cache_ok: cacheOk,
+        uiId,
+        ui_id: uiId,
       });
+
+      if (isDestroyed) return;
 
       const data =
         typeof rawResponse === "string" ? JSON.parse(rawResponse) : rawResponse;
 
       tile.searchId = data.id;
       tile.results = data.result || [];
-      tile = tile;
 
       itemsMap.clear();
+      orderedEntries = [];
       displayedItems = [];
+      inFlightIds.clear();
+      inViewRetryCounts.clear();
+      visibleCount = 0;
 
-      if (mode === "regular" || mode === "mixed") {
-        const initialBatch = tile.results.slice(0, BATCH_SIZE);
-        for (const id of initialBatch) {
-          const entry: DisplayEntry = { id, data: null, sortValue: null };
-          itemsMap.set(id, entry);
-          displayedItems.push(entry);
-        }
-        displayedItems = [...displayedItems];
-
-        if (initialBatch.length > 0 && tile.searchId) {
-          await fetchBatch(initialBatch, tile.searchId, false, cacheOk);
-        }
+      if (bodyElement) {
+        bodyElement.scrollTop = 0;
       }
 
-      if (mode === "live" || mode === "mixed") {
+      if (mode === "regular" || mode === "mixed") {
+        for (const id of tile.results) {
+          const entry: DisplayEntry = {
+            uid: `reg_${id}_${uidCounter++}`,
+            id,
+            payload: payloadToRun,
+            league: effectiveLeague,
+            data: null,
+            sortValue: null,
+            isLive: false,
+          };
+          itemsMap.set(id, entry);
+          orderedEntries.push(entry);
+        }
+
+        visibleCount = Math.min(orderedEntries.length, getViewportCapacity());
+        displayedItems = orderedEntries.slice(0, visibleCount);
+
+        await tick();
+        await ensureInViewItemsFetched();
+      }
+
+      if (!isDestroyed && (mode === "live" || mode === "mixed")) {
         await startLive();
       }
     } catch (err) {
-      console.error(`[SearchTile ${tile.id}] Search error:`, err);
+      if (!isDestroyed) {
+        console.error(`[SearchTile ${tile.id}] Search error:`, err);
+      }
     } finally {
-      tile.loading = false;
+      if (!isDestroyed) {
+        tile.loading = false;
+      }
     }
   }
 
-  async function fetchBatch(
+  /**
+   * Regular search batch fetch (`is_token: false`, `wait_ms: 200`, `min: ceil(ids.length / 2)`).
+   */
+  async function fetchRegularBatch(
     ids: string[],
     queryId: string,
-    isLiveItem: boolean = false,
     cacheOk: boolean = false,
   ) {
-    if (!ids.length) return;
+    if (isDestroyed) return;
+    const batchIds = ids.slice(0, BATCH_SIZE);
+    if (!batchIds.length) return;
 
-    const minCount = Math.ceil(ids.length / 2);
+    for (const id of batchIds) {
+      inFlightIds.add(id);
+    }
+    isFetchingMore = inFlightIds.size > 0;
+
+    const minCount = Math.ceil(batchIds.length / 2);
+    const uiId = String(tile.id);
 
     try {
-      const data: any = await invoke("fetch_items", {
+      const rawData: string | TradeFetchResponse = await invoke("fetch_items", {
         job: {
           id: queryId,
-          ids,
+          ids: batchIds,
           min: minCount,
-          wait_ms: 100,
+          wait_ms: 200,
           cache_ok: cacheOk,
           reservation: null,
           realm: tile.realm,
+          is_token: false,
+          ui_id: uiId,
         },
       });
 
-      const parsed = typeof data === "string" ? JSON.parse(data) : data;
-      const fetchedResults: PoETradeItemEntry[] = parsed.result || [];
+      if (isDestroyed) return;
+
+      const parsed: TradeFetchResponse =
+        typeof rawData === "string" ? JSON.parse(rawData) : rawData;
+      const fetchedResults: TradeFetchResult[] = parsed?.result || [];
       const { field } = getSortConfig();
 
       for (const itemData of fetchedResults) {
+        if (!itemData || !itemData.id) continue;
         const id = itemData.id;
         const sortVal = extractSortValue(itemData, field);
 
@@ -238,61 +501,224 @@
           existing.sortValue = sortVal;
         } else {
           const newEntry: DisplayEntry = {
+            uid: `reg_${id}_${uidCounter++}`,
             id,
+            payload: activePayload,
+            league: currentLeague,
             data: itemData,
             sortValue: sortVal,
-            isLive: isLiveItem,
+            isLive: false,
           };
           itemsMap.set(id, newEntry);
-
-          if (mode === "live") {
-            displayedItems.unshift(newEntry);
-          } else {
-            displayedItems.push(newEntry);
-          }
+          orderedEntries.push(newEntry);
         }
       }
 
       if (mode === "mixed") {
-        sortDisplayList();
+        sortOrderedList();
       } else {
-        displayedItems = [...displayedItems];
+        displayedItems = orderedEntries.slice(0, visibleCount);
       }
     } catch (err) {
-      console.error(`[SearchTile ${tile.id}] Fetch batch error:`, err);
+      if (!isDestroyed) {
+        console.error(
+          `[SearchTile ${tile.id}] Fetch regular batch error:`,
+          err,
+        );
+      }
+    } finally {
+      for (const id of batchIds) {
+        inFlightIds.delete(id);
+      }
+      isFetchingMore = inFlightIds.size > 0;
+    }
+
+    if (isDestroyed) return;
+    await tick();
+    if (!isDestroyed) {
+      await ensureInViewItemsFetched();
     }
   }
 
+  /**
+   * Live token fetch (`is_token: true`, `ids: [token]`, `wait_ms: 0`, `min: 1`).
+   */
+  async function fetchLiveToken(
+    token: string,
+    placeholders: DisplayEntry[],
+    queryId: string,
+  ) {
+    if (isDestroyed || !token) return;
+
+    inFlightIds.add(token);
+    isFetchingMore = inFlightIds.size > 0;
+
+    let fetchedResults: TradeFetchResult[] = [];
+    const uiId = String(tile.id);
+
+    try {
+      const rawData: string | TradeFetchResponse = await invoke("fetch_items", {
+        job: {
+          id: queryId,
+          ids: [token],
+          min: 1,
+          wait_ms: 0,
+          cache_ok: false,
+          reservation: null,
+          realm: tile.realm,
+          is_token: true,
+          ui_id: uiId,
+        },
+      });
+
+      if (isDestroyed) return;
+
+      const parsed: TradeFetchResponse =
+        typeof rawData === "string" ? JSON.parse(rawData) : rawData;
+      fetchedResults = parsed?.result || [];
+    } catch (err) {
+      if (!isDestroyed) {
+        console.error(`[SearchTile ${tile.id}] Live token fetch error:`, err);
+      }
+    } finally {
+      inFlightIds.delete(token);
+      isFetchingMore = inFlightIds.size > 0;
+    }
+
+    if (isDestroyed) return;
+
+    const { field } = getSortConfig();
+    const usedPlaceholderUids = new Set<string>();
+    let placeholderIdx = 0;
+
+    for (const itemData of fetchedResults) {
+      if (!itemData || !itemData.id) continue;
+      const realId = itemData.id;
+      const sortVal = extractSortValue(itemData, field);
+
+      if (itemsMap.has(realId)) {
+        const existing = itemsMap.get(realId)!;
+        existing.data = itemData;
+        existing.sortValue = sortVal;
+        existing.isLive = true;
+      } else if (placeholderIdx < placeholders.length) {
+        const targetPlaceholder = placeholders[placeholderIdx++];
+        targetPlaceholder.id = realId;
+        targetPlaceholder.data = itemData;
+        targetPlaceholder.sortValue = sortVal;
+        usedPlaceholderUids.add(targetPlaceholder.uid);
+        itemsMap.set(realId, targetPlaceholder);
+      } else {
+        const extraEntry: DisplayEntry = {
+          uid: `live_${realId}_${uidCounter++}`,
+          id: realId,
+          payload: activePayload,
+          league: currentLeague,
+          data: itemData,
+          sortValue: sortVal,
+          isLive: true,
+        };
+        itemsMap.set(realId, extraEntry);
+        orderedEntries.unshift(extraEntry);
+      }
+    }
+
+    const unusedPlaceholderUids = new Set(
+      placeholders
+        .filter((p) => !usedPlaceholderUids.has(p.uid))
+        .map((p) => p.uid),
+    );
+
+    if (unusedPlaceholderUids.size > 0) {
+      orderedEntries = orderedEntries.filter(
+        (entry) => !unusedPlaceholderUids.has(entry.uid),
+      );
+    }
+
+    if (mode === "mixed") {
+      sortOrderedList();
+    } else {
+      syncDisplayedSlice();
+    }
+  }
+
+  function parseLiveEventMessages(raw: any): LiveTokenMessage[] {
+    let parsed: any = raw;
+    if (typeof raw === "string") {
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return [];
+      }
+    }
+    if (!parsed) return [];
+
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item) => ({
+          result: String(item?.result ?? item?.token ?? ""),
+          count: Math.max(1, Number(item?.count ?? 1) || 1),
+        }))
+        .filter((m) => m.result.length > 0);
+    }
+
+    if (typeof parsed.result === "string" && parsed.result.length > 0) {
+      return [
+        {
+          result: parsed.result,
+          count: Math.max(1, Number(parsed.count ?? 1) || 1),
+        },
+      ];
+    }
+
+    if (
+      parsed.data &&
+      typeof parsed.data.result === "string" &&
+      parsed.data.result.length > 0
+    ) {
+      return [
+        {
+          result: parsed.data.result,
+          count: Math.max(1, Number(parsed.data.count ?? 1) || 1),
+        },
+      ];
+    }
+
+    if (Array.isArray(parsed.item_ids)) {
+      const fallbackCount = Math.max(1, Number(parsed.count ?? 1) || 1);
+      return parsed.item_ids
+        .filter((t: any) => typeof t === "string" && t.length > 0)
+        .map((t: string) => ({ result: t, count: fallbackCount }));
+    }
+
+    return [];
+  }
+
   async function handleScroll(e: Event) {
-    if (mode === "live" || isFetchingMore || !tile.searchId) return;
+    if (isDestroyed || !tile.searchId) return;
 
     const el = e.currentTarget as HTMLElement;
-    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const scrollTop = el.scrollTop;
+    const clientHeight = el.clientHeight;
+    const scrollHeight = el.scrollHeight;
+    const distanceToBottom = scrollHeight - scrollTop - clientHeight;
+    const rowH = getEstimatedRowHeight(effectiveStyle);
 
-    if (distanceToBottom < 120) {
-      const currentCount = displayedItems.length;
-      if (currentCount >= tile.results.length) return;
+    inViewRetryCounts.clear();
 
-      const nextBatchIds = tile.results.slice(
-        currentCount,
-        currentCount + BATCH_SIZE,
+    if (visibleCount < orderedEntries.length && distanceToBottom < rowH * 2) {
+      const targetVisible = Math.min(
+        orderedEntries.length,
+        visibleCount + Math.max(2, Math.ceil(clientHeight / rowH)),
       );
-      if (!nextBatchIds.length) return;
-
-      isFetchingMore = true;
-
-      for (const id of nextBatchIds) {
-        if (!itemsMap.has(id)) {
-          const entry: DisplayEntry = { id, data: null, sortValue: null };
-          itemsMap.set(id, entry);
-          displayedItems.push(entry);
-        }
+      if (targetVisible !== visibleCount) {
+        visibleCount = targetVisible;
+        displayedItems = orderedEntries.slice(0, visibleCount);
+        await tick();
       }
-      displayedItems = [...displayedItems];
-
-      await fetchBatch(nextBatchIds, tile.searchId, false, lastCacheOk);
-      isFetchingMore = false;
     }
+
+    await ensureInViewItemsFetched();
   }
 
   function cleanupListeners() {
@@ -307,7 +733,7 @@
   }
 
   async function startLive() {
-    if (!tile.searchId || disabled) return;
+    if (isDestroyed || !tile.searchId || disabled) return;
     cleanupListeners();
     isLiveConnecting = true;
 
@@ -322,28 +748,37 @@
         },
       );
 
-      unlistenItems = await listen<{ tile_id: string; item_ids: string[] }>(
+      unlistenItems = await listen<any>(
         `live-items-${tile.id}`,
         async (event) => {
-          const ids = event.payload.item_ids;
-          if (ids && ids.length > 0 && tile.searchId) {
-            if (mode === "live") {
-              for (let i = ids.length - 1; i >= 0; i--) {
-                const id = ids[i];
-                if (!itemsMap.has(id)) {
-                  const entry: DisplayEntry = {
-                    id,
-                    data: null,
-                    sortValue: null,
-                    isLive: true,
-                  };
-                  itemsMap.set(id, entry);
-                  displayedItems.unshift(entry);
-                }
-              }
-              displayedItems = [...displayedItems];
+          if (isDestroyed || !tile.searchId) return;
+          const messages = parseLiveEventMessages(event.payload);
+          if (messages.length === 0) return;
+
+          const currentSearchId = tile.searchId;
+
+          for (const msg of messages) {
+            if (isDestroyed) break;
+            const { result: token, count } = msg;
+            const placeholders: DisplayEntry[] = [];
+
+            for (let i = 0; i < count; i++) {
+              placeholders.push({
+                uid: `live_${token}_${uidCounter++}`,
+                id: token,
+                payload: activePayload,
+                league: currentLeague,
+                data: null,
+                sortValue: null,
+                isLive: true,
+              });
             }
-            await fetchBatch(ids, tile.searchId, true, false);
+
+            orderedEntries = [...placeholders, ...orderedEntries];
+            syncDisplayedSlice();
+            await tick();
+
+            await fetchLiveToken(token, placeholders, currentSearchId);
           }
         },
       );
@@ -354,15 +789,21 @@
         queryId: tile.searchId,
       });
 
-      isLiveActive = true;
+      if (!isDestroyed) {
+        isLiveActive = true;
+      }
     } catch (err) {
-      console.error(
-        `[SearchTile ${tile.id}] Failed to start live search:`,
-        err,
-      );
+      if (!isDestroyed) {
+        console.error(
+          `[SearchTile ${tile.id}] Failed to start live search:`,
+          err,
+        );
+      }
       await stopLive();
     } finally {
-      isLiveConnecting = false;
+      if (!isDestroyed) {
+        isLiveConnecting = false;
+      }
     }
   }
 
@@ -392,6 +833,10 @@
   }
 
   onDestroy(() => {
+    isDestroyed = true;
+    const targetUiId = String(tile?.id || initialUiId);
+    cancelUiJobs(targetUiId);
+
     if (isLiveActive || isLiveConnecting) {
       stopLive();
     } else {
@@ -499,8 +944,18 @@
   }
 
   function handleModeChange(e: Event) {
-    (e.currentTarget as HTMLElement)?.blur();
-    tile.mode = mode;
+    const selectEl = e.currentTarget as HTMLSelectElement;
+    const nextMode = selectEl.value as SearchMode;
+    tile.mode = nextMode;
+    mode = nextMode;
+    selectEl.blur();
+
+    if (nextMode === "regular" && (isLiveActive || isLiveConnecting)) {
+      stopLive();
+    } else if (nextMode === "mixed" && orderedEntries.length > 0) {
+      sortOrderedList();
+    }
+
     dispatch("change");
   }
 </script>
@@ -540,33 +995,18 @@
       {#if disabled}
         <span class="disabled-badge">OFF</span>
       {/if}
-      <span class="title" title={displayTitle}>{displayTitle}</span>
-      {#if displayedItems.length > 0 || (tile.results && tile.results.length > 0)}
+      <span class="title" title={tile.id}>{tile.id}</span>
+      {#if displayedItems.length > 0 || orderedEntries.length > 0}
         <span class="count-pill" title="Displayed / Total matched items">
-          {displayedItems.length}{#if tile.results?.length && mode !== "live"}/{tile
-              .results.length}{/if}
+          {displayedItems.length}{#if orderedEntries.length > 0 && mode !== "live"}/{orderedEntries.length}{/if}
         </span>
       {/if}
     </div>
 
     <div class="actions" on:pointerdown|stopPropagation>
       <select
-        class="style-select"
-        bind:value={displayStyle}
-        on:change={(e) => (e.currentTarget as HTMLElement)?.blur()}
-        title="Item display density ({displayStyle === 'auto'
-          ? `Auto: ${effectiveStyle}`
-          : displayStyle})"
-      >
-        <option value="auto">Auto ({effectiveStyle[0].toUpperCase()})</option>
-        <option value="full">Full</option>
-        <option value="compact">Compact</option>
-        <option value="minimal">Minimal</option>
-      </select>
-
-      <select
         class="mode-select"
-        bind:value={mode}
+        bind:value={tile.mode}
         on:change={handleModeChange}
         disabled={disabled || tile.loading || isLiveConnecting}
         title="Search mode"
@@ -590,7 +1030,7 @@
         >
           <span class="live-dot" class:pulsing={isLiveActive}></span>
           {#if !isNarrowHeader}
-            {isLiveActive ? "Live" : "Start"}
+            <span>{isLiveActive ? "Live" : "Start"}</span>
           {/if}
         </button>
       {/if}
@@ -608,7 +1048,7 @@
         {#if tile.loading}
           <span class="spin">↻</span>
         {:else}
-          🔍{#if !isNarrowHeader}&nbsp;Search{/if}
+          <span>🔍</span>{#if !isNarrowHeader}<span>Search</span>{/if}
         {/if}
       </button>
 
@@ -650,14 +1090,15 @@
       </div>
     {:else}
       <div class="item-list list-{effectiveStyle}">
-        {#each displayedItems as itemEntry (itemEntry.id)}
+        {#each displayedItems as itemEntry (itemEntry.uid)}
           <SearchItemRow
             id={itemEntry.id}
+            payload={itemEntry.payload}
+            league={itemEntry.league}
             data={itemEntry.data}
             sortValue={itemEntry.sortValue}
             isLive={itemEntry.isLive ?? false}
             realm={tile.realm}
-            league={currentLeague}
             searchId={tile.searchId ?? ""}
             {effectiveStyle}
             tileWidth={tile.w}
@@ -665,7 +1106,13 @@
           />
         {/each}
 
-        {#if isFetchingMore}
+        {#if visibleCount < orderedEntries.length}
+          <div class="scroll-sentinel">
+            {#if isFetchingMore}
+              <span class="spin">↻</span> Loading more results...
+            {/if}
+          </div>
+        {:else if isFetchingMore}
           <div class="fetching-more">
             <span class="spin">↻</span> Loading more results...
           </div>
@@ -697,7 +1144,6 @@
 </div>
 
 <style>
-  /* Unchanged styles from existing SearchTile.svelte */
   .tile-root {
     position: absolute;
     top: 0;
@@ -743,7 +1189,7 @@
     cursor: pointer;
     user-select: none;
     flex-shrink: 0;
-    gap: 0.35rem;
+    gap: 0.4rem;
   }
   .tile-bar:active {
     cursor: grabbing;
@@ -754,6 +1200,7 @@
     gap: 0.35rem;
     overflow: hidden;
     min-width: 0;
+    flex: 1;
   }
   .realm-badge {
     text-transform: uppercase;
@@ -813,36 +1260,44 @@
   .actions {
     display: flex;
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.3rem;
     flex-shrink: 0;
   }
-  .mode-select,
-  .style-select {
+  .mode-select {
+    height: 24px;
     background: #252a3a;
     color: #cbd5e1;
     border: 1px solid #374151;
-    font-size: 0.7rem;
-    padding: 0.15rem 0.25rem;
+    font-size: 0.72rem;
+    padding: 0 0.35rem;
     border-radius: 4px;
     outline: none;
     cursor: pointer;
+    line-height: 1;
   }
-  .style-select {
-    color: #93c5fd;
-    border-color: #1e3a8a;
+  .mode-select:hover:not(:disabled) {
+    border-color: #4b5563;
+  }
+  .mode-select:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
   .actions button {
+    height: 24px;
     background: #2b3040;
-    border: 1px solid transparent;
+    border: 1px solid #374151;
     color: #cbd5e1;
     font-size: 0.72rem;
-    padding: 0.2rem 0.45rem;
+    line-height: 1;
+    padding: 0 0.5rem;
     border-radius: 4px;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
-    gap: 0.2rem;
+    justify-content: center;
+    gap: 0.25rem;
     white-space: nowrap;
+    flex-shrink: 0;
   }
   .actions button:hover:not(:disabled) {
     background: #3b4257;
@@ -875,6 +1330,7 @@
     border-radius: 50%;
     background: #6b7280;
     display: inline-block;
+    flex-shrink: 0;
   }
   .live-dot.pulsing {
     background: #ef4444;
@@ -893,13 +1349,16 @@
     }
   }
   .actions button.del {
+    width: 24px;
+    height: 24px;
+    padding: 0;
     font-size: 0.95rem;
-    line-height: 1;
-    padding: 0.1rem 0.35rem;
+    border-color: transparent;
   }
   .actions button.del:hover {
     color: #ef4444;
     background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.3);
   }
   .spin {
     display: inline-block;
@@ -960,11 +1419,17 @@
   .item-list.list-minimal {
     gap: 0.22rem;
   }
+  .scroll-sentinel,
   .fetching-more {
+    min-height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
     text-align: center;
     font-size: 0.72rem;
     color: #64748b;
-    padding: 0.4rem 0;
+    padding: 0.35rem 0;
   }
   .edge,
   .corner {

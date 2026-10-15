@@ -192,8 +192,6 @@
     </div>
 
     <div class="footer-actions">
-      <div class="divider-horizontal"></div>
-
       <div class="ratelimiter-container" bind:this={containerEl}>
         {#if rateLimiterOpen}
           <div
@@ -425,12 +423,6 @@
     align-items: center;
     height: 100%;
     gap: 0.5rem;
-  }
-
-  .divider-horizontal {
-    width: 1px;
-    height: 14px;
-    background-color: #444444;
   }
 
   .disclaimer {

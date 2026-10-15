@@ -5,6 +5,7 @@ pub mod items;
 pub mod league;
 pub mod live;
 pub mod search;
+pub mod statics;
 pub mod stats;
 pub mod whisper;
 
@@ -33,6 +34,10 @@ pub struct FetchJob {
     pub cache_ok: bool,
     pub reservation: Option<String>,
     pub realm: String,
+    #[serde(default, alias = "isToken")]
+    pub is_token: bool,
+    #[serde(default, alias = "uiId")]
+    pub ui_id: Option<String>,
 }
 
 #[derive(Clone, Serialize, PartialEq, Eq, Debug)]
@@ -459,6 +464,8 @@ struct PendingFetch {
 struct SearchTask {
     realm: String,
     query: Value,
+    league: String,
+    ui_id: Option<String>,
     tx: oneshot::Sender<Result<String, String>>,
 }
 
@@ -584,13 +591,45 @@ impl ApiRateLimiter {
         }
     }
 
+    // --- Queue Cleanup for Deleted UI Elements ---
+
+    pub async fn cancel_ui_jobs(&self, target_id: &str) -> usize {
+        let mut removed = 0;
+
+        {
+            let mut searches = self.search_tasks.lock().await;
+            let before = searches.len();
+            searches.retain(|task| task.ui_id.as_deref() != Some(target_id));
+            removed += before - searches.len();
+        }
+
+        {
+            let mut fetches = self.fetch_queues.lock().await;
+            for queue in fetches.values_mut() {
+                let before = queue.len();
+                queue.retain(|pf| {
+                    pf.job.ui_id.as_deref() != Some(target_id) && pf.job.id != target_id
+                });
+                removed += before - queue.len();
+            }
+        }
+
+        if removed > 0 {
+            self.telemetry_notify.notify_one();
+        }
+
+        removed
+    }
+
     // --- Search Pipeline ---
 
     pub async fn search_items(
         &self,
         realm: String,
         payload: Value,
+        league: String,
         cache_ok: bool,
+        ui_id: Option<String>,
     ) -> Result<String, String> {
         if cache_ok {
             if let Some(cached) = self.cache.get_search(&realm, &payload).await {
@@ -604,6 +643,8 @@ impl ApiRateLimiter {
             tasks.push_back(SearchTask {
                 realm,
                 query: payload,
+                league,
+                ui_id,
                 tx,
             });
         }
@@ -619,7 +660,8 @@ impl ApiRateLimiter {
         loop {
             let task = loop {
                 let mut tasks = self.search_tasks.lock().await;
-                if let Some(t) = tasks.pop_front() {
+                // LIFO: Pop the most recent search task first
+                if let Some(t) = tasks.pop_back() {
                     break t;
                 }
                 drop(tasks);
@@ -635,7 +677,12 @@ impl ApiRateLimiter {
             self.search_limiter.record(None).await;
             self.telemetry_notify.notify_one();
 
-            let result = search::search_items_trade(task.query.clone(), task.realm.clone()).await;
+            let result = search::search_items_trade(
+                task.query.clone(),
+                task.realm.clone(),
+                task.league.clone(),
+            )
+            .await;
             match result {
                 Ok(resp) => {
                     let status = resp.status();
@@ -666,16 +713,15 @@ impl ApiRateLimiter {
                             )
                             .await;
 
-                        // Re-queue the task at the head of the deque to re-attempt after penalty
-                        {
+                        // Re-insert at the back so it stays highest priority
+                        if !task.tx.is_closed() {
                             let mut tasks = self.search_tasks.lock().await;
-                            tasks.push_front(task);
+                            tasks.push_back(task);
                         }
                         self.telemetry_notify.notify_one();
                         continue;
                     }
 
-                    // Check for other API error payloads (e.g. Code 2)
                     if let Some(ref j) = parsed_json {
                         if let Some(err) = j.get("error") {
                             let _ = task.tx.send(Err(err.to_string()));
@@ -692,7 +738,6 @@ impl ApiRateLimiter {
                         continue;
                     }
 
-                    // Success response
                     self.cache
                         .set_search(&task.realm, &task.query, text.clone())
                         .await;
@@ -711,7 +756,8 @@ impl ApiRateLimiter {
     pub async fn fetch_items(&self, job: FetchJob) -> Result<Value, String> {
         let realm = job.realm.clone();
 
-        if job.cache_ok {
+        // Non-token jobs can check cache
+        if !job.is_token && job.cache_ok {
             let mut all_found = true;
             let mut cached_results = Vec::new();
 
@@ -730,7 +776,12 @@ impl ApiRateLimiter {
         }
 
         let (tx, rx) = oneshot::channel();
-        let ready_at = Instant::now() + Duration::from_millis(job.wait_ms);
+        // Token jobs skip wait_ms completely and fire immediately
+        let ready_at = if job.is_token {
+            Instant::now()
+        } else {
+            Instant::now() + Duration::from_millis(job.wait_ms)
+        };
 
         {
             let mut queues = self.fetch_queues.lock().await;
@@ -752,14 +803,137 @@ impl ApiRateLimiter {
     async fn run_fetch_batcher(&self) {
         loop {
             let now = Instant::now();
-            let mut target_realm: Option<String> = None;
 
+            // 1. Priority Check: Find the MOST RECENT `is_token` job (ignores wait_ms / ready_at)
+            let mut token_target: Option<(String, usize)> = None;
+            {
+                let queues = self.fetch_queues.lock().await;
+                'outer: for (realm, queue) in queues.iter() {
+                    // Reverse iteration so the newest token job is picked first
+                    for (idx, pf) in queue.iter().enumerate().rev() {
+                        if pf.job.is_token && !pf.tx.is_closed() {
+                            token_target = Some((realm.clone(), idx));
+                            break 'outer;
+                        }
+                    }
+                }
+            }
+
+            if let Some((realm, idx)) = token_target {
+                let pending = {
+                    let mut queues = self.fetch_queues.lock().await;
+                    match queues.get_mut(&realm) {
+                        Some(q) if idx < q.len() => q.remove(idx).unwrap(),
+                        _ => continue,
+                    }
+                };
+
+                if pending.tx.is_closed() {
+                    self.telemetry_notify.notify_one();
+                    continue;
+                }
+
+                let token_id = pending
+                    .job
+                    .ids
+                    .first()
+                    .cloned()
+                    .map(|id| id.trim().trim_matches('"').to_string())
+                    .unwrap_or_default();
+
+                if token_id.is_empty() {
+                    let _ = pending.tx.send(Err("Empty token ID provided".to_string()));
+                    self.telemetry_notify.notify_one();
+                    continue;
+                }
+
+                let res_name = pending.job.reservation.clone();
+                self.fetch_limiter.wait_for_slot(res_name.as_deref()).await;
+                self.fetch_limiter.record(res_name.as_deref()).await;
+                self.telemetry_notify.notify_one();
+
+                let query_id = pending.job.id.clone();
+                let response =
+                    fetch::fetch_items_trade(token_id.clone(), realm.clone(), query_id).await;
+
+                match response {
+                    Ok(resp) => {
+                        let status = resp.status();
+                        let headers = resp.headers().clone();
+
+                        self.fetch_limiter.reconcile(&headers).await;
+
+                        let is_429 = status.as_u16() == 429;
+                        let text = resp.text().await.unwrap_or_default();
+                        let parsed_json: Option<Value> = serde_json::from_str(&text).ok();
+                        let error_code = parsed_json
+                            .as_ref()
+                            .and_then(|j| j.get("error"))
+                            .and_then(|e| e.get("code"))
+                            .and_then(|c| c.as_i64());
+
+                        if is_429 || error_code == Some(3) {
+                            let retry_secs = headers
+                                .get("retry-after")
+                                .and_then(|v| v.to_str().ok())
+                                .and_then(|s| s.parse::<u64>().ok())
+                                .unwrap_or(5);
+
+                            self.fetch_limiter
+                                .set_penalty(
+                                    Duration::from_secs(retry_secs) + Duration::from_millis(500),
+                                )
+                                .await;
+
+                            // Re-insert at the back so it remains at the top of the LIFO priority
+                            if !pending.tx.is_closed() {
+                                let mut queues = self.fetch_queues.lock().await;
+                                let queue = queues.entry(realm).or_default();
+                                queue.push_back(pending);
+                            }
+                            self.telemetry_notify.notify_one();
+                            continue;
+                        }
+
+                        if let Some(ref j) = parsed_json {
+                            if let Some(err) = j.get("error") {
+                                let _ = pending.tx.send(Err(err.to_string()));
+                                self.telemetry_notify.notify_one();
+                                continue;
+                            }
+                        }
+
+                        if !status.is_success() {
+                            let _ = pending
+                                .tx
+                                .send(Err(format!("HTTP Error {}: {}", status, text)));
+                            self.telemetry_notify.notify_one();
+                            continue;
+                        }
+
+                        if let Some(json) = parsed_json {
+                            let _ = pending.tx.send(Ok(json));
+                        } else {
+                            let _ = pending.tx.send(Err("Invalid JSON payload".to_string()));
+                        }
+                    }
+                    Err(err) => {
+                        let _ = pending.tx.send(Err(err));
+                    }
+                }
+
+                self.telemetry_notify.notify_one();
+                continue;
+            }
+
+            // 2. Standard Batched Execution (Non-Token Jobs Only)
+            let mut target_realm: Option<String> = None;
             {
                 let queues = self.fetch_queues.lock().await;
                 for (realm, queue) in queues.iter() {
                     if queue
                         .iter()
-                        .any(|pf| pf.ready_at <= now && !pf.tx.is_closed())
+                        .any(|pf| !pf.job.is_token && pf.ready_at <= now && !pf.tx.is_closed())
                     {
                         target_realm = Some(realm.clone());
                         break;
@@ -783,7 +957,7 @@ impl ApiRateLimiter {
             let mut reservation_to_charge: Option<String> = None;
             let mut primary_query_id: Option<String> = None;
 
-            // Batch allocation
+            // Batch allocation (Newest-first / LIFO priority)
             {
                 let mut queues = self.fetch_queues.lock().await;
                 let queue = match queues.get_mut(&realm) {
@@ -793,7 +967,12 @@ impl ApiRateLimiter {
 
                 queue.retain(|pf| !pf.tx.is_closed());
 
-                let candidate_indices: Vec<usize> = (0..queue.len()).rev().collect();
+                // Filter strictly to ready, non-token jobs, ordered newest-first (rev)
+                let candidate_indices: Vec<usize> = (0..queue.len())
+                    .filter(|&i| !queue[i].job.is_token && queue[i].ready_at <= now)
+                    .rev()
+                    .collect();
+
                 if candidate_indices.is_empty() {
                     continue;
                 }
@@ -801,11 +980,6 @@ impl ApiRateLimiter {
                 let mut batch_count = 0;
                 let mut allocation_plan: HashMap<String, usize> = HashMap::new();
 
-                for &idx in &candidate_indices {
-                    if reservation_to_charge.is_none() && queue[idx].job.reservation.is_some() {
-                        reservation_to_charge = queue[idx].job.reservation.clone();
-                    }
-                }
                 for &idx in &candidate_indices {
                     if primary_query_id.is_none() {
                         primary_query_id = Some(queue[idx].job.id.clone());
@@ -815,7 +989,7 @@ impl ApiRateLimiter {
                     }
                 }
 
-                // Pass 1: Ensure each candidate job gets its `min` requirement
+                // Pass 1: Give newest ready jobs their `min` requirement first
                 for &idx in &candidate_indices {
                     if batch_count >= 10 {
                         break;
@@ -837,7 +1011,7 @@ impl ApiRateLimiter {
                     }
                 }
 
-                // Pass 2: Top off remaining slots greedily from the most recent job first
+                // Pass 2: Top off remaining slots greedily from the newest ready jobs first
                 if batch_count < 10 {
                     for &idx in &candidate_indices {
                         if batch_count >= 10 {
@@ -858,11 +1032,14 @@ impl ApiRateLimiter {
                     }
                 }
 
-                // Pass 3: Drain and sanitize allocated IDs
-                for pending in queue.iter_mut() {
+                // Pass 3: Drain and sanitize allocated IDs in newest-first order
+                for &idx in &candidate_indices {
+                    let pending = &mut queue[idx];
                     if let Some(&count) = allocation_plan.get(&pending.job.id) {
                         if count > 0 {
-                            let drained: Vec<String> = pending.job.ids.drain(0..count).collect();
+                            let take_count = count.min(pending.job.ids.len());
+                            let drained: Vec<String> =
+                                pending.job.ids.drain(0..take_count).collect();
                             let mut clean_drained = Vec::with_capacity(drained.len());
 
                             for raw_id in drained {
@@ -923,7 +1100,6 @@ impl ApiRateLimiter {
                         .and_then(|e| e.get("code"))
                         .and_then(|c| c.as_i64());
 
-                    // Check for rate limit condition (HTTP 429 or error code 3)
                     if is_429 || error_code == Some(3) {
                         let retry_secs = headers
                             .get("retry-after")
@@ -937,7 +1113,6 @@ impl ApiRateLimiter {
                             )
                             .await;
 
-                        // Re-insert unperformed IDs back to front of their respective jobs
                         let mut queues = self.fetch_queues.lock().await;
                         if let Some(queue) = queues.get_mut(&realm) {
                             for (job_id, drained) in job_allocations {
@@ -953,7 +1128,6 @@ impl ApiRateLimiter {
                         continue;
                     }
 
-                    // Check for other API error payloads (e.g. Code 2)
                     if let Some(ref j) = parsed_json {
                         if let Some(err) = j.get("error") {
                             let err_msg = err.to_string();
@@ -972,7 +1146,6 @@ impl ApiRateLimiter {
                         continue;
                     }
 
-                    // Success payload
                     if let Some(json) = parsed_json {
                         let mut returned_items_by_id: HashMap<String, Value> = HashMap::new();
 
@@ -993,7 +1166,6 @@ impl ApiRateLimiter {
                             }
                         }
 
-                        // Distribute matched items to corresponding calling jobs
                         let mut queues = self.fetch_queues.lock().await;
                         if let Some(queue) = queues.get_mut(&realm) {
                             for (job_id, drained_ids) in job_allocations {
@@ -1007,7 +1179,6 @@ impl ApiRateLimiter {
                                 }
                             }
 
-                            // Complete jobs that have their items or have satisfied their min
                             let mut i = 0;
                             while i < queue.len() {
                                 let is_finished = queue[i].job.ids.is_empty()
@@ -1070,10 +1241,12 @@ pub async fn search_items(
     limiter: State<'_, ApiRateLimiter>,
     realm: String,
     payload: Value,
+    league: String,
     cache_ok: Option<bool>,
+    ui_id: Option<String>,
 ) -> Result<String, String> {
     limiter
-        .search_items(realm, payload, cache_ok.unwrap_or(false))
+        .search_items(realm, payload, league, cache_ok.unwrap_or(false), ui_id)
         .await
 }
 
@@ -1083,6 +1256,14 @@ pub async fn fetch_items(
     job: FetchJob,
 ) -> Result<Value, String> {
     limiter.fetch_items(job).await
+}
+
+#[tauri::command]
+pub async fn cancel_ui_jobs(
+    limiter: State<'_, ApiRateLimiter>,
+    ui_id: String,
+) -> Result<usize, String> {
+    Ok(limiter.cancel_ui_jobs(&ui_id).await)
 }
 
 #[tauri::command]

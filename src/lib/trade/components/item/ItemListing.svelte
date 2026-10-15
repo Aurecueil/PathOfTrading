@@ -2,12 +2,14 @@
 <script lang="ts">
   import type { ItemListing } from "$lib/types/tradeItem";
   import type { ResolvedDisplayStyle } from "$lib/types/types";
+  import type { staticsPoe, staticsPoe2 } from "$lib/trade/tradeStore";
 
   export let listing: ItemListing | undefined;
   export let sortValue: any = null;
   export let isTraveling: boolean = false;
   export let isQueued: boolean = false;
   export let travelError: string | null = null;
+  export let realm: string = "";
   export let league: string = "";
   export let searchId: string = "";
   export let styleMode: ResolvedDisplayStyle = "full";
@@ -49,7 +51,10 @@
   <div class="listing-minimal">
     <div class="min-price">
       <span class="amount">{price?.amount ?? "—"}</span>
-      <span class="currency">{price?.currency ?? ""}</span>
+      <span
+        class="cur
+      ncy">{price?.currency ?? ""}</span
+      >
     </div>
 
     <button

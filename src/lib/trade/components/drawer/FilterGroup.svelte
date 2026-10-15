@@ -15,7 +15,7 @@
   }>();
 </script>
 
-<div class="filter-group-card">
+<div class="filter-group-card" class:collapsed>
   <button
     type="button"
     class="group-toggle"
@@ -49,49 +49,69 @@
 
 <style>
   .filter-group-card {
-    background: #1d212d;
-    border: 1px solid #2a3040;
-    border-radius: 4px;
+    background: #000000;
+    border: 1px solid #777777;
+    border-radius: 0px;
     position: relative;
     width: 100%;
+    margin-top: 0;
     box-sizing: border-box;
     min-width: 0;
     container-type: inline-size;
     container-name: group;
   }
+
   .filter-group-card:focus-within {
     z-index: 30;
   }
 
+  /* Compact Header - Sitting higher with 22px fixed height */
   .group-toggle {
     width: 100%;
+    height: 22px;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.4rem 0.65rem;
-    background: #232838;
+    padding: 1px 5px;
+    background: #050505;
     border: none;
-    color: #e2e8f0;
-    font-size: 0.775rem;
-    font-weight: 500;
+    border-bottom: 1px solid #777777;
+    color: #e0e0e0;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 11px;
     cursor: pointer;
     text-align: left;
-    border-radius: 4px 4px 0 0;
+    border-radius: 0px;
+    outline: none;
+    line-height: 1;
+    transition: background 0.1s ease;
   }
-  .group-toggle:hover {
-    background: #293044;
+
+  .filter-group-card.collapsed .group-toggle {
+    border-bottom: none;
+  }
+
+  .group-toggle:hover,
+  .group-toggle:focus {
+    background: #1a1a1a;
+    color: #ffffff;
   }
 
   .chevron {
-    color: #94a3b8;
-    font-size: 0.65rem;
+    color: #888888;
+    font-size: 9px;
+  }
+
+  .group-toggle:hover .chevron {
+    color: #ffffff;
   }
 
   .group-content {
-    padding: 0.45rem 0.55rem;
+    padding: 3px 5px;
+    background: #000000;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: 0.35rem 0.55rem;
+    gap: 0.2rem 0.4rem;
     width: 100%;
     box-sizing: border-box;
   }

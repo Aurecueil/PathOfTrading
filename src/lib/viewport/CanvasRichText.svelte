@@ -20,8 +20,15 @@
   type ResizeDirection = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
   const MIN_W = 100;
   const MIN_H = 40;
+  const MIN_FONT = 8;
+  const MAX_FONT = 72;
 
   let editing = false;
+
+  // Ensure default fontSize is initialized
+  $: if (!item.thickness) {
+    item.thickness = 12;
+  }
 
   onMount(() => {
     if (item.autoEdit) {
@@ -37,6 +44,20 @@
 
   function snap(val: number): number {
     return snapToGrid ? Math.round(val / gridSize) * gridSize : Math.round(val);
+  }
+
+  function adjustFontSize(delta: number) {
+    const current = item.thickness || 12;
+    item.thickness = Math.min(MAX_FONT, Math.max(MIN_FONT, current + delta));
+    dispatch("change");
+  }
+
+  function onFontSizeInput(e: Event) {
+    const val = parseInt((e.currentTarget as HTMLInputElement).value, 10);
+    if (!isNaN(val)) {
+      item.thickness = Math.min(MAX_FONT, Math.max(MIN_FONT, val));
+      dispatch("change");
+    }
   }
 
   function renderMarkdown(raw: string): string {
@@ -105,19 +126,24 @@
     editing = true;
   }
 
-  function finishEditing() {
+  function finishEditing(e: FocusEvent) {
+    // Keep editing open if focus moved to an element inside this component (like the font size input)
+    const nextFocused = e.relatedTarget as HTMLElement | null;
+    if (nextFocused && e.currentTarget instanceof HTMLElement) {
+      const root = e.currentTarget.closest(".richtext-root");
+      if (root?.contains(nextFocused)) return;
+    }
     editing = false;
   }
 
   function onTextareaKeyDown(e: KeyboardEvent) {
     e.stopPropagation();
-    // Enter submits, Shift+Enter makes a new line
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      finishEditing();
+      editing = false;
     } else if (e.key === "Escape") {
       e.preventDefault();
-      finishEditing();
+      editing = false;
     }
   }
 
@@ -184,11 +210,51 @@
   style:transform="translate({item.x}px, {item.y}px)"
   style:width="{item.w}px"
   style:height="{item.h}px"
+  style:--item-font-size="{item.thickness || 12}px"
   on:pointerdown={onPointerDown}
   on:dblclick={onDoubleClick}
   on:wheel|stopPropagation
 >
   {#if editing}
+    <!-- Floating Font Size Control Box -->
+    <div
+      class="rt-toolbar"
+      on:pointerdown|stopPropagation
+      on:dblclick|stopPropagation
+    >
+      <span class="rt-toolbar-label">Size</span>
+      <button
+        type="button"
+        class="rt-btn"
+        on:pointerdown|preventDefault={() => adjustFontSize(-1)}
+        title="Decrease font size"
+      >
+        -
+      </button>
+      <input
+        type="number"
+        class="rt-size-input"
+        min={MIN_FONT}
+        max={MAX_FONT}
+        value={item.thickness || 12}
+        on:input={onFontSizeInput}
+        on:keydown|stopPropagation={(e) => {
+          if (e.key === "Enter" || e.key === "Escape") {
+            editing = false;
+          }
+        }}
+        on:blur={finishEditing}
+      />
+      <button
+        type="button"
+        class="rt-btn"
+        on:pointerdown|preventDefault={() => adjustFontSize(1)}
+        title="Increase font size"
+      >
+        +
+      </button>
+    </div>
+
     <textarea
       use:autofocus
       class="rt-textarea"
@@ -246,9 +312,9 @@
     top: 0;
     left: 0;
     box-sizing: border-box;
-    background: #161923;
-    border: 1px solid #2c3345;
-    border-radius: 6px;
+    background: #050505;
+    border: 1px solid #777777;
+    border-radius: 0px;
     padding: 0;
     margin: 0;
     display: flex;
@@ -257,131 +323,242 @@
     user-select: none;
     overflow: visible;
   }
+
   .richtext-root.selected {
-    border-color: #3a57e8;
-    box-shadow: 0 0 0 2px rgba(58, 87, 232, 0.4);
+    border-color: #ffffff;
+    box-shadow: none;
   }
+
+  /* Toolbar anchored directly above the top-left corner */
+  .rt-toolbar {
+    position: absolute;
+    top: -28px;
+    left: -1px;
+    height: 24px;
+    background: #050505;
+    border: 1px solid #ffffff;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 6px;
+    z-index: 30;
+    box-sizing: border-box;
+    font-family: "Fontin", monospace, sans-serif;
+  }
+
+  .rt-toolbar-label {
+    font-size: 11px;
+    color: #aaaaaa;
+    margin-right: 2px;
+  }
+
+  .rt-btn {
+    background: #111111;
+    color: #ffffff;
+    border: 1px solid #555555;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .rt-btn:hover {
+    border-color: #ffffff;
+    background: #222222;
+  }
+
+  .rt-size-input {
+    width: 36px;
+    height: 18px;
+    background: #000000;
+    color: #ffffff;
+    border: 1px solid #555555;
+    font-family: inherit;
+    font-size: 11px;
+    text-align: center;
+    padding: 0 2px;
+    outline: none;
+    box-sizing: border-box;
+  }
+
+  .rt-size-input:focus {
+    border-color: #ffffff;
+  }
+
   .rt-textarea {
     width: 100%;
     height: 100%;
     flex: 1;
     resize: none;
-    background: transparent;
-    color: #e2e8f0;
+    background: #000000;
+    color: #ffffff;
     border: none;
-    padding: 0.45rem;
+    padding: 4px 6px;
     margin: 0;
-    font-family: ui-monospace, monospace;
-    font-size: 0.82rem;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: var(--item-font-size, 12px);
+    line-height: 1.25;
     outline: none;
     box-sizing: border-box;
+    border-radius: 0px;
   }
+
   .rt-rendered {
     width: 100%;
     height: 100%;
     box-sizing: border-box;
-    padding: 0.45rem;
+    padding: 4px 6px;
     overflow-y: auto;
-    font-size: 0.85rem;
-    color: #e2e8f0;
-    line-height: 1.45;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: var(--item-font-size, 12px);
+    color: #d3d3d3;
+    line-height: 1.25;
     word-break: break-word;
   }
+
+  .rt-rendered :global(h1) {
+    font-size: 1.5em;
+  }
+  .rt-rendered :global(h2) {
+    font-size: 1.25em;
+  }
+  .rt-rendered :global(h3) {
+    font-size: 1.1em;
+  }
+
   .rt-rendered :global(h1),
   .rt-rendered :global(h2),
   .rt-rendered :global(h3) {
     margin: 0 0 0.35rem;
-    color: #f8fafc;
+    color: #e0e0e0;
+    font-weight: bold;
   }
+
   .rt-rendered :global(code) {
-    background: #0f131c;
-    padding: 1px 4px;
-    border-radius: 3px;
-    font-family: ui-monospace, monospace;
-    font-size: 0.78rem;
+    background: #111111;
+    border: 1px solid #555555;
+    padding: 0 3px;
+    border-radius: 0px;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 0.9em;
+    color: #ffffff;
   }
+
   .rt-rendered :global(pre) {
-    background: #0f131c;
-    padding: 0.4rem;
-    border-radius: 4px;
+    background: #111111;
+    border: 1px solid #555555;
+    padding: 4px;
+    border-radius: 0px;
     overflow-x: auto;
     margin: 0.25rem 0;
   }
+
   .rt-rendered :global(blockquote) {
     margin: 0.25rem 0;
-    padding-left: 0.6rem;
-    border-left: 3px solid #3a57e8;
-    color: #94a3b8;
+    padding-left: 0.5rem;
+    border-left: 3px solid #777777;
+    color: #888888;
   }
+
+  .rt-rendered :global(hr) {
+    border: none;
+    border-top: 1px solid #777777;
+    margin: 0.5rem 0;
+  }
+
   .rt-rendered :global(ul) {
     margin: 0.25rem 0;
-    padding-left: 1.2rem;
+    padding-left: 1.1rem;
   }
+
   .rt-rendered :global(a) {
-    color: #60a5fa;
+    color: #66b2ff;
+    text-decoration: none;
   }
+
+  .rt-rendered :global(a:hover) {
+    text-decoration: underline;
+  }
+
   .rt-rendered :global(.empty-hint) {
-    color: #64748b;
+    color: #888888;
     font-style: italic;
   }
+
   .edge,
   .corner {
     position: absolute;
     z-index: 25;
   }
+
   .edge.n {
     top: -5px;
-    left: 6px;
-    right: 6px;
+    left: 4px;
+    right: 4px;
     height: 10px;
     cursor: ns-resize;
   }
+
   .edge.s {
+    top: auto;
     bottom: -5px;
-    left: 6px;
-    right: 6px;
+    left: 4px;
+    right: 4px;
     height: 10px;
     cursor: ns-resize;
   }
+
   .edge.w {
     left: -5px;
-    top: 6px;
-    bottom: 6px;
+    top: 4px;
+    bottom: 4px;
     width: 10px;
     cursor: ew-resize;
   }
+
   .edge.e {
     right: -5px;
-    top: 6px;
-    bottom: 6px;
+    top: 4px;
+    bottom: 4px;
     width: 10px;
     cursor: ew-resize;
   }
+
   .corner {
-    width: 10px;
-    height: 10px;
-    background: #3a57e8;
-    border: 1px solid #fff;
-    border-radius: 2px;
+    width: 8px;
+    height: 8px;
+    background: #000000;
+    border: 1px solid #ffffff;
+    border-radius: 0px;
   }
+
   .corner.nw {
-    top: -6px;
-    left: -6px;
+    top: -4px;
+    left: -4px;
     cursor: nwse-resize;
   }
+
   .corner.ne {
-    top: -6px;
-    right: -6px;
+    top: -4px;
+    right: -4px;
     cursor: nesw-resize;
   }
+
   .corner.sw {
-    bottom: -6px;
-    left: -6px;
+    bottom: -4px;
+    left: -4px;
     cursor: nesw-resize;
   }
+
   .corner.se {
-    bottom: -6px;
-    right: -6px;
+    bottom: -4px;
+    right: -4px;
     cursor: nwse-resize;
   }
 </style>

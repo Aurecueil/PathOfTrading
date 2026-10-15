@@ -123,23 +123,30 @@
     min-width: 0;
     width: 100%;
   }
+
   input {
-    background: #232838;
-    border: 1px solid #333c52;
-    color: #fff;
-    padding: 0.3rem 0.45rem;
-    border-radius: 4px;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 12px;
+    line-height: 1.15;
+    height: 26px;
+    background: #000000;
+    border: 1px solid #7f7f7f;
+    border-radius: 0px;
+    color: #ffffff;
+    padding: 0 6px;
     outline: none;
-    font-size: 0.78rem;
-    height: 30px;
     width: 100%;
     box-sizing: border-box;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  input:hover,
   input:focus {
-    border-color: #3b82f6;
+    border-color: #ffffff;
   }
+
+  /* Popover Panel with 3px Solid White Border */
   .dropdown {
     position: absolute;
     top: 100%;
@@ -148,35 +155,57 @@
     max-height: 260px;
     overflow-y: auto;
     overscroll-behavior: contain;
-    background: #1e2230;
-    border: 1px solid #333c52;
-    border-radius: 4px;
+    background: #000000;
+    border: 1px solid #ffffff;
+    border-radius: 0px;
     list-style: none;
-    padding: 0;
+    padding: 2px 0;
     margin: 2px 0 0 0;
     z-index: 1000;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-    scrollbar-width: none;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
+    scrollbar-width: thin;
+    scrollbar-color: #555555 #000000;
   }
+
   .dropdown::-webkit-scrollbar {
-    display: none;
+    width: 6px;
   }
+
+  .dropdown::-webkit-scrollbar-track {
+    background: #000000;
+  }
+
+  .dropdown::-webkit-scrollbar-thumb {
+    background: #555555;
+  }
+
+  /* Option Item Rows */
   .dropdown li {
-    padding: 0.35rem 0.5rem;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 12px;
+    line-height: 1.15;
+    padding: 1px 4px;
     cursor: pointer;
-    font-size: 0.775rem;
-    color: #cbd5e1;
-    border-bottom: 1px solid #282e40;
+    color: #9a9a9a;
+    background: #000000;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
   .dropdown li:hover,
   .dropdown li.highlighted {
-    background: #293044;
+    background: #262626;
+    color: #ffffff;
   }
+
   .dropdown li.unique {
-    color: #af6025;
-    font-weight: 600;
+    color: #9a5521;
+  }
+
+  .dropdown li.unique:hover,
+  .dropdown li.unique.highlighted {
+    background: #262626;
+    color: #db792f;
   }
 </style>

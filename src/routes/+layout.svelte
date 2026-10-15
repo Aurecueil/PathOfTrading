@@ -18,8 +18,20 @@
   import MenuTabBar from "$lib/layout/MenuTabBar.svelte";
   import WorkspaceModals from "$lib/layout/WorkspaceModals.svelte";
   import FooterBar from "$lib/layout/FooterBar.svelte";
+  import type { Snippet } from "svelte";
 
-  let { children } = $props();
+  let { children }: { children: Snippet } = $props();
+
+  $effect(() => {
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+    };
+
+    window.addEventListener("contextmenu", handleContextMenu);
+    return () => {
+      window.removeEventListener("contextmenu", handleContextMenu);
+    };
+  });
 
   let unlistenWindowClose: UnlistenFn | undefined;
 
