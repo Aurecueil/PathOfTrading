@@ -8,7 +8,7 @@
   export let snapToGrid: boolean = true;
   export let gridSize: number = 40;
   export let selected: boolean = false;
-
+  export let z: number = 0;
   const dispatch = createEventDispatcher<{
     select: { shiftKey: boolean };
     dragstart: void;
@@ -124,6 +124,7 @@
 <div
   class="shape-root"
   class:selected
+  style:z-index={z}
   class:arrow={item.kind === "arrow"}
   style:transform="translate({item.x}px, {item.y}px)"
   style:width="{Math.max(item.w, 1)}px"

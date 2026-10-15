@@ -8,7 +8,7 @@
   export let snapToGrid: boolean = true;
   export let gridSize: number = 40;
   export let selected: boolean = false;
-
+  export let z: number = 0;
   const dispatch = createEventDispatcher<{
     select: { shiftKey: boolean };
     dragstart: void;
@@ -206,6 +206,7 @@
 <!-- svelte-ignore a11y-no-static-element-interactions -->
 <div
   class="richtext-root"
+  style:z-index={z}
   class:selected={selected || editing}
   style:transform="translate({item.x}px, {item.y}px)"
   style:width="{item.w}px"

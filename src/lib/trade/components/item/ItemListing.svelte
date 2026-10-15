@@ -2,14 +2,16 @@
 <script lang="ts">
   import type { ItemListing } from "$lib/types/tradeItem";
   import type { ResolvedDisplayStyle } from "$lib/types/types";
-  import type { staticsPoe, staticsPoe2 } from "$lib/trade/tradeStore";
+  import type { StaticEntry } from "$lib/types/statics";
+  import { staticsPoe, staticsPoe2 } from "$lib/trade/tradeStore";
+  import CdnImage from "./CdnImage.svelte";
 
   export let listing: ItemListing | undefined;
   export let sortValue: any = null;
   export let isTraveling: boolean = false;
   export let isQueued: boolean = false;
   export let travelError: string | null = null;
-  export let realm: string = "";
+  export let realm: string = "poe";
   export let league: string = "";
   export let searchId: string = "";
   export let styleMode: ResolvedDisplayStyle = "full";
@@ -20,6 +22,27 @@
 
   $: price = listing?.price;
   $: account = listing?.account;
+  $: statics = realm === "poe2" ? $staticsPoe2 : $staticsPoe;
+  $: currencyEntry = findStatic(statics, price?.currency);
+
+  function findStatic(
+    categories: { entries: StaticEntry[] }[],
+    id: string | undefined,
+  ): StaticEntry | undefined {
+    if (!id) return undefined;
+    for (const cat of categories) {
+      const hit = cat.entries.find((e) => e.id === id);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
+
+  function extractArray<T>(storeVal: any): T[] {
+    if (!storeVal) return [];
+    if (Array.isArray(storeVal)) return storeVal;
+    if (Array.isArray(storeVal.result)) return storeVal.result;
+    return [];
+  }
 
   $: relativeAge = (() => {
     if (!listing?.indexed) return "";
@@ -50,10 +73,17 @@
 {#if styleMode === "minimal"}
   <div class="listing-minimal">
     <div class="min-price">
-      <span class="amount">{price?.amount ?? "—"}</span>
-      <span
-        class="cur
-      ncy">{price?.currency ?? ""}</span
+      <span class="amount">{price?.amount ?? "—"}x</span>
+      {#if currencyEntry?.image}
+        <CdnImage
+          src={currencyEntry.image}
+          alt={currencyEntry.text}
+          className="currency-img"
+          loading="lazy"
+        />
+      {/if}
+      <span class="currency"
+        >{currencyEntry?.text ?? price?.currency ?? ""}</span
       >
     </div>
 
@@ -80,8 +110,18 @@
     <!-- Price & Larger Gold Fee -->
     <div class="price-box">
       <div class="price-headline">
-        <span class="amount">{price?.amount ?? "—"}</span>
-        <span class="currency">{price?.currency ?? "Unpriced"}</span>
+        <span class="amount">{price?.amount ?? "—"}x</span>
+        {#if currencyEntry?.image}
+          <CdnImage
+            src={currencyEntry.image}
+            alt={currencyEntry.text}
+            className="currency-img"
+            loading="lazy"
+          />
+        {/if}
+        <span class="currency">
+          {currencyEntry?.text ?? price?.currency ?? "Unpriced"}
+        </span>
       </div>
       {#if listing?.fee}
         <div class="fee-text">+ {listing.fee} gold fee</div>
@@ -219,7 +259,12 @@
       width: auto !important;
     }
   }
-
+  :global(.currency-img) {
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+    align-self: center;
+  }
   .price-headline {
     display: flex;
     align-items: baseline;
@@ -238,7 +283,11 @@
     font-size: 0.8rem;
     color: #94a3b8;
   }
-
+  .mode-compact :global(.currency-img),
+  .min-price :global(.currency-img) {
+    width: 16px;
+    height: 16px;
+  }
   /* Bigger Gold Fee */
   .fee-text {
     font-size: 0.78rem;

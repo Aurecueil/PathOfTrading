@@ -21,6 +21,7 @@
   export let gridSize: number = 40;
   export let selected: boolean = false;
   export let disabled: boolean = false;
+  export let z: number = 0;
 
   const dispatch = createEventDispatcher<{
     openfilters: void;
@@ -965,6 +966,7 @@
   class="tile-root style-{effectiveStyle}"
   class:live-active={isLiveActive}
   class:selected
+  style:z-index={z}
   class:is-disabled={disabled}
   style:transform="translate({tile.x}px, {tile.y}px)"
   style:width="{tile.w}px"
@@ -995,7 +997,7 @@
       {#if disabled}
         <span class="disabled-badge">OFF</span>
       {/if}
-      <span class="title" title={tile.id}>{tile.id}</span>
+      <span class="title" title={displayTitle}>{displayTitle}</span>
       {#if displayedItems.length > 0 || orderedEntries.length > 0}
         <span class="count-pill" title="Displayed / Total matched items">
           {displayedItems.length}{#if orderedEntries.length > 0 && mode !== "live"}/{orderedEntries.length}{/if}

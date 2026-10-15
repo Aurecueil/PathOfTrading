@@ -82,6 +82,20 @@
   let clipboard: CanvasSnapshot | null = null;
   let autoSaveTimer: ReturnType<typeof setInterval> | undefined;
 
+  let zOrder: Map<string | number, number> = new Map();
+  let zCounter = 0;
+
+  function bringToFront(ids: (string | number)[]) {
+    if (ids.length === 0) return;
+    const next = new Map(zOrder);
+    // keep the relative order of a multi-selection
+    const sorted = [...ids].sort(
+      (a, b) => (next.get(a) ?? 0) - (next.get(b) ?? 0),
+    );
+    for (const id of sorted) next.set(id, ++zCounter);
+    zOrder = next; // reassign so Svelte reacts
+  }
+
   function makeTileId(): string {
     if (
       typeof crypto !== "undefined" &&
@@ -180,6 +194,9 @@
     }
 
     let idCounter = 1;
+    zOrder = new Map();
+    zCounter = 0;
+    const hydratedZ = new Map<string | number, number>();
     const hydratedTiles: SearchTile[] = [];
     const hydratedAnnotations: CanvasAnnotation[] = [];
 
@@ -192,6 +209,7 @@
           id: assignedId,
           autoEdit: false,
         });
+        hydratedZ.set(assignedId, ++zCounter);
       } else {
         const tileUniqueId = makeTileId();
         const tileRealm = item.realm || currentProjectRealm;
@@ -230,9 +248,10 @@
           payload: "",
           full_payload: clonedFullPayload,
         });
+        hydratedZ.set(tileUniqueId, ++zCounter);
       }
     }
-
+    zOrder = hydratedZ;
     nextId = idCounter;
     tiles = hydratedTiles;
     annotations = hydratedAnnotations;
@@ -248,7 +267,7 @@
     }
   }
 
-  function buildProjectItems(onlySelected: boolean = false): ProjectItem[] {
+  function buildProjectItems(onlySelected = false): ProjectItem[] {
     const targetTiles = onlySelected
       ? tiles.filter((t) => selectedIds.has(t.id))
       : tiles;
@@ -257,9 +276,17 @@
       : annotations;
 
     return [
-      ...targetAnnotations.map(serializeAnnotationForSave),
-      ...targetTiles.map(serializeTileForSave),
-    ];
+      ...targetAnnotations.map((a) => ({
+        z: zOrder.get(a.id) ?? 0,
+        item: serializeAnnotationForSave(a),
+      })),
+      ...targetTiles.map((t) => ({
+        z: zOrder.get(t.id) ?? 0,
+        item: serializeTileForSave(t),
+      })),
+    ]
+      .sort((a, b) => a.z - b.z)
+      .map((e) => e.item);
   }
 
   function buildShareCodePayload(
@@ -366,7 +393,7 @@
     tiles = [...tiles, ...addedTiles];
     annotations = [...annotations, ...addedAnnotations];
     selectedIds = newSelection;
-
+    bringToFront([...newSelection]);
     await tick();
     for (const t of addedTiles) {
       if (!t.disabled) {
@@ -577,7 +604,7 @@
     tiles = [...tiles, ...pastedTiles];
     annotations = [...annotations, ...pastedAnnotations];
     selectedIds = newSelected;
-
+    bringToFront([...newSelected]);
     await tick();
     for (const t of pastedTiles) {
       if (!t.disabled && (!t.results || t.results.length === 0)) {
@@ -684,6 +711,7 @@
       full_payload: deepClone(defaultFullPayload),
     };
     tiles = [...tiles, newTile];
+    bringToFront([newTile.id]);
     blurActiveInput();
   }
 
@@ -701,19 +729,20 @@
     selectedIds.delete(id);
   }
 
-  function selectItem(id: string | number, shiftKey: boolean = false) {
+  function selectItem(id: string | number, shiftKey = false) {
     contextMenu = null;
     blurActiveInput();
     if (shiftKey) {
       const next = new Set(selectedIds);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
+      if (next.has(id)) next.delete(id);
+      else {
         next.add(id);
+        bringToFront([id]);
       }
       selectedIds = next;
-    } else if (!selectedIds.has(id)) {
-      selectedIds = new Set([id]);
+    } else {
+      if (!selectedIds.has(id)) selectedIds = new Set([id]);
+      bringToFront([id]);
     }
   }
 
@@ -722,6 +751,7 @@
     if (draggedId !== undefined && !selectedIds.has(draggedId)) {
       selectedIds = new Set([draggedId]);
     }
+    bringToFront([...selectedIds]);
 
     dragMoved = false;
     preDragSnapshot = createCurrentSnapshot();
@@ -787,6 +817,7 @@
       drawerRef?.saveWithoutSearch();
     }
     activeTileId = tileId;
+    bringToFront([tileId]);
   }
 
   function nonPassiveWheel(node: HTMLElement) {
@@ -888,6 +919,7 @@
 
       annotations = [...annotations, newAnnotation];
       selectedIds = new Set([id]);
+      bringToFront([id]);
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     }
   }
@@ -1258,6 +1290,7 @@
           {item}
           {scale}
           {snapToGrid}
+          z={zOrder.get(item.id) ?? 0}
           gridSize={GRID_SIZE}
           selected={selectedIds.has(item.id)}
           on:select={(e) => selectItem(item.id, e.detail?.shiftKey)}
@@ -1268,9 +1301,10 @@
         />
       {:else if item.kind === "title"}
         <CanvasTitle
-          bind:item
+          {item}
           {scale}
           {snapToGrid}
+          z={zOrder.get(item.id) ?? 0}
           gridSize={GRID_SIZE}
           selected={selectedIds.has(item.id)}
           on:select={(e) => selectItem(item.id, e.detail?.shiftKey)}
@@ -1281,9 +1315,10 @@
         />
       {:else if item.kind === "richtext"}
         <CanvasRichText
-          bind:item
+          {item}
           {scale}
           {snapToGrid}
+          z={zOrder.get(item.id) ?? 0}
           gridSize={GRID_SIZE}
           selected={selectedIds.has(item.id)}
           on:select={(e) => selectItem(item.id, e.detail?.shiftKey)}
@@ -1297,9 +1332,11 @@
 
     {#each tiles as tile (tile.id)}
       <Tile
+        bind:this={tileRefs[tile.id]}
         {tile}
         {scale}
         {snapToGrid}
+        z={zOrder.get(tile.id) ?? 0}
         gridSize={GRID_SIZE}
         selected={selectedIds.has(tile.id)}
         disabled={tile.disabled ?? false}
@@ -1435,6 +1472,7 @@
   }
 
   .marquee-box {
+    z-index: 1000000;
     position: absolute;
     top: 0;
     left: 0;
