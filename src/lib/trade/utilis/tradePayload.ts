@@ -7,7 +7,7 @@ import {
   statsPoe2,
 } from "$lib/trade/tradeStore";
 import type { ItemEntry } from "$lib/types/baseItem";
-import type { FilterGroup } from "$lib/types/filters";
+import type { FilterGroup, FilterEntry } from "$lib/types/filters";
 import type { StatGroup } from "$lib/types/stats";
 
 export interface StatGroupPayloadState {
@@ -30,8 +30,43 @@ function extractStoreArray<T>(storeVal: any): T[] {
   return [];
 }
 
+function hasValidOption(opt: any): boolean {
+  return opt !== undefined && opt !== null && opt !== "" && opt !== "any";
+}
+
+function hasValidNumber(num: any): boolean {
+  return num !== undefined && num !== null && num !== "" && !isNaN(Number(num));
+}
+
+/**
+ * Builds a map of GroupID -> Map<FilterID, FilterDef> across a list of FilterGroups.
+ * Avoids `.find()` collisions when PoE1 and PoE2 share group IDs like `misc_filters`.
+ */
+function buildFilterDefinitionsMap(
+  groups: FilterGroup[],
+): Map<string, Map<string, FilterEntry>> {
+  const map = new Map<string, Map<string, FilterEntry>>();
+  for (const g of groups) {
+    if (!g || !g.id || g.id === "status_filters") continue;
+    let fMap = map.get(g.id);
+    if (!fMap) {
+      fMap = new Map<string, FilterEntry>();
+      map.set(g.id, fMap);
+    }
+    if (Array.isArray(g.filters)) {
+      for (const f of g.filters) {
+        if (f && f.id && !fMap.has(f.id)) {
+          fMap.set(f.id, f);
+        }
+      }
+    }
+  }
+  return map;
+}
+
 /**
  * Converts a saved `full_payload` and `realm` into an executable regular search `payload`.
+ * Strips any disabled groups, disabled filters/stats, or entries not belonging to `realm`.
  */
 export function buildRegularPayload(
   fullPayload: any,
@@ -48,13 +83,9 @@ export function buildRegularPayload(
   const realmFilterGroups = extractStoreArray<FilterGroup>(
     normalizedRealm === "poe2" ? get(filtersPoe2) : get(filtersPoe),
   );
-  const validRealmGroupIds =
+  const validRealmGroupFilterMap =
     realmFilterGroups.length > 0
-      ? new Set(
-          realmFilterGroups
-            .filter((g) => g.id !== "status_filters")
-            .map((g) => g.id),
-        )
+      ? buildFilterDefinitionsMap(realmFilterGroups)
       : null;
 
   const realmStatCatalog = extractStoreArray<StatGroup>(
@@ -67,7 +98,7 @@ export function buildRegularPayload(
         )
       : null;
 
-  // Build active stats & track index mapping from full_payload stats -> regular payload stats
+  // 1. Build active stats & track index mapping from full_payload stats -> regular payload stats
   const rawStats: any[] = Array.isArray(baseQuery.stats) ? baseQuery.stats : [];
   const searchStats: any[] = [];
   const fullToSearchGroupIndexMap = new Map<number, number>();
@@ -80,76 +111,72 @@ export function buildRegularPayload(
     const isPoe2Restricted =
       normalizedRealm === "poe2" &&
       (gType === "crucible" || gType === "mercenary");
-    const isGroupDisabled = Boolean(g.disabled || isPoe2Restricted);
+    const isGroupDisabled = Boolean(
+      g.disabled || g.collapsed || isPoe2Restricted,
+    );
 
-    if (!isGroupDisabled) {
-      const rawFilters = Array.isArray(g.filters) ? g.filters : [];
-      const activeFiltersList = rawFilters
-        .filter((f: any) => {
-          if (!f || f.disabled) return false;
-          if (validRealmStatIds && !validRealmStatIds.has(f.id)) return false;
-          return true;
-        })
-        .map((f: any) => {
-          const fil: any = { id: f.id };
-          const fVal: any = {};
-          if (
-            f.value?.option !== undefined &&
-            f.value?.option !== null &&
-            f.value?.option !== ""
-          ) {
-            fVal.option = Number(f.value.option);
-          }
-          if (f.value?.min !== undefined && f.value?.min !== "") {
-            fVal.min = Number(f.value.min);
-          }
-          if (f.value?.max !== undefined && f.value?.max !== "") {
-            fVal.max = Number(f.value.max);
-          }
-          if (
-            (gType === "weight" || gType === "weight2") &&
-            f.value?.weight !== undefined &&
-            f.value?.weight !== ""
-          ) {
-            fVal.weight = Number(f.value.weight);
-          }
-          fil.value = fVal;
-          fil.disabled = false;
-          return fil;
-        });
+    if (isGroupDisabled) continue;
 
-      if (activeFiltersList.length > 0 || gType === "and") {
-        fullToSearchGroupIndexMap.set(fullIdx, searchStats.length);
-        const searchGrp: any = {
-          type: gType,
-          filters: activeFiltersList,
-        };
-
-        if (
-          ["count", "weight", "weight2", "crucible", "mercenary"].includes(
-            gType,
-          ) &&
-          g.value &&
-          typeof g.value === "object"
-        ) {
-          const valObj: any = {};
-          if (g.value.min !== undefined && g.value.min !== "") {
-            valObj.min = Number(g.value.min);
-          }
-          if (g.value.max !== undefined && g.value.max !== "") {
-            valObj.max = Number(g.value.max);
-          }
-          if (Object.keys(valObj).length > 0) {
-            searchGrp.value = valObj;
-          }
+    const rawFilters = Array.isArray(g.filters) ? g.filters : [];
+    const activeFiltersList = rawFilters
+      .filter((f: any) => {
+        if (!f || !f.id || f.disabled) return false;
+        if (validRealmStatIds && !validRealmStatIds.has(f.id)) return false;
+        return true;
+      })
+      .map((f: any) => {
+        const fil: any = { id: f.id };
+        const fVal: any = {};
+        if (hasValidOption(f.value?.option)) {
+          const numOpt = Number(f.value.option);
+          fVal.option = isNaN(numOpt) ? f.value.option : numOpt;
         }
+        if (hasValidNumber(f.value?.min)) {
+          fVal.min = Number(f.value.min);
+        }
+        if (hasValidNumber(f.value?.max)) {
+          fVal.max = Number(f.value.max);
+        }
+        if (
+          (gType === "weight" || gType === "weight2") &&
+          hasValidNumber(f.value?.weight)
+        ) {
+          fVal.weight = Number(f.value.weight);
+        }
+        if (Object.keys(fVal).length > 0) {
+          fil.value = fVal;
+        }
+        fil.disabled = false;
+        return fil;
+      });
 
-        searchStats.push(searchGrp);
+    if (activeFiltersList.length > 0 || gType === "and") {
+      fullToSearchGroupIndexMap.set(fullIdx, searchStats.length);
+      const searchGrp: any = {
+        type: gType,
+        filters: activeFiltersList,
+      };
+
+      if (
+        ["count", "weight", "weight2", "crucible", "mercenary"].includes(
+          gType,
+        ) &&
+        g.value &&
+        typeof g.value === "object"
+      ) {
+        const valObj: any = {};
+        if (hasValidNumber(g.value.min)) valObj.min = Number(g.value.min);
+        if (hasValidNumber(g.value.max)) valObj.max = Number(g.value.max);
+        if (Object.keys(valObj).length > 0) {
+          searchGrp.value = valObj;
+        }
       }
+
+      searchStats.push(searchGrp);
     }
   }
 
-  // Build active filter groups
+  // 2. Build active filter groups (strip disabled groups, disabled filters, and non-realm filters)
   const rawFiltersObj =
     baseQuery.filters && typeof baseQuery.filters === "object"
       ? baseQuery.filters
@@ -160,20 +187,46 @@ export function buildRegularPayload(
     rawFiltersObj as Record<string, any>,
   )) {
     if (groupId === "status_filters") continue;
-    if (validRealmGroupIds && !validRealmGroupIds.has(groupId)) continue;
     if (!gData || typeof gData !== "object" || gData.disabled) continue;
 
-    const groupFiltersPayload =
+    const validGroupFilters = validRealmGroupFilterMap?.get(groupId);
+    if (validRealmGroupFilterMap && !validGroupFilters) continue;
+
+    const rawGroupFilters =
       gData.filters && typeof gData.filters === "object" ? gData.filters : {};
-    if (Object.keys(groupFiltersPayload).length > 0) {
+    const activeGroupFilters: Record<string, any> = {};
+
+    for (const [filterId, fObj] of Object.entries(
+      rawGroupFilters as Record<string, any>,
+    )) {
+      if (!fObj || typeof fObj !== "object") continue;
+      // Strip if explicitly disabled in full_payload
+      if (fObj.disabled) continue;
+      // Strip if this specific filter ID does not exist in the current realm's group
+      if (validGroupFilters && !validGroupFilters.has(filterId)) continue;
+
+      const cleanEntry: Record<string, any> = {};
+      for (const [k, v] of Object.entries(fObj)) {
+        if (k === "disabled") continue;
+        if (v !== undefined && v !== null && v !== "") {
+          cleanEntry[k] = v;
+        }
+      }
+
+      if (Object.keys(cleanEntry).length > 0) {
+        activeGroupFilters[filterId] = cleanEntry;
+      }
+    }
+
+    if (Object.keys(activeGroupFilters).length > 0) {
       searchFilters[groupId] = {
         disabled: false,
-        filters: groupFiltersPayload,
+        filters: activeGroupFilters,
       };
     }
   }
 
-  // Resolve sort object, remapping statgroup indices if needed
+  // 3. Resolve sort object, remapping statgroup indices or falling back if stat isn't in realm
   let searchSortObj: Record<string, "asc" | "desc"> = { price: "asc" };
   if (base.sort && typeof base.sort === "object") {
     const [sField, sDir] = Object.entries(base.sort)[0] || [];
@@ -187,6 +240,10 @@ export function buildRegularPayload(
           searchIdx !== undefined
             ? { [`statgroup.${searchIdx}`]: dir }
             : { price: dir };
+      } else if (sField.startsWith("stat.")) {
+        const statId = sField.replace("stat.", "");
+        const isStatValid = !validRealmStatIds || validRealmStatIds.has(statId);
+        searchSortObj = isStatValid ? { [sField]: dir } : { price: dir };
       } else {
         searchSortObj = { [sField]: dir };
       }
@@ -213,6 +270,10 @@ export function buildRegularPayload(
   return payload;
 }
 
+/**
+ * Builds both `full_payload` (retaining ALL values across realms, marking collapsed or
+ * out-of-realm items as `disabled: true`) and `payload` (stripped for the active search).
+ */
 export function buildPayloads(params: {
   initialPayload: any;
   statGroups: StatGroupPayloadState[];
@@ -241,13 +302,27 @@ export function buildPayloads(params: {
   } = params;
 
   const base = initialPayload ? JSON.parse(JSON.stringify(initialPayload)) : {};
+
+  const realmStatCatalog = extractStoreArray<StatGroup>(
+    realm === "poe2" ? get(statsPoe2) : get(statsPoe),
+  );
+  const validRealmStatIds =
+    realmStatCatalog.length > 0
+      ? new Set(
+          realmStatCatalog.flatMap((g) => (g.entries || []).map((e) => e.id)),
+        )
+      : null;
+
+  // 1. Build fullStats (keep all groups & filters, disable collapsed or out-of-realm)
   const fullStats: any[] = [];
   const fullGroupIndexMap = new Map<string, number>();
 
   for (const g of statGroups) {
     const isPoe2Restricted =
       realm === "poe2" && (g.type === "crucible" || g.type === "mercenary");
-    const isGroupDisabled = Boolean(g.collapsed || isPoe2Restricted);
+    const isGroupDisabled = Boolean(
+      g.collapsed || g.disabled || isPoe2Restricted,
+    );
 
     const valObj: any = {};
     if (
@@ -256,41 +331,38 @@ export function buildPayloads(params: {
       ) &&
       g.value
     ) {
-      if (g.value.min !== undefined && g.value.min !== "")
-        valObj.min = Number(g.value.min);
-      if (g.value.max !== undefined && g.value.max !== "")
-        valObj.max = Number(g.value.max);
+      if (hasValidNumber(g.value.min)) valObj.min = Number(g.value.min);
+      if (hasValidNumber(g.value.max)) valObj.max = Number(g.value.max);
     }
 
     const fullFiltersList = g.filters.map((f) => {
       const fil: any = { id: f.id };
       const fVal: any = {};
-      if (
-        f.value?.option !== undefined &&
-        f.value?.option !== null &&
-        f.value?.option !== ""
-      ) {
-        fVal.option = Number(f.value.option);
+      if (hasValidOption(f.value?.option)) {
+        const numOpt = Number(f.value.option);
+        fVal.option = isNaN(numOpt) ? f.value.option : numOpt;
       }
-      if (f.value?.min !== undefined && f.value?.min !== "")
-        fVal.min = Number(f.value.min);
-      if (f.value?.max !== undefined && f.value?.max !== "")
-        fVal.max = Number(f.value.max);
+      if (hasValidNumber(f.value?.min)) fVal.min = Number(f.value.min);
+      if (hasValidNumber(f.value?.max)) fVal.max = Number(f.value.max);
       if (
         (g.type === "weight" || g.type === "weight2") &&
-        f.value?.weight !== undefined &&
-        f.value?.weight !== ""
+        hasValidNumber(f.value?.weight)
       ) {
         fVal.weight = Number(f.value.weight);
       }
       fil.value = fVal;
-      fil.disabled = Boolean(f.disabled);
+
+      const isOutOfRealm = Boolean(
+        validRealmStatIds && !validRealmStatIds.has(f.id),
+      );
+      fil.disabled = Boolean(f.disabled || isOutOfRealm);
       return fil;
     });
 
     fullGroupIndexMap.set(g.id, fullStats.length);
     const fullGrp: any = {
       type: g.type,
+      collapsed: Boolean(g.collapsed),
       disabled: isGroupDisabled,
       filters: fullFiltersList,
     };
@@ -318,9 +390,13 @@ export function buildPayloads(params: {
     delete baseQuery.type;
   }
 
-  const currentRealmGroupIds = new Set(renderedFilterGroups.map((g) => g.id));
+  // 2. Build fullFilters (merge PoE1 + PoE2 filter definitions properly)
+  const currentRealmMap = buildFilterDefinitionsMap(renderedFilterGroups);
+  const allKnownMap = buildFilterDefinitionsMap(allKnownFilterGroups);
+
   const allGroupIds = new Set<string>([
     ...Object.keys(filterValues),
+    ...Array.from(allKnownMap.keys()),
     ...(initialPayload?.query?.filters
       ? Object.keys(initialPayload.query.filters)
       : []),
@@ -331,90 +407,102 @@ export function buildPayloads(params: {
   for (const groupId of allGroupIds) {
     if (groupId === "status_filters") continue;
 
-    const isCurrentRealm = currentRealmGroupIds.has(groupId);
-    const isExpanded = !groupCollapsed[groupId];
-    const isVisibleRightNow = isCurrentRealm && isExpanded;
+    const currentRealmGroupFilters = currentRealmMap.get(groupId);
+    const isGroupInCurrentRealm = Boolean(currentRealmGroupFilters);
+    const isCollapsed = Boolean(groupCollapsed[groupId]);
+    const isGroupDisabled = !isGroupInCurrentRealm || isCollapsed;
+
     const groupState = filterValues[groupId] || {};
+    const initialGroupFilters =
+      initialPayload?.query?.filters?.[groupId]?.filters || {};
+    const knownGroupFilters = allKnownMap.get(groupId);
+
+    const allFilterIdsInGroup = new Set<string>([
+      ...Object.keys(initialGroupFilters),
+      ...Object.keys(groupState),
+      ...(knownGroupFilters ? Array.from(knownGroupFilters.keys()) : []),
+    ]);
+
     const groupFiltersPayload: Record<string, any> = {};
 
-    if (initialPayload?.query?.filters?.[groupId]?.filters) {
-      Object.assign(
-        groupFiltersPayload,
-        JSON.parse(
-          JSON.stringify(initialPayload.query.filters[groupId].filters),
-        ),
+    for (const filterId of allFilterIdsInGroup) {
+      const fDef =
+        currentRealmGroupFilters?.get(filterId) ??
+        knownGroupFilters?.get(filterId);
+      const isFilterInCurrentRealm = Boolean(
+        currentRealmGroupFilters?.has(filterId),
       );
-    }
 
-    const groupDef = allKnownFilterGroups.find((g) => g.id === groupId);
-    if (groupDef && Array.isArray(groupDef.filters)) {
-      for (const fDef of groupDef.filters) {
-        const val = groupState[fDef.id];
-        if (!val) {
-          delete groupFiltersPayload[fDef.id];
-          continue;
-        }
+      // Prefer user state in `filterValues` if any key exists; otherwise fall back to `initialGroupFilters`
+      const stateVal = groupState[filterId];
+      const hasStateKeys =
+        stateVal &&
+        typeof stateVal === "object" &&
+        Object.keys(stateVal).length > 0;
+      const rawSource = hasStateKeys
+        ? stateVal
+        : isFilterInCurrentRealm && stateVal !== undefined
+          ? stateVal
+          : initialGroupFilters[filterId];
 
-        const entryPayload: Record<string, any> = {};
-        if (
-          fDef.option &&
-          val.option !== undefined &&
-          val.option !== null &&
-          val.option !== ""
-        ) {
-          entryPayload.option = val.option;
+      if (!rawSource || typeof rawSource !== "object") continue;
+
+      const entryPayload: Record<string, any> = {};
+
+      if (fDef) {
+        if (fDef.option && hasValidOption(rawSource.option)) {
+          entryPayload.option = String(rawSource.option);
         }
         if (
           fDef.input &&
-          typeof val.input === "string" &&
-          val.input.trim() !== ""
+          typeof rawSource.input === "string" &&
+          rawSource.input.trim() !== ""
         ) {
-          entryPayload.input = val.input.trim();
+          entryPayload.input = rawSource.input.trim();
         }
         if (fDef.minMax) {
-          if (
-            val.min !== undefined &&
-            val.min !== "" &&
-            !isNaN(Number(val.min))
-          ) {
-            entryPayload.min = Number(val.min);
+          if (hasValidNumber(rawSource.min)) {
+            entryPayload.min = Number(rawSource.min);
           }
-          if (
-            val.max !== undefined &&
-            val.max !== "" &&
-            !isNaN(Number(val.max))
-          ) {
-            entryPayload.max = Number(val.max);
+          if (hasValidNumber(rawSource.max)) {
+            entryPayload.max = Number(rawSource.max);
           }
         }
         if (fDef.sockets) {
           for (const s of ["r", "g", "b", "w"] as const) {
-            if (
-              val[s] !== undefined &&
-              val[s] !== "" &&
-              !isNaN(Number(val[s]))
-            ) {
-              entryPayload[s] = Number(val[s]);
+            if (hasValidNumber(rawSource[s])) {
+              entryPayload[s] = Number(rawSource[s]);
             }
           }
         }
-        if (Object.keys(entryPayload).length > 0) {
-          groupFiltersPayload[fDef.id] = entryPayload;
-        } else {
-          delete groupFiltersPayload[fDef.id];
+      } else {
+        // Catalogs haven't loaded yet or unknown filter: preserve existing values verbatim
+        for (const [k, v] of Object.entries(rawSource)) {
+          if (k === "disabled") continue;
+          if (v !== undefined && v !== null && v !== "") {
+            entryPayload[k] = v;
+          }
         }
+      }
+
+      if (Object.keys(entryPayload).length > 0) {
+        if (!isFilterInCurrentRealm) {
+          entryPayload.disabled = true;
+        }
+        groupFiltersPayload[filterId] = entryPayload;
       }
     }
 
     const hasFilterValues = Object.keys(groupFiltersPayload).length > 0;
-    if (hasFilterValues || isVisibleRightNow) {
+    if (hasFilterValues || (isGroupInCurrentRealm && !isCollapsed)) {
       fullFilters[groupId] = {
-        disabled: !isVisibleRightNow,
+        disabled: isGroupDisabled,
         filters: groupFiltersPayload,
       };
     }
   }
 
+  // 3. Resolve Sort
   let fullSortObj: Record<string, "asc" | "desc"> = {};
 
   if (sortKey.startsWith("group:")) {

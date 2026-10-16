@@ -104,14 +104,52 @@ export const STAT_KEYWORD_COLORS: Array<{ keywords: string[]; color: string }> =
     // Multi-word phrases first so they match before single words
     { keywords: ["energy shield"], color: "#7EEBEB" },
     { keywords: ["evasion rating"], color: "#30EB6E" },
-    { keywords: ["fire"], color: "#AB6921" },
-    { keywords: ["cold"], color: "#3B65A5" },
-    { keywords: ["lightning", "lighting"], color: "#A09D42" },
-    { keywords: ["chaos"], color: "#C01E85" },
+    {
+      keywords: [
+        "fire resistance",
+        "fire damage",
+        "fire gems",
+        "level of all fire",
+      ],
+      color: "#AB6921",
+    },
+    {
+      keywords: [
+        "cold resistance",
+        "cold damage",
+        "cold gems",
+        "level of all cold",
+      ],
+      color: "#3B65A5",
+    },
+    {
+      keywords: [
+        "lightning resistance",
+        "lightning damage",
+        "lightning gems",
+        "level of all lightning",
+      ],
+      color: "#A09D42",
+    },
+    {
+      keywords: [
+        "chaos resistance",
+        "chaos damage",
+        "chaos gems",
+        "level of all chaos",
+      ],
+      color: "#C01E85",
+    },
     { keywords: ["strength"], color: "#CF4A2D" },
     { keywords: ["dexterity"], color: "#65E465" },
     { keywords: ["intelligence", "inteligence"], color: "#6868EB" },
-    { keywords: ["life"], color: "#CF4A2D" },
-    { keywords: ["mana"], color: "#6868EB" },
-    { keywords: ["spirit"], color: "#EBEB6E" },
+    {
+      keywords: ["to life", "increased life", "maximum life"],
+      color: "#CF4A2D",
+    },
+    {
+      keywords: ["to mana", "increased mana", "maximum mana"],
+      color: "#6868EB",
+    },
+    { keywords: ["to spirit", "increased spirit"], color: "#EBEB6E" },
   ];

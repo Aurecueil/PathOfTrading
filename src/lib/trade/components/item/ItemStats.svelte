@@ -25,6 +25,7 @@
   $: isPoe2 = (item.realm || realm || "").toLowerCase() === "poe2";
 
   const CDN_BASE = "https://web.poecdn.com";
+
   const FORESIGHT_ICON = `${CDN_BASE}/protected/image/item/popup/foresight.png?v=1709582916256&key=Lef8eETW43fyBwYaZ_f3SA`;
 
   const VEILED_POE1: Record<string, string> = {
@@ -109,6 +110,7 @@
     if (rarity === "unique") return "rarity-unique";
     if (rarity === "gem") return "rarity-gem";
     if (rarity === "currency") return "rarity-currency";
+
     switch (it.frameType) {
       case 0:
         return "rarity-normal";
@@ -204,6 +206,7 @@
       });
       return { label: templated, values: [], icon: prop.icon };
     }
+
     return {
       label: mapPropLabel(cleanedName, compact),
       values: parsedValues,
@@ -227,6 +230,7 @@
   /* Properties, Line Groupings, KPIs, Requirements & Sockets           */
   /* ------------------------------------------------------------------ */
   $: ilvl = item.ilvl || item.itemLevel || 0;
+
   $: baseTypeClean = [item.baseType, item.typeLine]
     .map((t) =>
       cleanBracketText(t || "")
@@ -264,11 +268,6 @@
     return list;
   })();
 
-  // Group properties into:
-  // - defenceLine: Evasion Rating, Energy Shield, Armour (one line, any order)
-  // - weaponRateLine: Attacks per Second, Critical Hit/Strike Chance, Reload Time (one line, in this order)
-  // - singleLines: every other property on its own line (with physical/ele/chaos damage merged into one Damage line)
-  // - qualityProp: extracted for the Item Level / Requirements / Quality line
   $: groupedProps = (() => {
     const rawProps = item.properties || [];
     const defenceLine: FormattedProp[] = [];
@@ -348,15 +347,19 @@
     ...(item.supportGemRequirements || []),
   ];
 
-  // Gem / socketable description + stats (shown in tooltips only)
+  // Always show secDescrText when present (above explicit stats, #1BA274)
+  $: secDescrTextClean = cleanBracketText(item.secDescrText || "").trim();
+
+  // Gem / socketable stats & fallback descrText (shown in tooltips)
   $: tooltipTexts = ((): { desc: string; stats: string[] } => {
     const tab = (item.gemTabs as any[] | undefined)?.[0];
     const stats: string[] = (tab?.pages?.[0]?.stats ?? []).map((t: string) =>
       cleanBracketText(t),
     );
-    const desc = cleanBracketText(
-      item.secDescrText || (stats.length ? "" : item.descrText || ""),
-    );
+    const desc =
+      !secDescrTextClean && !stats.length
+        ? cleanBracketText(item.descrText || "").trim()
+        : "";
     return { desc, stats };
   })();
 
@@ -440,6 +443,7 @@
           si.frameType === 4 ||
           (si.frameTypeId || "").toLowerCase() === "gem"),
     );
+
     const usedSkillItems = new Set<Item>();
 
     for (let i = 0; i < granted.length; i++) {
@@ -455,9 +459,6 @@
           : valText
         : baseName;
 
-      // grantedSkills only says "this item grants skill X" (name is in values).
-      // The matching socketedItems entry is the real item definition used for
-      // the tooltip, and its gemSkill is the image.
       const norm = (t?: string) =>
         cleanBracketText(t || "")
           .trim()
@@ -465,8 +466,8 @@
       const wanted = (gs.values || []).map((v) => norm(v[0])).filter(Boolean);
       const itemName = (si: Item) =>
         norm(si.typeLine || si.baseType || si.name);
-      const free = skillItems.filter((si) => !usedSkillItems.has(si));
 
+      const free = skillItems.filter((si) => !usedSkillItems.has(si));
       const matched: Item | null =
         free.find((si) => wanted.includes(itemName(si))) ??
         free.find((si) => gs.icon && si.gemSkill && si.gemSkill === gs.icon) ??
@@ -506,18 +507,17 @@
   /* ------------------------------------------------------------------ */
   $: separatedMods = (() => {
     const runeRegular: Array<string | ItemMod> = [];
-    const implicitRegular: Array<string | ItemMod> = [];
-    const runeBonded: Array<string | ItemMod> = [...(item.bondedMods || [])];
+    const runeBonded: Array<string | ItemMod> = [];
 
+    // Bonded mods are placed into the collapsed object ONLY if they are inside runeMods
     (item.runeMods || []).forEach((m) => {
       if (isBondedMod(m)) runeBonded.push(m);
       else runeRegular.push(m);
     });
 
-    (item.implicitMods || []).forEach((m) => {
-      if (isBondedMod(m)) runeBonded.push(m);
-      else implicitRegular.push(m);
-    });
+    const implicitRegular: Array<string | ItemMod> = [
+      ...(item.implicitMods || []),
+    ];
 
     return {
       runeRegular,
@@ -527,6 +527,7 @@
   })();
 
   $: enchantMods = item.enchantMods ?? [];
+  $: crucibleMods = item.crucibleMods ?? [];
 
   $: classifiedExplicits = (() => {
     const prefixes: Array<{
@@ -542,7 +543,12 @@
       cat: "generic" | "bonded";
     }> = [];
 
-    (item.explicitMods || []).forEach((mod) => {
+    const allExplicitMods = [
+      ...(item.explicitMods || []),
+      ...(item.bondedMods || []),
+    ];
+
+    allExplicitMods.forEach((mod) => {
       const bonded = isBondedMod(mod);
       if (typeof mod === "string") {
         others.push({ mod, cat: bonded ? "bonded" : "generic" });
@@ -558,13 +564,7 @@
       }
     });
 
-    // Bonded mods that live in explicitMods stay explicit modifiers: grey text,
-    // always listed after the other explicit modifiers.
-    const regular = [...prefixes, ...suffixes, ...others];
-    return [
-      ...regular.filter((e) => e.cat !== "bonded"),
-      ...regular.filter((e) => e.cat === "bonded"),
-    ];
+    return [...prefixes, ...suffixes, ...others];
   })();
 
   $: veiledEntries = (item.veiledMods || []).map((vm) => {
@@ -580,12 +580,14 @@
   });
 
   /* ------------------------------------------------------------------ */
-  /* Exclusive Bottom State Tag + Split                                 */
+  /* Exclusive Bottom State Tag + Split (split or duplicated)           */
   /* ------------------------------------------------------------------ */
   type ExclusiveState =
     | { kind: "foreseeing" }
     | { kind: "text"; label: string; cls: string }
     | null;
+
+  $: isSplit = Boolean(item.split || item.duplicated);
 
   $: exclusiveState = ((): ExclusiveState => {
     if (item.foreseeing) return { kind: "foreseeing" };
@@ -606,12 +608,6 @@
         kind: "text",
         label: "Corrupted",
         cls: "state-corrupted",
-      };
-    if (item.duplicated)
-      return {
-        kind: "text",
-        label: "Mirrored",
-        cls: "state-mirrored",
       };
     if (item.sanctified)
       return {
@@ -874,6 +870,7 @@
                     {:else}
                       <span class="inline-ring"></span>
                     {/if}
+
                     {#if iconSrc}
                       <span class="inline-icon-layer">
                         <CdnImage
@@ -888,6 +885,7 @@
                     {/if}
                   </span>
                 </span>
+
                 {#if si < inlineSockets.length - 1}
                   {@const linked =
                     inlineSockets[si + 1].socket.group === entry.socket.group}
@@ -917,18 +915,6 @@
       </div>
     {/if}
 
-    {#if isTooltip && (tooltipTexts.desc || tooltipTexts.stats.length > 0)}
-      <div class="separator-line" />
-      <div class="stat-group tooltip-text-group">
-        {#each tooltipTexts.stats as line}
-          <div class="tooltip-text-line stat">{line}</div>
-        {/each}
-        {#if tooltipTexts.desc}
-          <div class="tooltip-text-line desc">{tooltipTexts.desc}</div>
-        {/if}
-      </div>
-    {/if}
-
     <!-- Rune, Enchant & Bonded Rune Mods (Together) -->
     {#if separatedMods.runeRegular.length > 0 || enchantMods.length > 0 || separatedMods.runeBonded.length > 0}
       <div class="separator-line" />
@@ -953,7 +939,6 @@
                 : `▸ +${separatedMods.runeBonded.length} Bonded`}
             </button>
           {/if}
-
           {#if isTooltip || showBondedMods}
             {#each separatedMods.runeBonded as bMod}
               <ItemModifier
@@ -1009,6 +994,26 @@
       </div>
     {/if}
 
+    <!-- Secondary Description Text (Always shown if present, above explicit stats, #1BA274) -->
+    {#if secDescrTextClean}
+      <div class="separator-line" />
+      <div class="stat-group sec-descr-group">
+        <div class="sec-descr-text">{secDescrTextClean}</div>
+      </div>
+    {/if}
+
+    {#if isTooltip && (tooltipTexts.desc || tooltipTexts.stats.length > 0)}
+      <div class="separator-line" />
+      <div class="stat-group tooltip-text-group">
+        {#each tooltipTexts.stats as line}
+          <div class="tooltip-text-line stat">{line}</div>
+        {/each}
+        {#if tooltipTexts.desc}
+          <div class="tooltip-text-line desc">{tooltipTexts.desc}</div>
+        {/if}
+      </div>
+    {/if}
+
     <!-- Explicit Mods + Veiled / Unrevealed Mods -->
     {#if classifiedExplicits.length > 0 || veiledEntries.length > 0}
       <div class="separator-line" />
@@ -1049,6 +1054,16 @@
       </div>
     {/if}
 
+    <!-- Crucible Mods (Under Explicit Mods) -->
+    {#if crucibleMods.length > 0}
+      <div class="separator-line" />
+      <div class="stat-group">
+        {#each crucibleMods as mod}
+          <ItemModifier {mod} {realm} category="crucible" compact={isCompact} />
+        {/each}
+      </div>
+    {/if}
+
     <!-- Notable Properties -->
     {#if item.notableProperties && item.notableProperties.length > 0}
       <div class="separator-line" />
@@ -1085,11 +1100,11 @@
       </div>
     {/if}
 
-    <!-- Split + Exclusive Bottom State -->
-    {#if item.split || exclusiveState}
+    <!-- Split (split or duplicated) + Exclusive Bottom State -->
+    {#if isSplit || exclusiveState}
       <div class="separator-line" />
       <div class="stat-group bottom-state-group">
-        {#if item.split}
+        {#if isSplit}
           <div class="state-stat-line state-split">Split</div>
         {/if}
         {#if exclusiveState?.kind === "foreseeing"}
@@ -1238,7 +1253,7 @@
     align-items: center;
     justify-content: center;
     white-space: nowrap;
-    gap: 0.32rem; /* explicit space between label and every value */
+    gap: 0.32rem;
     font-size: 0.95rem;
     line-height: 1.22;
     color: #cbd5e1;
@@ -1264,16 +1279,13 @@
   .prop-tag-only {
     color: #94a3b8;
   }
-
   :global(.prop-icon) {
     width: 15px;
     height: 15px;
     object-fit: contain;
   }
 
-  /* Sockets on their own centered line.
-     Line height = 44px (previous overall line was 36px + 2*2px padding = 40px, x1.1).
-     No box/background: sockets are sprite images at a fixed size. */
+  /* Sockets on their own centered line */
   .sockets-own-line {
     display: flex;
     justify-content: center;
@@ -1353,8 +1365,6 @@
     object-fit: contain;
     filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.7));
   }
-  /* Gap between sockets: 12px when linked (chain sprite centred on it, same
-     47px pitch as in-game), slightly wider between link groups. */
   .inline-gap {
     position: relative;
     flex: none;
@@ -1378,6 +1388,22 @@
     flex-direction: column;
     gap: 1px;
     width: 100%;
+  }
+
+  /* Secondary Description Text (Skills / Gems) */
+  .sec-descr-group {
+    align-items: center;
+    padding: 0 0.5rem;
+    box-sizing: border-box;
+  }
+  .sec-descr-text {
+    color: #1ba274;
+    font-size: 0.98rem;
+    line-height: 1.25;
+    text-align: center;
+  }
+  .mode-compact .sec-descr-text {
+    font-size: 0.92rem;
   }
 
   /* Granted Skills Row */
@@ -1440,7 +1466,7 @@
     align-items: center;
     justify-content: center;
     width: 100%;
-    height: var(--mod-h, 1.7rem); /* identical to ItemModifier min-height */
+    height: var(--mod-h, 1.7rem);
     overflow: hidden;
     background: none;
     border: none;
@@ -1458,19 +1484,17 @@
     flex-shrink: 0;
     background-repeat: no-repeat;
     background-position: -12480px 0;
-    /* 29px sprite scaled to the modifier row height (1.7rem ≈ 27px) */
     transform: translateY(-3px) scale(0.94);
     transform-origin: center center;
     animation: animate-veiled-mod 2.6s steps(39) reverse infinite;
   }
   .item-mod--veiled.poe2.compact .lc {
-    transform: translateY(-3px) scale(0.83); /* 1.5rem ≈ 24px */
+    transform: translateY(-3px) scale(0.83);
   }
   .item-mod--veiled.poe2 .lc.wide {
     width: 240px;
     background-position: -18720px 0;
   }
-
   @keyframes animate-veiled-mod {
     0% {
       background-position: 0 0;

@@ -14,6 +14,7 @@
     | "prefix"
     | "suffix"
     | "bonded"
+    | "crucible"
     | "generic" = "generic";
   export let realm: string = "poe";
   export let compact: boolean = false;
@@ -83,7 +84,8 @@
     const upper = token.toUpperCase();
     if (upper.startsWith("P") || cat === "prefix") return "#DD3E14";
     if (upper.startsWith("S") || cat === "suffix") return "#58AFF1";
-    if (upper.startsWith("R") || cat === "rune") return "#FFFFFF";
+    if (upper.startsWith("R") || cat === "rune" || cat === "enchant")
+      return "#FFFFFF";
     return "#9a9a9a";
   }
 
@@ -153,7 +155,7 @@
         : parsed.flags.desecrated
           ? { letter: "D", title: "Desecrated", color: "#78B20A" }
           : parsed.flags.fractured
-            ? { letter: "F", title: "Fractured", color: "#B58E3A" }
+            ? { letter: "F", title: "Fractured", color: "#A89664" }
             : null;
 </script>
 
@@ -203,7 +205,7 @@
 
 <style>
   .mod-row {
-    --edge: 28px; /* distance of tier (left) / level (right) from the row edge */
+    --edge: 5px; /* ~5px distance of tier (left) / level (right) from the row edge */
     --mod: #6588ff;
     --mod-rgb: 101, 136, 255;
     position: relative;
@@ -241,15 +243,10 @@
     display: flex;
     align-items: center;
     white-space: nowrap;
-    z-index: 5;
-  }
-  /* Badges sit 14px in from the row edge and never wrap */
-  .side-anchor {
     flex-wrap: nowrap;
     flex-shrink: 0;
-  }
-  .side-anchor {
     width: max-content;
+    z-index: 5;
   }
   .side-anchor.left {
     left: var(--edge);
@@ -261,23 +258,23 @@
   .mod-text-center {
     width: 100%;
     text-align: center;
-    padding: 0 1.2rem;
+    padding: 0 0.5rem;
     color: var(--mod);
     word-break: break-word;
     font-variant-numeric: tabular-nums;
   }
 
-  /* room for the (absolute) side badges, kept symmetric so text stays centred */
+  /* Tighter side clearance so modifier text has more horizontal room */
   .mod-text-center.has-badge {
-    padding: 0 calc(var(--edge) + 4.4rem);
+    padding: 0 calc(var(--edge) + 2.6rem);
   }
 
   /* ---- Category colours ---- */
-  .rune {
+  .rune,
+  .enchant {
     --mod: #ffffff;
     --mod-rgb: 255, 255, 255;
   }
-  .enchant,
   .implicit,
   .prefix,
   .suffix,
@@ -289,13 +286,18 @@
     --mod: #94a3b8;
     --mod-rgb: 148, 163, 184;
   }
+  .crucible {
+    --mod: #ff7339;
+    --mod-rgb: 255, 115, 57;
+  }
 
   /* ---- Special states ---- */
-  /* Desecrated: text colour + its own decorator graphic only
-     (no side borders, no coloured in-light like crafted) */
+  /* Desecrated: green vertical edge lines + abyss decorator graphic */
   .mod-row.is-desecrated {
     --mod: #78b20a;
     --mod-rgb: 120, 178, 10;
+    border-left-color: rgba(120, 178, 10, 0.85);
+    border-right-color: rgba(120, 178, 10, 0.85);
     background-image: url("https://web.poecdn.com/protected/image/item/popup2/mod-decorator-abyss.webp?v=1755058882408&key=P7lo6UMIBNlQ9qClPdHjFw");
     background-size: 100% 100%;
     background-position: center;
@@ -319,6 +321,9 @@
       rgba(255, 255, 255, 0.14) 100%
     );
   }
+  .mod-row.is-crafted:hover {
+    background: rgba(255, 255, 255, 0.14);
+  }
 
   .mod-row.is-mutated {
     --mod: #cd2285;
@@ -337,6 +342,9 @@
     --mod: #ad2116;
     --mod-rgb: 173, 33, 22;
   }
+  .mod-row.is-mutated:hover {
+    background: rgba(var(--mod-rgb), 0.18);
+  }
 
   /* Fractured uses #B58E3A font color only (no border) and overrides all other font colors */
   .mod-row.is-fractured {
@@ -347,29 +355,25 @@
     color: #b58e3a !important;
   }
 
-  /* ---- Badges ---- */
+  /* ---- Badges (plain text, same font size as modifier) ---- */
   .side-badge {
     display: inline-flex;
     flex-wrap: nowrap;
     width: max-content;
     align-items: center;
     justify-content: center;
-    min-width: 1.5rem;
-    padding: 0 4px;
+    padding: 0;
     box-sizing: border-box;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 0.72rem;
-    font-weight: 700;
-    line-height: 1.35;
+    font-size: inherit;
+    font-weight: 600;
+    line-height: inherit;
     text-align: center;
     white-space: nowrap;
-    flex-wrap: nowrap;
     letter-spacing: 0;
     word-spacing: 0;
     color: #9a9a9a;
-    background: rgba(0, 0, 0, 0.85);
-    border: 1px solid #3a3a3a;
-    border-radius: 0;
+    background: none;
+    border: none;
   }
 
   .tier-plus {

@@ -300,7 +300,7 @@ export interface Item {
   utilityMods?: string[];
   scourgeMods?: string[];
   bondedMods?: Array<string | ItemMod>;
-  crucibleMods?: string[];
+  crucibleMods?: Array<string | ItemMod>;
   cosmeticMods?: string[];
   veiledMods?: Array<string | ItemMod>;
 

@@ -72,6 +72,7 @@
       )
     : null;
   $: isFresh = ageSec !== null && ageSec < 300;
+
   $: relativeAge = (() => {
     if (ageSec === null) return "";
     const diffSec = ageSec;
@@ -364,23 +365,21 @@
     justify-content: center;
     width: 100%;
   }
-
   .min-price {
     display: flex;
     align-items: center;
-    gap: 0.28rem;
+    gap: 0.3rem;
     white-space: nowrap;
   }
   .min-price .amount {
-    font-size: 1.05rem;
+    font-size: 1.2rem;
     font-weight: 700;
     color: var(--price);
   }
   .min-price .currency {
-    font-size: 0.78rem;
+    font-size: 0.9rem;
     color: var(--currency);
   }
-
   .btn-icon-travel {
     background: var(--btn-bg);
     border: 1px solid var(--btn-border);
@@ -415,6 +414,7 @@
     align-items: center;
     text-align: center;
     gap: 0.5rem;
+    padding-bottom: 0.25rem;
     width: 168px;
     min-width: 168px;
     max-width: 168px;
@@ -429,6 +429,9 @@
     justify-content: space-between;
     align-items: center;
     gap: 0.6rem;
+    padding-bottom: 0;
+    padding-left: 10%;
+    padding-right: 10%;
   }
   .listing-panel.mode-compact.no-actions {
     justify-content: center;
@@ -439,16 +442,23 @@
   }
 
   :global(.currency-img) {
-    width: 28px;
-    height: 28px;
+    width: 34px;
+    height: 34px;
     object-fit: contain;
     align-self: center;
     filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.75));
   }
   .mode-compact :global(.currency-img),
   .min-price :global(.currency-img) {
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
+  }
+
+  .price-box {
+    margin-top: -0.15rem;
+  }
+  .mode-compact .price-box {
+    margin-top: 0;
   }
 
   .price-headline {
@@ -456,11 +466,10 @@
     align-items: center;
     justify-content: center;
     flex-wrap: wrap;
-    gap: 0.32rem;
+    gap: 0.35rem;
   }
-
   .amount {
-    font-size: 1.32rem;
+    font-size: 1.56rem;
     font-weight: 700;
     line-height: 1;
     color: var(--price);
@@ -474,12 +483,15 @@
     font-weight: 400;
   }
   .mode-compact .amount {
-    font-size: 1.12rem;
+    font-size: 1.3rem;
   }
-
   .currency {
-    font-size: 0.86rem;
+    font-size: 1.04rem;
+    line-height: 1.1;
     color: var(--currency);
+  }
+  .mode-compact .currency {
+    font-size: 0.96rem;
   }
 
   .fee-text {
@@ -487,7 +499,7 @@
     align-items: center;
     gap: 0.3rem;
     margin-top: 0.2rem;
-    font-size: 0.78rem;
+    font-size: 0.9rem;
     color: var(--gold);
     font-variant-numeric: tabular-nums;
   }
@@ -537,7 +549,6 @@
   .status-dot.offline {
     background: #d9534f;
   }
-
   .age-badge {
     font-size: 0.76rem;
     color: #8f8a7b;
@@ -641,7 +652,6 @@
     color: #7fd18f;
   }
 
-  /* width: 0 + min-width: 100% ensures the error text never expands the button/container width */
   .travel-error {
     display: block;
     width: 0;

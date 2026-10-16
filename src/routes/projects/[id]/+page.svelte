@@ -678,8 +678,8 @@
       : window.innerHeight / 2;
     const center = screenToWorld(centerClientX, centerClientY);
 
-    const rawX = center.x - 210;
-    const rawY = center.y - 160;
+    const rawX = center.x - 340;
+    const rawY = center.y - 460;
 
     const tileRealm = currentProjectRealm;
     const tileLeague = currentProjectLeague;
@@ -697,8 +697,8 @@
       id: makeTileId(),
       x: snap(rawX),
       y: snap(rawY),
-      w: snap(440),
-      h: snap(680),
+      w: snap(880),
+      h: snap(760),
       title: "",
       displayName: "",
       realm: tileRealm,

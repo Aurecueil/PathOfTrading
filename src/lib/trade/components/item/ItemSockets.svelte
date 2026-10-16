@@ -17,7 +17,7 @@
   export let w: number = 1;
   export let h: number = 1;
   export let realm: string = "poe";
-  /** Rendered width (px) of the item image; the socket grid is laid out on it. */
+  /** Rendered width (px) of the item image */
   export let gridWidth: number = 0;
 
   interface Cell {
@@ -45,10 +45,11 @@
     return { cols: 2, rows: 3 };
   })());
 
-  // Sockets keep a fixed size; the grid only decides POSITIONS.
-  // The grid is always a SQUARE: width = rendered image width, height = width
-  // (never smaller than what the sockets themselves need).
-  $: side = Math.max(gridWidth, cols * SOCKET_SIZE, rows * SOCKET_SIZE);
+  // Every cell in the grid is a square of CELL_SIZE x CELL_SIZE:
+  // 1x1 -> square, 2x2 -> square, 2x3 -> 1:1.5 proportion rectangle.
+  const CELL_SIZE = 48;
+  $: gridW = cols * CELL_SIZE;
+  $: gridH = rows * CELL_SIZE;
 
   const boxSize = (c: Cell) => c.base?.size ?? SOCKET_SIZE;
 
@@ -117,7 +118,7 @@
 </script>
 
 <div class="sockets-overlay">
-  <div class="sockets-grid" style:width="{side}px" style:height="{side}px">
+  <div class="sockets-grid" style:width="{gridW}px" style:height="{gridH}px">
     {#each links as link}
       <span class="link-pos" style:left="{link.x}%" style:top="{link.y}%">
         {#if link.horizontal}
@@ -155,8 +156,8 @@
         class:has-item={cell.item !== null}
         style:left="{(cell.col / cols) * 100}%"
         style:top="{(cell.row / rows) * 100}%"
-        style:width="{100 / cols}%"
-        style:height="{100 / rows}%"
+        style:width="{CELL_SIZE}px"
+        style:height="{CELL_SIZE}px"
         role={cell.item ? "button" : undefined}
         tabindex={cell.item ? 0 : undefined}
         aria-label={cell.item?.typeLine || cell.item?.name || undefined}
@@ -237,10 +238,11 @@
     pointer-events: none;
   }
 
-  /* Square grid (height === width) centered on the item; sockets inside never scale. */
+  /* Grid composed of square cells, shifted slightly higher on the item icon */
   .sockets-grid {
     position: relative;
     flex-shrink: 0;
+    transform: scale(1.2);
   }
 
   .slot {
@@ -251,7 +253,6 @@
     z-index: 1;
     outline: none;
   }
-
   .slot.has-item {
     pointer-events: auto;
     cursor: help;

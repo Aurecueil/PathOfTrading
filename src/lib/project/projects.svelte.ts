@@ -561,7 +561,7 @@ export async function createNewProject(options: {
   const realm = options.realm || "poe";
   const league = options.league || "Standard";
   const camera: CameraState = options.camera ?? {
-    scale: 1,
+    scale: 0.7,
     offsetX: 0,
     offsetY: 0,
   };

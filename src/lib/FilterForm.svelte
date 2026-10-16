@@ -350,7 +350,7 @@
         statGroups = initialPayload.query.stats.map((sg: any, idx: number) => ({
           id: `stat_group_${idx}_${Date.now()}`,
           type: sg.type || "and",
-          collapsed: sg.disabled ?? false,
+          collapsed: sg.collapsed ?? sg.disabled ?? false,
           disabled: sg.disabled ?? false,
           value: sg.value ? { ...sg.value } : undefined,
           filters: (sg.filters || []).map((f: any) => ({
@@ -823,7 +823,9 @@
     width: 100%;
     box-sizing: border-box;
   }
-
+  .top-bar select {
+    color: #ffffff !important;
+  }
   .top-row-1 {
     width: 100%;
   }
@@ -935,7 +937,15 @@
     padding: 0 !important;
     box-sizing: border-box;
   }
-
+  .filter-groups :global(select) {
+    color: #9a9a9a !important;
+  }
+  .filter-groups :global(select.is-modified),
+  .filter-groups :global(select[data-modified="true"]),
+  .filter-groups
+    :global(select:has(option:checked:not([value=""]):not([value="null"]))) {
+    color: #ffffff !important;
+  }
   /* --------------------------------------------------------------------------
      Expanded Child Popover / Dropdown Menu Styles (1px White Border)
      -------------------------------------------------------------------------- */
