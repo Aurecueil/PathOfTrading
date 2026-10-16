@@ -1,4 +1,4 @@
-<!-- src/lib/components/item/ItemIcon.svelte -->
+<!-- src/lib/trade/components/item/ItemIcon.svelte -->
 <script lang="ts">
   import type { ResolvedDisplayStyle } from "$lib/types/types";
   import type { Item } from "$lib/types/tradeItem";
@@ -12,7 +12,6 @@
     if (styleMode === "minimal") {
       return { w: 48, h: 48 };
     }
-    // Full mode: significantly larger container & scaled-up artwork
     const cellW = 62;
     const cellH = 62;
     const w = Math.min(Math.max((item.w || 1) * cellW, 116), 136);
@@ -20,20 +19,33 @@
     return { w, h };
   })();
 
+  // Width the item image actually renders at (.item-icon is 92% of the box and
+  // object-fit: contain, so it is limited by whichever axis is tighter).
+  $: imageWidth = (() => {
+    const boxW = iconDimensions.w * 0.92;
+    const boxH = iconDimensions.h * 0.92;
+    const ratio = (item.w || 1) / (item.h || 1);
+    return Math.round(Math.min(boxW, boxH * ratio));
+  })();
+
   $: stackMaxed =
     item.stackSize !== undefined &&
     item.maxStackSize !== undefined &&
     item.stackSize >= item.maxStackSize;
 
-  $: hasSockets = Boolean(item.sockets && item.sockets.length > 0);
+  $: nonGemSockets = (item.sockets || []).filter(
+    (s) => (s.type || "").toLowerCase() !== "gem",
+  );
+  $: hasEquipmentSockets = nonGemSockets.length > 0;
 </script>
 
 <div
   class="item-icon-wrapper mode-{styleMode}"
-  class:is-corrupted={item.corrupted}
-  class:is-sanctified={item.sanctified}
-  class:is-fractured={item.fractured}
-  class:is-unidentified={item.identified === false}
+  class:is-corrupted={styleMode !== "minimal" &&
+    (item.corrupted || item.doubleCorrupted)}
+  class:is-sanctified={styleMode !== "minimal" && item.sanctified}
+  class:is-fractured={styleMode !== "minimal" && item.fractured}
+  class:is-unidentified={styleMode !== "minimal" && item.identified === false}
   style:width="{iconDimensions.w}px"
   style:height="{iconDimensions.h}px"
   title={item.typeLine || item.name}
@@ -47,19 +59,16 @@
     />
   {/if}
 
-  {#if styleMode !== "minimal" && hasSockets}
+  <!-- Minimal mode: image only, never any socket graphics -->
+  {#if styleMode !== "minimal" && hasEquipmentSockets}
     <ItemSockets
       sockets={item.sockets ?? []}
       socketedItems={item.socketedItems ?? []}
       w={item.w}
       h={item.h}
       realm={item.realm === "poe2" ? "poe2" : "poe"}
-      on:gems
+      gridWidth={imageWidth}
     />
-  {:else if styleMode === "minimal" && hasSockets}
-    <span class="mini-socket-pill" title="{item.sockets?.length} sockets">
-      {item.sockets?.length}S
-    </span>
   {/if}
 
   {#if item.stackSize}
@@ -72,11 +81,6 @@
 </div>
 
 <style>
-  /*
-    --rc / --rc-rgb are set by the row (SearchItemRow) and inherited here, so
-    the icon tile picks up the item's rarity colour. Fallbacks keep the
-    component usable on its own.
-  */
   .item-icon-wrapper {
     --_rgb: var(--rc-rgb, 127, 127, 127);
     position: relative;
@@ -99,7 +103,6 @@
     flex-shrink: 0;
   }
 
-  /* inner hairline frame, like an inventory cell */
   .item-icon-wrapper::after {
     content: "";
     position: absolute;
@@ -130,7 +133,6 @@
     border-color: rgba(162, 145, 98, 0.7);
   }
 
-  /* Explicitly set width & height so 1x1 / 1x2 CDN images scale up to fill the box */
   :global(.item-icon-wrapper .item-icon) {
     position: relative;
     width: 92%;
@@ -144,7 +146,6 @@
     -webkit-user-drag: none;
   }
 
-  /* Stack size reads like the in-game number: bold, top-left, outlined */
   .stack-badge {
     position: absolute;
     top: 2px;
@@ -169,19 +170,5 @@
   .mode-minimal .stack-badge {
     font-size: 0.78rem;
     left: 3px;
-  }
-
-  .mini-socket-pill {
-    position: absolute;
-    bottom: 1px;
-    right: 1px;
-    background: rgba(0, 0, 0, 0.85);
-    color: #d8d8d8;
-    border: 1px solid #3a3a3a;
-    font-size: 0.56rem;
-    font-weight: 700;
-    line-height: 1.3;
-    padding: 0 3px;
-    z-index: 3;
   }
 </style>

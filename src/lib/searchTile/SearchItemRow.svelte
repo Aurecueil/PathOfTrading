@@ -7,7 +7,6 @@
   import ItemStats from "$lib/trade/components/item/ItemStats.svelte";
   import ItemListing from "$lib/trade/components/item/ItemListing.svelte";
   import ItemJsonModal from "$lib/trade/components/item/ItemJsonModal.svelte";
-  import CdnImage from "$lib/trade/components/item/CdnImage.svelte";
 
   export let id: string;
   export let payload: any = null;
@@ -25,7 +24,14 @@
   let isQueued = false;
   let travelError: string | null = null;
   let isJsonModalOpen = false;
-  let gemSkills: { url: string; item: Item }[] = [];
+  let rowWidth: number = 0;
+
+  $: boxWidth = rowWidth > 0 ? rowWidth : tileWidth;
+  $: resolvedStyle = ((): ResolvedDisplayStyle => {
+    if (boxWidth < 520) return "minimal";
+    if (boxWidth < 720) return "compact";
+    return "full";
+  })();
 
   $: item = data?.item as Item | undefined;
   $: listing = data?.listing;
@@ -34,7 +40,7 @@
     : "";
 
   /* ------------------------------------------------------------------ */
-  /* Rarity                                                              */
+  /* Rarity                                                             */
   /* ------------------------------------------------------------------ */
   const KNOWN_KEYS = new Set([
     "normal",
@@ -51,7 +57,6 @@
     "breach",
   ]);
 
-  // FrameType enum -> rarity key (foils render as uniques in-game)
   const FRAME_KEYS: Record<number, string> = {
     0: "normal",
     1: "magic",
@@ -85,7 +90,7 @@
   $: rarityKey = getRarityKey(item);
 
   /* ------------------------------------------------------------------ */
-  /* Influences (shown as small diamonds in front of the item name)      */
+  /* Influences (shown as small diamonds in front of the item name)     */
   /* ------------------------------------------------------------------ */
   const INFLUENCES: { key: string; label: string; color: string }[] = [
     { key: "shaper", label: "Shaper", color: "#4aa3ff" },
@@ -110,71 +115,43 @@
   $: influences = activeInfluences(item);
 
   /* ------------------------------------------------------------------ */
-  /* Tags: everything worth knowing about the item at a glance           */
+  /* Travel / Whisper & Error Extraction                                */
   /* ------------------------------------------------------------------ */
-  type Tone = "info" | "bad" | "gold" | "purple" | "green" | "blue" | "note";
-  interface Tag {
-    label: string;
-    tone: Tone;
-    title?: string;
-  }
-
-  function buildTags(it: Item): Tag[] {
-    const t: Tag[] = [];
-    const ilvl = it.ilvl || it.itemLevel;
-    if (ilvl)
-      t.push({ label: `iLvl ${ilvl}`, tone: "info", title: "Item level" });
-    if (it.monsterLevel)
-      t.push({ label: `Monster ${it.monsterLevel}`, tone: "info" });
-
-    if (it.identified === false) t.push({ label: "Unidentified", tone: "bad" });
-    if (it.doubleCorrupted) t.push({ label: "Double corrupted", tone: "bad" });
-    else if (it.corrupted) t.push({ label: "Corrupted", tone: "bad" });
-    if (it.mutated)
-      t.push({
-        label: realm === "poe2" ? "Mutated" : "Foulborn",
-        tone: realm === "poe2" ? "bad" : "purple",
-      });
-    if (it.fractured) t.push({ label: "Fractured", tone: "gold" });
-    if (it.sanctified) t.push({ label: "Sanctified", tone: "gold" });
-    if (it.synthesised) t.push({ label: "Synthesised", tone: "blue" });
-    if (it.desecrated) t.push({ label: "Desecrated", tone: "green" });
-    if (it.vestigial) t.push({ label: "Vestigial", tone: "green" });
-    if (it.veiled) t.push({ label: "Veiled", tone: "purple" });
-    if (it.duplicated) t.push({ label: "Mirrored", tone: "blue" });
-    if (it.split) t.push({ label: "Split", tone: "info" });
-    if (it.replica) t.push({ label: "Replica", tone: "info" });
-    if (it.isRelic) t.push({ label: "Relic", tone: "green" });
-    if (it.foreseeing) t.push({ label: "Foreseeing", tone: "info" });
-    if (it.memoryItem) t.push({ label: "Memory", tone: "info" });
-    if (it.foilVariation !== undefined)
-      t.push({ label: "Foil", tone: "purple" });
-    if (it.ruthless) t.push({ label: "Ruthless", tone: "info" });
-    if (it.unmodifiable) t.push({ label: "Unmodifiable", tone: "info" });
-    else if (it.unmodifiableExceptChaos)
-      t.push({ label: "Chaos-only modifiable", tone: "info" });
-    if (it.lockedToCharacter)
-      t.push({ label: "Character-bound", tone: "info" });
-    if (it.lockedToAccount) t.push({ label: "Account-bound", tone: "info" });
-    if (it.cisRaceReward || it.seaRaceReward || it.thRaceReward)
-      t.push({ label: "Race reward", tone: "gold" });
-    if (it.note || it.forum_note) {
-      const n = (it.note || it.forum_note) as string;
-      t.push({ label: n, tone: "note", title: `Seller note: ${n}` });
+  function parseTravelError(err: any): string {
+    if (!err) return "Failed";
+    if (typeof err === "object") {
+      if (typeof err.error?.message === "string") return err.error.message;
+      if (typeof err.message === "string") {
+        return parseTravelError(err.message);
+      }
     }
-    return t;
+    if (typeof err === "string") {
+      const trimmed = err.trim();
+      const jsonStart = trimmed.indexOf("{");
+      const jsonEnd = trimmed.lastIndexOf("}");
+      if (jsonStart !== -1 && jsonEnd > jsonStart) {
+        try {
+          const parsed = JSON.parse(trimmed.slice(jsonStart, jsonEnd + 1));
+          if (typeof parsed?.error?.message === "string") {
+            return parsed.error.message;
+          }
+          if (typeof parsed?.message === "string") {
+            return parsed.message;
+          }
+        } catch {
+          // fall through to raw string
+        }
+      }
+      return trimmed;
+    }
+    return "Failed";
   }
 
-  $: tags = item ? buildTags(item) : [];
-
-  /* ------------------------------------------------------------------ */
-  /* Travel                                                              */
-  /* ------------------------------------------------------------------ */
   async function handleTravel() {
     if (!listing || isTraveling) return;
     const token = listing.hideout_token ?? listing.whisper_token;
     if (!token) {
-      travelError = "No hideout token";
+      travelError = "No token";
       return;
     }
 
@@ -188,7 +165,7 @@
         searchId,
       });
     } catch (err: any) {
-      travelError = typeof err === "string" ? err : err?.message || "Failed";
+      travelError = parseTravelError(err);
     } finally {
       isTraveling = false;
     }
@@ -197,21 +174,22 @@
 
 {#if !data || !item}
   <div
-    class="item-row skeleton-row mode-{effectiveStyle} r-default"
+    class="item-row skeleton-row mode-{resolvedStyle} r-default"
     data-item-id={id}
+    bind:clientWidth={rowWidth}
   >
-    {#if effectiveStyle !== "minimal"}
+    {#if resolvedStyle !== "minimal"}
       <div class="row-title-bar skel-title-bar">
         <div class="skel-line title"></div>
       </div>
     {/if}
 
-    {#if effectiveStyle !== "compact"}
+    {#if resolvedStyle !== "compact"}
       <div class="skel-icon"></div>
     {/if}
 
     <div class="skel-content">
-      {#if effectiveStyle === "minimal"}
+      {#if resolvedStyle === "minimal"}
         <div class="skel-line title"></div>
       {:else}
         <div class="skel-line sub"></div>
@@ -227,13 +205,14 @@
   </div>
 {:else}
   <div
-    class="item-row mode-{effectiveStyle} r-{rarityKey}"
+    class="item-row mode-{resolvedStyle} r-{rarityKey}"
     class:is-live-entry={isLive}
-    class:is-corrupted={item.corrupted}
+    class:is-corrupted={item.corrupted || item.doubleCorrupted}
     class:is-unidentified={item.identified === false}
     data-item-id={id}
+    bind:clientWidth={rowWidth}
   >
-    {#if effectiveStyle !== "minimal"}
+    {#if resolvedStyle !== "minimal"}
       <!-- Header: influences, name, base type, raw JSON -->
       <div class="row-title-bar">
         <div class="title-text" title={fullItemTitle}>
@@ -266,16 +245,6 @@
           &#123;&nbsp;&#125;
         </button>
       </div>
-
-      {#if tags.length}
-        <div class="tag-strip" aria-label="Item properties">
-          {#each tags as tag}
-            <span class="tag tone-{tag.tone}" title={tag.title ?? tag.label}>
-              {tag.label}
-            </span>
-          {/each}
-        </div>
-      {/if}
     {:else}
       <!-- Floating top-right JSON button for minimal mode -->
       <button
@@ -290,35 +259,20 @@
     {/if}
 
     <!-- Left: vertically centered icon (full & minimal only) -->
-    {#if effectiveStyle !== "compact"}
+    {#if resolvedStyle !== "compact"}
       <div class="col-icon">
-        <ItemIcon
-          {item}
-          styleMode={effectiveStyle}
-          on:gems={(e) => (gemSkills = e.detail)}
-        />
+        <ItemIcon {item} styleMode={resolvedStyle} />
       </div>
     {/if}
 
     <!-- Center: stats & modifiers -->
-    <div
-      class="col-stats"
-      class:hide-inner-title={effectiveStyle !== "minimal"}
-    >
-      <ItemStats {item} {realm} styleMode={effectiveStyle} {tileWidth} />
-
-      {#if gemSkills.length}
-        <div class="gem-skills">
-          {#each gemSkills as g}
-            <CdnImage
-              src={g.url}
-              alt={g.item.typeLine}
-              className="gem-skill"
-              loading="lazy"
-            />
-          {/each}
-        </div>
-      {/if}
+    <div class="col-stats" class:hide-inner-title={resolvedStyle !== "minimal"}>
+      <ItemStats
+        {item}
+        {realm}
+        styleMode={resolvedStyle}
+        tileWidth={boxWidth}
+      />
     </div>
 
     <!-- Right / bottom: listing & trade actions -->
@@ -332,7 +286,7 @@
         {realm}
         {league}
         {searchId}
-        styleMode={effectiveStyle}
+        styleMode={resolvedStyle}
         onTravel={handleTravel}
       />
     </div>
@@ -405,7 +359,7 @@
   }
 
   /* ---------------------------------------------------------------- */
-  /* Row shell                                                         */
+  /* Row shell                                                        */
   /* ---------------------------------------------------------------- */
   .item-row {
     position: relative;
@@ -441,7 +395,6 @@
     border-bottom-color: rgba(var(--rc-rgb), 0.55);
   }
 
-  /* State hints on the whole row */
   .item-row.is-corrupted {
     box-shadow: inset 0 0 0 1px rgba(210, 0, 0, 0.28);
   }
@@ -450,7 +403,7 @@
   }
 
   /* ---------------------------------------------------------------- */
-  /* Title bar                                                         */
+  /* Title bar                                                        */
   /* ---------------------------------------------------------------- */
   .row-title-bar {
     grid-column: 1 / -1;
@@ -478,7 +431,7 @@
     flex: 1;
     overflow: hidden;
     white-space: nowrap;
-    font-size: 17px;
+    font-size: 18px;
     line-height: 1.2;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
   }
@@ -499,7 +452,6 @@
     text-overflow: ellipsis;
     min-width: 0;
   }
-  /* a name + base type pair reads as one title; base type yields first */
   .item-name + .item-type {
     flex-shrink: 2;
   }
@@ -521,17 +473,8 @@
       inset 0 0 0 1px rgba(0, 0, 0, 0.45);
   }
 
-  /* Hide the duplicate title ItemStats draws when the bar is present */
-  .col-stats.hide-inner-title :global(.item-header),
-  .col-stats.hide-inner-title :global(.item-title),
-  .col-stats.hide-inner-title :global(.title-row),
-  .col-stats.hide-inner-title :global(.header-row),
-  .col-stats.hide-inner-title :global(.name-line) {
-    display: none !important;
-  }
-
   /* ---------------------------------------------------------------- */
-  /* Raw JSON button                                                   */
+  /* Raw JSON button                                                  */
   /* ---------------------------------------------------------------- */
   .btn-top-json {
     flex-shrink: 0;
@@ -565,59 +508,7 @@
   }
 
   /* ---------------------------------------------------------------- */
-  /* Tag strip                                                         */
-  /* ---------------------------------------------------------------- */
-  .tag-strip {
-    grid-column: 1 / -1;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    padding: 6px 0 0;
-    min-width: 0;
-  }
-
-  .tag {
-    --tg: 160, 160, 160;
-    display: inline-flex;
-    align-items: center;
-    max-width: 100%;
-    padding: 1px 6px;
-    font-family: inherit;
-    font-size: 11.5px;
-    line-height: 1.5;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    color: rgb(var(--tg));
-    background: rgba(var(--tg), 0.1);
-    border: 1px solid rgba(var(--tg), 0.32);
-  }
-  .tone-info {
-    --tg: 168, 168, 168;
-  }
-  .tone-bad {
-    --tg: 255, 82, 82;
-  }
-  .tone-gold {
-    --tg: 214, 186, 112;
-  }
-  .tone-purple {
-    --tg: 205, 116, 232;
-  }
-  .tone-green {
-    --tg: 142, 170, 82;
-  }
-  .tone-blue {
-    --tg: 110, 170, 255;
-  }
-  .tone-note {
-    --tg: 233, 207, 159;
-    max-width: 18rem;
-    font-style: italic;
-  }
-
-  /* ---------------------------------------------------------------- */
-  /* Column pieces                                                     */
+  /* Column pieces                                                    */
   /* ---------------------------------------------------------------- */
   .col-icon {
     display: flex;
@@ -631,24 +522,7 @@
     width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
-  }
-
-  .gem-skills {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-    align-items: center;
-    padding-top: 0.35rem;
-    border-top: 1px dotted rgba(var(--rc-rgb), 0.3);
-  }
-  .gem-skills :global(img.gem-skill) {
-    width: 30px;
-    height: 30px;
-    object-fit: contain;
-    background: rgba(0, 0, 0, 0.55);
-    border: 1px solid rgba(var(--rc-rgb), 0.45);
-    padding: 1px;
+    gap: 0.35rem;
   }
 
   .col-listing {
@@ -659,7 +533,7 @@
   }
 
   /* ---------------------------------------------------------------- */
-  /* Live entry flash                                                  */
+  /* Live entry flash                                                 */
   /* ---------------------------------------------------------------- */
   .item-row.is-live-entry {
     animation: liveFlash 2s ease-out;
@@ -675,13 +549,13 @@
   }
 
   /* ---------------------------------------------------------------- */
-  /* Layout modes                                                      */
+  /* Layout modes                                                     */
   /* ---------------------------------------------------------------- */
   .item-row.mode-full {
     grid-template-columns: auto minmax(0, 1fr) auto;
     column-gap: 0.85rem;
-    row-gap: 0.5rem;
-    padding: 0 0.7rem 0.7rem;
+    row-gap: 0.45rem;
+    padding: 0 0.7rem 0.65rem;
     align-items: center;
   }
   .item-row.mode-full .row-title-bar {
@@ -694,9 +568,8 @@
   }
 
   .item-row.mode-compact {
-    grid-template-columns: minmax(0, 1fr) auto;
-    column-gap: 0.65rem;
-    row-gap: 0.4rem;
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 0.35rem;
     padding: 0 0.6rem 0.5rem;
     align-items: center;
   }
@@ -704,9 +577,10 @@
     margin: 0 -0.6rem;
   }
   .item-row.mode-compact .col-listing {
-    padding-left: 0.65rem;
-    border-left: 1px solid rgba(255, 255, 255, 0.07);
-    align-self: stretch;
+    grid-column: 1 / -1;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 0.4rem;
+    justify-content: space-between;
   }
 
   .item-row.mode-minimal {
@@ -717,25 +591,8 @@
     min-height: 54px;
   }
 
-  @container tile-body (max-width: 470px) {
-    .item-row.mode-full {
-      grid-template-columns: auto minmax(0, 1fr);
-    }
-    .item-row.mode-compact {
-      grid-template-columns: minmax(0, 1fr);
-    }
-    .item-row.mode-full .col-listing,
-    .item-row.mode-compact .col-listing {
-      grid-column: 1 / -1;
-      border-left: none;
-      padding-left: 0;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
-      padding-top: 0.45rem;
-    }
-  }
-
   /* ---------------------------------------------------------------- */
-  /* Skeleton                                                          */
+  /* Skeleton                                                         */
   /* ---------------------------------------------------------------- */
   .skeleton-row {
     pointer-events: none;

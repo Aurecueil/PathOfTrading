@@ -1,4 +1,4 @@
-// types/item.ts
+// src/lib/types/tradeItem.ts
 
 /**
  * Common enums & unions
@@ -79,7 +79,7 @@ export interface ItemModInfo {
   name?: string;
   tier?: string;
   level?: number;
-  magnitudes?: ItemModMagnitude[];
+  magnitudes?: ItemModMagnitude[] | null;
 }
 
 export interface ItemModFlags {
@@ -114,6 +114,8 @@ export interface ItemProperty {
   type?: number;
   suffix?: string;
   icon?: string;
+  domain?: string;
+  hash?: string;
 }
 
 export interface MercenarySkillSupport {
@@ -291,17 +293,16 @@ export interface Item {
   gemSkill?: string;
 
   // Item Modifiers
-  // Both legacy string arrays and modern Trade/Stash rich ItemMod objects are handled
   implicitMods?: Array<string | ItemMod>;
   explicitMods?: Array<string | ItemMod>;
   enchantMods?: Array<string | ItemMod>;
   runeMods?: Array<string | ItemMod>;
   utilityMods?: string[];
   scourgeMods?: string[];
-  bondedMods?: string[];
+  bondedMods?: Array<string | ItemMod>;
   crucibleMods?: string[];
   cosmeticMods?: string[];
-  veiledMods?: string[];
+  veiledMods?: Array<string | ItemMod>;
 
   // Mechanics & League Sub-objects
   properties?: ItemProperty[];
@@ -391,8 +392,6 @@ export interface ListingAccount {
   online: boolean | null;
 }
 
-// types/item.ts (snippet)
-
 export interface ItemListing {
   method: string;
   indexed: string;
@@ -414,5 +413,3 @@ export interface TradeFetchResult {
 export interface TradeFetchResponse {
   result: TradeFetchResult[];
 }
-
-// fetched item compolex struct
