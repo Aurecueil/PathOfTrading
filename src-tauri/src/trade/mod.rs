@@ -5,6 +5,7 @@ pub mod items;
 pub mod league;
 pub mod live;
 pub mod search;
+pub mod settings;
 pub mod statics;
 pub mod stats;
 pub mod whisper;
@@ -14,12 +15,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{oneshot, Mutex, Notify};
 
-pub const ENDPOINT: &str = "https://www.pathofexile.com";
+pub static ENDPOINT: RwLock<&'static str> = RwLock::new("https://www.pathofexile.com");
 
+pub fn get_endpoint() -> &'static str {
+    *ENDPOINT.read().unwrap()
+}
 // ===========================================================================
 // 1. Data Structures & Telemetry Models
 // ===========================================================================

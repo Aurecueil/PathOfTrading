@@ -9,7 +9,7 @@ pub async fn search_items_trade(
     league: String,
 ) -> Result<Response, String> {
     let client = Client::new();
-    let endpoint = super::ENDPOINT;
+    let endpoint = crate::trade::get_endpoint();
     let trade_path = if realm == "poe2" { "trade2" } else { "trade" };
 
     let url = format!("{endpoint}/api/{trade_path}/search/{league}");

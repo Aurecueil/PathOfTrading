@@ -3,7 +3,11 @@
   import { onMount, onDestroy } from "svelte";
   import { page } from "$app/stores";
   import type { UnlistenFn } from "@tauri-apps/api/event";
-  import { initItemData, leaguesPoe } from "$lib/trade/tradeStore";
+  import {
+    initItemData,
+    leaguesPoe,
+    initUserSettings,
+  } from "$lib/trade/tradeStore";
   import {
     workspaceState,
     openProject,
@@ -49,8 +53,10 @@
   onMount(async () => {
     try {
       initItemData();
-    } catch {
+      initUserSettings();
+    } catch (error) {
       // Dev mode fallback
+      console.error("Failed to initialize item data:", error);
     }
 
     try {

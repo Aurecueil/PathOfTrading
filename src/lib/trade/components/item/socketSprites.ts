@@ -6,6 +6,8 @@ export const SHEET_1 =
   "/protected/image/gen/socket.png?v=1791178103574&key=mf1B3nj-F9flN8KRLcBQ8A";
 export const SHEET_2 =
   "/protected/image/gen/socket2.png?v=1791178103674&key=bOOTV3VD4QQrcQMzHLZ1RA";
+export const SHEET_GEM =
+  "/protected/image/item/popup2/socket.png?v=1733391800174&key=4FpK7CNQARaLzQ2u33OhBg";
 
 export type Pos = [number, number];
 export type Attr = "S" | "D" | "I" | "G";
@@ -29,6 +31,7 @@ export const ABYSS: Pos = [-37, -72];
 export const POE2_EMPTY: Record<string, Pos> = {
   rune: [0, -248],
   jewel: [0, -62],
+  gem: [0, 0],
 };
 
 /** Fixed on-screen socket size (never scaled) */
@@ -69,8 +72,15 @@ export function getBase(socket: ItemSocket): Sprite | null {
   const type = (socket.type || "").toString().toLowerCase();
   if (type) {
     const pos = POE2_EMPTY[type];
-    // SHEET_2 sprites are 62px @2x assets; fixed 0.56 scale renders them at a constant ~35px
-    return pos ? { sheet: SHEET_2, size: 62, pos, fixedScale: 0.56 } : null;
+    if (pos) {
+      if (type === "gem") {
+        // SHEET_GEM assets are 72px; fixed scale renders them at ~35px
+        return { sheet: SHEET_GEM, size: 72, pos, fixedScale: 35 / 72 };
+      }
+      // SHEET_2 sprites are 62px @2x assets; fixed 0.56 scale renders them at a constant ~35px
+      return { sheet: SHEET_2, size: 62, pos, fixedScale: 0.56 };
+    }
+    return null;
   }
   const a = toAttr(socket);
   if (a === "DV") return { sheet: SHEET_1, size: 31, pos: DELVE };

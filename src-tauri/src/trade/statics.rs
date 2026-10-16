@@ -27,7 +27,7 @@ pub struct StaticDataResponse {
 
 pub async fn fetch_static_data(realm: &str) -> Result<StaticDataResponse, String> {
     let client = Client::new();
-    let endpoint = super::ENDPOINT;
+    let endpoint = crate::trade::get_endpoint();
 
     let trade_path = if realm == "poe2" { "trade2" } else { "trade" };
     let url = format!("{endpoint}/api/{trade_path}/data/static");

@@ -5,7 +5,7 @@ use reqwest::{Client, Response};
 #[tauri::command]
 pub async fn fetch_items_trade(ids: String, realm: String, id: String) -> Result<Response, String> {
     let client = Client::new();
-    let endpoint = super::ENDPOINT;
+    let endpoint = crate::trade::get_endpoint();
 
     let poesessid = load_secret("poesessid")?;
     let poe_token = load_secret("poetoken")?;

@@ -98,58 +98,103 @@ export async function initItemData(): Promise<void> {
 
 // Global toggle for stat color coding (true = enabled, false = disabled)
 export const statColorCodingEnabled = writable<boolean>(true);
+export async function initUserSettings(): Promise<void> {
+  try {
+    const settings = await invoke<{ colorCoding: boolean }>(
+      "get_user_settings",
+    );
+    if (typeof settings?.colorCoding === "boolean") {
+      statColorCodingEnabled.set(settings.colorCoding);
+    }
+  } catch (err) {
+    console.error("Failed to load user settings:", err);
+  }
+}
+export interface StatColorRule {
+  partial?: string[];
+  literal?: string[];
+  color: string;
+}
 
-export const STAT_KEYWORD_COLORS: Array<{ keywords: string[]; color: string }> =
-  [
-    // Multi-word phrases first so they match before single words
-    { keywords: ["energy shield"], color: "#7EEBEB" },
-    { keywords: ["evasion rating"], color: "#30EB6E" },
-    {
-      keywords: [
-        "fire resistance",
-        "fire damage",
-        "fire gems",
-        "level of all fire",
-      ],
-      color: "#AB6921",
-    },
-    {
-      keywords: [
-        "cold resistance",
-        "cold damage",
-        "cold gems",
-        "level of all cold",
-      ],
-      color: "#3B65A5",
-    },
-    {
-      keywords: [
-        "lightning resistance",
-        "lightning damage",
-        "lightning gems",
-        "level of all lightning",
-      ],
-      color: "#A09D42",
-    },
-    {
-      keywords: [
-        "chaos resistance",
-        "chaos damage",
-        "chaos gems",
-        "level of all chaos",
-      ],
-      color: "#C01E85",
-    },
-    { keywords: ["strength"], color: "#CF4A2D" },
-    { keywords: ["dexterity"], color: "#65E465" },
-    { keywords: ["intelligence", "inteligence"], color: "#6868EB" },
-    {
-      keywords: ["to life", "increased life", "maximum life"],
-      color: "#CF4A2D",
-    },
-    {
-      keywords: ["to mana", "increased mana", "maximum mana"],
-      color: "#6868EB",
-    },
-    { keywords: ["to spirit", "increased spirit"], color: "#EBEB6E" },
-  ];
+export const STAT_KEYWORD_COLORS: StatColorRule[] = [
+  // Multi-word phrases first so they match before single words
+  {
+    partial: ["increased energy shield", "to energy shield"],
+    literal: ["energy shield", "es"],
+    color: "#7EEBEB",
+  },
+  {
+    partial: ["increased evasion rating", "to evasion rating"],
+    literal: ["evasion rating", "ev"],
+    color: "#30EB6E",
+  },
+  {
+    partial: ["increased armour", "to armour"],
+    literal: ["armour", "ar"],
+    color: "#e75e3f",
+  },
+  {
+    partial: [
+      "fire resistance",
+      "fire damage",
+      "fire gems",
+      "level of all fire",
+    ],
+    literal: [],
+    color: "#AB6921",
+  },
+  {
+    partial: [
+      "cold resistance",
+      "cold damage",
+      "cold gems",
+      "level of all cold",
+    ],
+    literal: [],
+    color: "#3B65A5",
+  },
+  {
+    partial: [
+      "lightning resistance",
+      "lightning damage",
+      "lightning gems",
+      "level of all lightning",
+    ],
+    literal: [],
+    color: "#A09D42",
+  },
+  {
+    partial: [
+      "chaos resistance",
+      "chaos damage",
+      "chaos gems",
+      "level of all chaos",
+    ],
+    literal: [],
+    color: "#C01E85",
+  },
+  {
+    partial: [
+      "physical resistance",
+      "physical damage",
+      "physical gems",
+      "level of all physical",
+    ],
+    literal: [],
+    color: "#B9B9B9",
+  },
+  { partial: ["strength"], literal: [], color: "#CF4A2D" },
+  { partial: ["dexterity"], literal: [], color: "#65E465" },
+  { partial: ["intelligence", "inteligence"], literal: [], color: "#6868EB" },
+  {
+    partial: ["to life", "increased life", "maximum life"],
+    literal: [],
+    color: "#CF4A2D",
+  },
+  {
+    partial: ["to mana", "increased mana", "maximum mana"],
+    literal: [],
+    color: "#6868EB",
+  },
+  { partial: ["to spirit", "increased spirit"], literal: [], color: "#EBEB6E" },
+];

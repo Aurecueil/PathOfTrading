@@ -1,6 +1,6 @@
 <!-- src/lib/FilterForm.svelte -->
 <script lang="ts">
-  import { createEventDispatcher, onDestroy, tick } from "svelte";
+  import { createEventDispatcher, onMount, onDestroy, tick } from "svelte";
   import FilterGroup from "$lib/trade/components/drawer/FilterGroup.svelte";
   import DrawerHeader from "$lib/trade/components/drawer/DrawerHeader.svelte";
   import ItemSearchCombobox from "$lib/trade/components/drawer/ItemSearchCombobox.svelte";
@@ -24,6 +24,8 @@
     statsPoe2,
     leaguesPoe,
     leaguesPoe2,
+    isLoading,
+    initItemData,
   } from "$lib/trade/tradeStore";
   import type { ItemEntry, ItemCategory } from "$lib/types/baseItem";
   import type { SortOptionItem } from "$lib/types/types";
@@ -105,7 +107,22 @@
     if (Array.isArray(storeVal.result)) return storeVal.result;
     return [];
   }
+  onMount(() => {
+    const isPoeEmpty =
+      !$leaguesPoe?.length ||
+      !$itemsPoe?.length ||
+      !$filtersPoe?.length ||
+      !$statsPoe?.length;
+    const isPoe2Empty =
+      !$leaguesPoe2?.length ||
+      !$itemsPoe2?.length ||
+      !$filtersPoe2?.length ||
+      !$statsPoe2?.length;
 
+    if (!$isLoading && (isPoeEmpty || isPoe2Empty)) {
+      initItemData();
+    }
+  });
   $: currentItemCategories = extractArray<ItemCategory>(
     realm === "poe2" ? $itemsPoe2 : $itemsPoe,
   );
@@ -598,7 +615,12 @@
     {computedDisplayName}
     on:close={handleCloseWithoutSearch}
   />
-
+  {#if $isLoading}
+    <div class="loading-banner" role="status" aria-live="polite">
+      <span class="loading-spinner"></span>
+      <span>Fetching trade data...</span>
+    </div>
+  {/if}
   <form on:submit|preventDefault={handleSearchOnly}>
     <div class="scroll-area" on:wheel|stopPropagation>
       <div class="top-bar">
@@ -1070,5 +1092,33 @@
     background-color: #000000 !important;
     border-color: #ffffff !important;
     color: #ffffff !important;
+  }
+  .loading-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    background-color: #111111;
+    border-bottom: 1px solid #777777;
+    color: #ffffff;
+    font-family: monospace, sans-serif;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+
+  .loading-spinner {
+    width: 10px;
+    height: 10px;
+    border: 2px solid #555555;
+    border-top-color: #ffffff;
+    border-radius: 50%;
+    display: inline-block;
+    animation: drawer-spin 0.7s linear infinite;
+  }
+
+  @keyframes drawer-spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>

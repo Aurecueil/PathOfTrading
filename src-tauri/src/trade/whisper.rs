@@ -11,7 +11,7 @@ pub async fn whisper(
     searchId: String,
 ) -> Result<Value, String> {
     let client = Client::new();
-    let endpoint = super::ENDPOINT;
+    let endpoint = crate::trade::get_endpoint();
 
     let poesessid = load_secret("poesessid")?
         .ok_or_else(|| "400 Bad Request: poesessid is required".to_string())?;

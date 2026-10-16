@@ -62,7 +62,7 @@ pub struct FilterDataResponse {
 
 pub async fn fetch_filters_data(realm: &str) -> Result<FilterDataResponse, String> {
     let client = Client::new();
-    let endpoint = super::ENDPOINT;
+    let endpoint = crate::trade::get_endpoint();
 
     let trade_path = if realm == "poe2" { "trade2" } else { "trade" };
     let url = format!("{endpoint}/api/{trade_path}/data/filters");

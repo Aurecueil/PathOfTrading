@@ -17,7 +17,7 @@ pub struct LeagueData {
 
 pub async fn fetch_league_data(realm: &str) -> Result<LeagueData, String> {
     let client = Client::new();
-    let endpoint = super::ENDPOINT;
+    let endpoint = "https://www.pathofexile.com";
 
     let trade_path = if realm == "poe2" { "trade2" } else { "trade" };
     let url = format!("{endpoint}/api/{trade_path}/data/leagues");

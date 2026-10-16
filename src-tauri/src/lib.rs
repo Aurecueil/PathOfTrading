@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod project;
+pub mod settings;
 pub mod trade;
 
 // fn initialize() {}
@@ -41,7 +42,7 @@ pub fn run() {
                     Err(e) => eprintln!("Failed to check auth status: {e}"),
                 }
             });
-
+            trade::settings::load_settings_from_disk(app.handle());
             // initialize();
             Ok(())
         })
@@ -76,6 +77,10 @@ pub fn run() {
             project::window_toggle_maximize,
             project::window_start_dragging,
             project::exit_app,
+            trade::settings::set_language,
+            trade::settings::get_language,
+            settings::get_user_settings,
+            settings::set_color_coding,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

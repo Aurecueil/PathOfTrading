@@ -14,30 +14,60 @@
     color: string | null;
   }
 
-  const keywordToColor = new Map<string, string>();
-  const allKeywords: string[] = [];
+  const partialToColor = new Map<string, string>();
+  const literalToColor = new Map<string, string>();
+  const allPartialKeywords: string[] = [];
 
   for (const entry of STAT_KEYWORD_COLORS) {
-    for (const kw of entry.keywords) {
+    for (const kw of entry.literal ?? []) {
+      literalToColor.set(kw.trim().toLowerCase(), entry.color);
+    }
+    for (const kw of entry.partial ?? []) {
       const lower = kw.toLowerCase();
-      keywordToColor.set(lower, entry.color);
-      allKeywords.push(lower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+      partialToColor.set(lower, entry.color);
+      allPartialKeywords.push(lower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
     }
   }
 
-  // Sort longest first so "energy shield" and "evasion rating" match first
-  allKeywords.sort((a, b) => b.length - a.length);
-  const patternString = `\\b(${allKeywords.join("|")})\\b`;
+  // Sort longest first so multi-word phrases match before shorter substrings
+  allPartialKeywords.sort((a, b) => b.length - a.length);
+  const patternString =
+    allPartialKeywords.length > 0
+      ? `\\b(${allPartialKeywords.join("|")})\\b`
+      : "";
 
   function getFirstMatchColor(input: string, enabled: boolean): string | null {
     if (!enabled || !input) return null;
+
+    const normalized = input.trim().toLowerCase();
+
+    // 1. Literal match: keyword === term
+    const literalMatch = literalToColor.get(normalized);
+    if (literalMatch) return literalMatch;
+
+    // 2. Partial match: keyword is inside the term
+    if (!patternString) return null;
     const match = new RegExp(patternString, "i").exec(input);
     if (!match) return null;
-    return keywordToColor.get(match[0].toLowerCase()) ?? null;
+    return partialToColor.get(match[0].toLowerCase()) ?? null;
   }
 
   function splitIntoSegments(input: string, enabled: boolean): TextSegment[] {
     if (!enabled || !input) return [];
+
+    const normalized = input.trim().toLowerCase();
+
+    // 1. Literal match: if entire term equals a literal keyword, color the whole text
+    const literalMatch = literalToColor.get(normalized);
+    if (literalMatch) {
+      return [{ text: input, color: literalMatch }];
+    }
+
+    // 2. Partial match: highlight matching substrings inside the term
+    if (!patternString) {
+      return [{ text: input, color: null }];
+    }
+
     const regex = new RegExp(patternString, "gi");
     const segments: TextSegment[] = [];
     let lastIndex = 0;
@@ -53,7 +83,7 @@
       const matchedWord = match[0];
       segments.push({
         text: matchedWord,
-        color: keywordToColor.get(matchedWord.toLowerCase()) ?? null,
+        color: partialToColor.get(matchedWord.toLowerCase()) ?? null,
       });
       lastIndex = regex.lastIndex;
     }
