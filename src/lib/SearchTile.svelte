@@ -103,8 +103,6 @@
     return "full";
   })();
 
-  $: isNarrowHeader = tile.w < 360;
-
   function snap(val: number): number {
     return snapToGrid ? Math.round(val / gridSize) * gridSize : Math.round(val);
   }
@@ -115,11 +113,20 @@
       : tile.full_payload;
   $: currentLeague = tile.league || activePayload?.league || "";
 
-  $: defaultRealmTitle =
-    tile.realm?.toLowerCase() === "poe2" ? "PoE2 Trade" : "PoE Trade";
+  $: isPoe2 = tile.realm?.toLowerCase() === "poe2";
+  $: realmIconSrc = isPoe2 ? "/poe2.png" : "/poe.png";
+  $: defaultRealmTitle = isPoe2 ? "PoE2 Trade" : "PoE Trade";
 
   $: displayTitle =
     tile.displayName?.trim() || tile.title?.trim() || defaultRealmTitle;
+
+  $: hasNoSearchYet =
+    !tile.searchId &&
+    !tile.loading &&
+    !isLiveActive &&
+    !isLiveConnecting &&
+    displayedItems.length === 0 &&
+    orderedEntries.length === 0;
 
   async function cancelUiJobs(
     targetUiId: string = String(tile.id || initialUiId),
@@ -145,7 +152,7 @@
   }
 
   function getViewportCapacity(): number {
-    const viewH = bodyElement?.clientHeight || Math.max(120, tile.h - 36);
+    const viewH = bodyElement?.clientHeight || Math.max(120, tile.h - 42);
     const rowH = getEstimatedRowHeight(effectiveStyle);
     return Math.max(1, Math.ceil(viewH / rowH));
   }
@@ -237,7 +244,7 @@
     }
 
     const scrollTop = bodyElement.scrollTop;
-    const clientHeight = bodyElement.clientHeight || Math.max(120, tile.h - 36);
+    const clientHeight = bodyElement.clientHeight || Math.max(120, tile.h - 32);
     const viewBottom = scrollTop + clientHeight;
 
     const rowNodes = bodyElement.querySelectorAll<HTMLElement>(
@@ -822,14 +829,10 @@
 
   async function toggleLiveButton() {
     if (disabled) return;
-    if (isLiveActive) {
+    if (isLiveActive || isLiveConnecting) {
       await stopLive();
     } else {
-      if (!tile.searchId) {
-        await executeSearch(undefined, false);
-      } else {
-        await startLive();
-      }
+      await executeSearch(undefined, false);
     }
   }
 
@@ -881,6 +884,12 @@
 
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
+  }
+
+  function handleBodyClick() {
+    if (hasNoSearchYet) {
+      dispatch("openfilters");
+    }
   }
 
   function onResizePointerDown(e: PointerEvent, dir: ResizeDirection) {
@@ -962,12 +971,12 @@
 </script>
 
 <!-- svelte-ignore a11y-no-static-element-interactions -->
+<!-- svelte-ignore a11y-click-events-have-key-events -->
 <div
   class="tile-root style-{effectiveStyle}"
-  class:live-active={isLiveActive}
   class:selected
-  style:z-index={z}
   class:is-disabled={disabled}
+  style:z-index={z}
   style:transform="translate({tile.x}px, {tile.y}px)"
   style:width="{tile.w}px"
   style:height="{tile.h}px"
@@ -983,25 +992,38 @@
     title="Click to configure filters, drag to move"
   >
     <div class="bar-left">
-      <span
-        class="realm-badge"
-        class:poe2={tile.realm?.toLowerCase() === "poe2"}
-      >
-        {tile.realm}
-      </span>
+      {#if mode === "live" || mode === "mixed"}
+        <span
+          class="live-dot"
+          class:active={isLiveActive}
+          title={isLiveActive ? "Live search active" : "Live search inactive"}
+        ></span>
+      {/if}
+
+      <img
+        class="realm-icon"
+        src={realmIconSrc}
+        alt={tile.realm}
+        on:error={(e) => {
+          const img = e.currentTarget as HTMLImageElement;
+          if (!img.src.includes("/static/")) {
+            img.src = isPoe2 ? "/static/poe2.png" : "/static/poe.png";
+          }
+        }}
+      />
+
       {#if currentLeague}
-        <span class="league-badge" title="League: {currentLeague}">
+        <span class="league-name" title="League: {currentLeague}">
           {currentLeague}
         </span>
       {/if}
-      {#if disabled}
-        <span class="disabled-badge">OFF</span>
-      {/if}
+
+      <span class="v-sep"></span>
+
       <span class="title" title={displayTitle}>{displayTitle}</span>
-      {#if displayedItems.length > 0 || orderedEntries.length > 0}
-        <span class="count-pill" title="Displayed / Total matched items">
-          {displayedItems.length}{#if orderedEntries.length > 0 && mode !== "live"}/{orderedEntries.length}{/if}
-        </span>
+
+      {#if disabled}
+        <span class="disabled-text">(OFF)</span>
       {/if}
     </div>
 
@@ -1018,41 +1040,44 @@
         <option value="mixed">Mixed</option>
       </select>
 
-      {#if mode !== "regular"}
+      {#if mode === "regular"}
         <button
           type="button"
-          class="live-btn"
+          class="action-btn"
+          disabled={disabled ||
+            tile.loading ||
+            isLiveConnecting ||
+            !activePayload}
+          on:click|stopPropagation={() => executeSearch(undefined, false)}
+          title={disabled
+            ? "Search is disabled on this tile"
+            : "Execute search"}
+        >
+          {tile.loading ? "Searching..." : "Search"}
+        </button>
+      {:else}
+        <button
+          type="button"
+          class="action-btn live-btn"
           class:active={isLiveActive}
           disabled={disabled ||
             tile.loading ||
             isLiveConnecting ||
             !activePayload}
           on:click|stopPropagation={toggleLiveButton}
-          title={isLiveActive ? "Stop live listener" : "Start live listener"}
+          title={isLiveActive
+            ? "Deactivate live search"
+            : "Activate live search"}
         >
-          <span class="live-dot" class:pulsing={isLiveActive}></span>
-          {#if !isNarrowHeader}
-            <span>{isLiveActive ? "Live" : "Start"}</span>
+          {#if isLiveConnecting || tile.loading}
+            Connecting...
+          {:else if isLiveActive}
+            Deactivate
+          {:else}
+            Activate
           {/if}
         </button>
       {/if}
-
-      <button
-        type="button"
-        class="search-btn"
-        disabled={disabled ||
-          tile.loading ||
-          isLiveConnecting ||
-          !activePayload}
-        on:click|stopPropagation={() => executeSearch(undefined, false)}
-        title={disabled ? "Search is disabled on this tile" : "Execute search"}
-      >
-        {#if tile.loading}
-          <span class="spin">↻</span>
-        {:else}
-          <span>🔍</span>{#if !isNarrowHeader}<span>Search</span>{/if}
-        {/if}
-      </button>
 
       <button
         type="button"
@@ -1060,20 +1085,22 @@
         on:click|stopPropagation={() => dispatch("delete")}
         title="Remove tile"
       >
-        ×
+        X
       </button>
     </div>
   </div>
 
   <div
     class="tile-body"
+    class:clickable-empty={hasNoSearchYet}
     bind:this={bodyElement}
     on:scroll={handleScroll}
     on:wheel|stopPropagation
+    on:click={handleBodyClick}
+    title={hasNoSearchYet ? "Click to configure filters" : undefined}
   >
     {#if tile.loading}
       <div class="search-overlay">
-        <span class="spin">↻</span>
         <span>Searching market...</span>
       </div>
     {/if}
@@ -1083,11 +1110,13 @@
         {#if disabled}
           Search disabled (Right-click to enable).
         {:else if isLiveConnecting}
-          <span class="spin">↻</span> Connecting to live socket...
+          Connecting to live socket...
         {:else if isLiveActive}
-          <span class="live-dot pulsing"></span> Waiting for live listings...
+          Waiting for live listings...
+        {:else if tile.searchId}
+          No items found.
         {:else}
-          No search executed or no items found.
+          No search executed — click to configure filters.
         {/if}
       </div>
     {:else}
@@ -1111,13 +1140,11 @@
         {#if visibleCount < orderedEntries.length}
           <div class="scroll-sentinel">
             {#if isFetchingMore}
-              <span class="spin">↻</span> Loading more results...
+              Loading more results...
             {/if}
           </div>
         {:else if isFetchingMore}
-          <div class="fetching-more">
-            <span class="spin">↻</span> Loading more results...
-          </div>
+          <div class="fetching-more">Loading more results...</div>
         {/if}
       </div>
     {/if}
@@ -1153,286 +1180,262 @@
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    background: #13161f;
-    border-radius: 8px;
-    border: 1px solid #283044;
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+    background-color: #040608;
+    border-radius: 0px;
+    border: 1px solid #7f7f7f;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
+    color: #d3d3d3;
+    font-family: "Fontin", monospace, sans-serif;
     overflow: visible;
-    transition:
-      border-color 0.15s ease,
-      box-shadow 0.15s ease,
-      opacity 0.15s ease;
   }
+
   .tile-root.selected {
-    border-color: #3a57e8;
-    box-shadow:
-      0 0 0 2px rgba(58, 87, 232, 0.45),
-      0 10px 28px rgba(0, 0, 0, 0.55);
+    border-color: #ffffff;
   }
+
   .tile-root.is-disabled {
-    opacity: 0.68;
+    opacity: 0.65;
   }
-  .tile-root.live-active {
-    border-color: #7f1d1d;
-    box-shadow:
-      0 10px 28px rgba(0, 0, 0, 0.55),
-      0 0 12px rgba(239, 68, 68, 0.12);
-  }
+
   .tile-bar {
-    height: 36px;
-    background: linear-gradient(180deg, #212636 0%, #1a1e2b 100%);
-    border-top-left-radius: 7px;
-    border-top-right-radius: 7px;
-    border-bottom: 1px solid #2c3345;
+    height: 42px;
+    background-color: #040608;
+    border-bottom: 1px solid #7f7f7f;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 0.45rem;
+    padding: 0 12px;
     cursor: pointer;
     user-select: none;
     flex-shrink: 0;
-    gap: 0.4rem;
+    gap: 12px;
   }
+
   .tile-bar:active {
     cursor: grabbing;
   }
+
   .bar-left {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 10px;
     overflow: hidden;
     min-width: 0;
     flex: 1;
   }
-  .realm-badge {
-    text-transform: uppercase;
-    font-size: 0.62rem;
-    font-weight: 700;
-    background: #334155;
-    color: #cbd5e1;
-    padding: 2px 5px;
-    border-radius: 3px;
+
+  .live-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background-color: #7f7f7f;
+    display: inline-block;
     flex-shrink: 0;
   }
-  .realm-badge.poe2 {
-    background: #3b1d5e;
-    color: #e9d5ff;
-    border: 1px solid #581c87;
+
+  .live-dot.active {
+    background-color: #ef4444;
   }
-  .league-badge {
-    font-size: 0.62rem;
-    background: #1e293b;
-    color: #93c5fd;
-    border: 1px solid #334155;
-    padding: 1px 5px;
-    border-radius: 3px;
+
+  .realm-icon {
+    width: 28px;
+    height: 28px;
+    object-fit: contain;
     flex-shrink: 0;
-    max-width: 80px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    display: block;
+  }
+
+  .league-name {
+    font-size: 22px;
+    font-weight: 400;
+    color: #ffffff;
     white-space: nowrap;
+    flex-shrink: 0;
+    line-height: 1;
   }
-  .disabled-badge {
-    font-size: 0.6rem;
-    font-weight: 700;
-    background: #7f1d1d;
-    color: #fecaca;
-    padding: 1px 4px;
-    border-radius: 3px;
+
+  .v-sep {
+    width: 2px;
+    height: 26px;
+    background-color: #7f7f7f;
     flex-shrink: 0;
   }
+
   .title {
-    font-size: 0.82rem;
-    font-weight: 600;
-    color: #e2e8f0;
+    font-size: 22px;
+    font-weight: 400;
+    color: #d3d3d3;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    line-height: 1.1;
   }
-  .count-pill {
-    font-size: 0.65rem;
-    font-family: ui-monospace, monospace;
-    color: #94a3b8;
-    background: #0f131c;
-    border: 1px solid #262e40;
-    padding: 1px 5px;
-    border-radius: 999px;
+
+  .disabled-text {
+    font-size: 18px;
+    color: #9a9a9a;
     flex-shrink: 0;
   }
+
   .actions {
     display: flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: 6px;
     flex-shrink: 0;
   }
+
   .mode-select {
-    height: 24px;
-    background: #252a3a;
-    color: #cbd5e1;
-    border: 1px solid #374151;
-    font-size: 0.72rem;
-    padding: 0 0.35rem;
-    border-radius: 4px;
+    font-family: "Fontin", monospace, sans-serif !important;
+    font-size: 18px !important;
+    height: 28px !important;
+    line-height: 1 !important;
+    background-color: #000000 !important;
+    border: 2px solid #7f7f7f !important;
+    border-radius: 0px !important;
+    color: #ffffff !important;
+    padding: 0 8px !important;
     outline: none;
     cursor: pointer;
-    line-height: 1;
   }
-  .mode-select:hover:not(:disabled) {
-    border-color: #4b5563;
+
+  .mode-select:hover:not(:disabled),
+  .mode-select:focus:not(:disabled) {
+    border-color: #ffffff !important;
   }
+
   .mode-select:disabled {
-    opacity: 0.4;
+    opacity: 0.45;
     cursor: not-allowed;
   }
+
+  .mode-select option {
+    background-color: #000000 !important;
+    color: #9a9a9a !important;
+    font-family: "Fontin", monospace, sans-serif !important;
+    font-size: 18px !important;
+  }
+
+  .mode-select option:checked {
+    color: #ffffff !important;
+  }
+
   .actions button {
-    height: 24px;
-    background: #2b3040;
-    border: 1px solid #374151;
-    color: #cbd5e1;
-    font-size: 0.72rem;
+    font-family: "Fontin", monospace, sans-serif !important;
+    font-size: 18px;
+    height: 28px;
     line-height: 1;
-    padding: 0 0.5rem;
-    border-radius: 4px;
+    padding: 0 8px;
+    border-radius: 0px !important;
     cursor: pointer;
+    border: 2px solid #7f7f7f;
+    background-color: #000000;
+    color: #ffffff;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.25rem;
     white-space: nowrap;
     flex-shrink: 0;
+    transition: border-color 0.1s ease;
   }
-  .actions button:hover:not(:disabled) {
-    background: #3b4257;
+
+  .actions button:hover:not(:disabled),
+  .actions button:focus:not(:disabled) {
+    border-color: #ffffff;
+    outline: none;
   }
+
   .actions button:disabled {
-    opacity: 0.4;
+    opacity: 0.45;
     cursor: not-allowed;
   }
-  .actions button.search-btn {
-    background: #1e3a8a;
-    color: #bfdbfe;
-    border-color: #2563eb;
-  }
-  .actions button.search-btn:hover:not(:disabled) {
-    background: #1d4ed8;
-  }
-  .actions button.live-btn {
-    background: #1f2937;
-    color: #9ca3af;
-    border-color: #374151;
-  }
+
   .actions button.live-btn.active {
-    background: #7f1d1d;
-    color: #fca5a5;
     border-color: #ef4444;
+    color: #ffffff;
   }
-  .live-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #6b7280;
-    display: inline-block;
-    flex-shrink: 0;
+
+  .actions button.live-btn.active:hover:not(:disabled) {
+    border-color: #ffffff;
   }
-  .live-dot.pulsing {
-    background: #ef4444;
-    box-shadow: 0 0 6px #ef4444;
-    animation: pulse 1.2s infinite ease-in-out;
-  }
-  @keyframes pulse {
-    0%,
-    100% {
-      opacity: 1;
-      transform: scale(1);
-    }
-    50% {
-      opacity: 0.35;
-      transform: scale(0.8);
-    }
-  }
+
   .actions button.del {
-    width: 24px;
-    height: 24px;
+    width: 28px;
     padding: 0;
-    font-size: 0.95rem;
-    border-color: transparent;
+    font-size: 18px;
   }
-  .actions button.del:hover {
-    color: #ef4444;
-    background: rgba(239, 68, 68, 0.12);
-    border-color: rgba(239, 68, 68, 0.3);
-  }
-  .spin {
-    display: inline-block;
-    animation: rotate 1s linear infinite;
-  }
-  @keyframes rotate {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
-  }
+
   .tile-body {
     flex: 1;
+    background-color: #000000;
     overflow-y: auto;
     overflow-x: hidden;
     position: relative;
-    padding: 0.45rem;
+    padding: 0.5rem;
     display: flex;
     flex-direction: column;
     container-type: inline-size;
     container-name: tile-body;
   }
-  .style-minimal .tile-body {
-    padding: 0.3rem;
+
+  .tile-body.clickable-empty {
+    cursor: pointer;
   }
+
+  .style-minimal .tile-body {
+    padding: 0.35rem;
+  }
+
   .search-overlay {
     position: absolute;
     inset: 0;
-    background: rgba(15, 23, 42, 0.78);
-    backdrop-filter: blur(2px);
+    background: rgba(0, 0, 0, 0.85);
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
     z-index: 10;
-    color: #94a3b8;
-    font-size: 0.8rem;
+    color: #d3d3d3;
+    font-size: 21px;
   }
+
   .status-msg {
     margin: auto;
-    font-size: 0.78rem;
-    color: #94a3b8;
+    font-size: 21px;
+    color: #9a9a9a;
     text-align: center;
     display: flex;
     align-items: center;
     gap: 0.4rem;
+    user-select: none;
   }
+
   .item-list {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
   }
+
   .item-list.list-compact {
     gap: 0.35rem;
   }
+
   .item-list.list-minimal {
     gap: 0.22rem;
   }
+
   .scroll-sentinel,
   .fetching-more {
-    min-height: 28px;
+    min-height: 36px;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 0.35rem;
     text-align: center;
-    font-size: 0.72rem;
-    color: #64748b;
+    font-size: 18px;
+    color: #9a9a9a;
     padding: 0.35rem 0;
   }
+
   .edge,
   .corner {
     position: absolute;

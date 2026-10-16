@@ -39,7 +39,14 @@
   {/if}
 
   {#if styleMode !== "minimal" && item.sockets && item.sockets.length > 0}
-    <ItemSockets sockets={item.sockets} />
+    <ItemSockets
+      sockets={item.sockets}
+      socketedItems={item.socketedItems ?? []}
+      w={item.w}
+      h={item.h}
+      realm={item.realm === "poe2" ? "poe2" : "poe"}
+      on:gems
+    />
   {:else if styleMode === "minimal" && item.sockets && item.sockets.length > 0}
     <span class="mini-socket-pill" title="{item.sockets.length} Sockets">
       {item.sockets.length}S
