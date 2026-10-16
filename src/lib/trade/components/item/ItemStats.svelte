@@ -173,29 +173,6 @@
   <!-- COMPACT & FULL VIEW -->
   <div class="stats-container mode-{styleMode}">
     <!-- Top Header Banner -->
-    <div class="item-header-banner {getRarityClass(item)}">
-      <div class="header-titles">
-        {#if item.name}
-          <span class="item-title-name">{item.name}</span>
-        {/if}
-        <span class="item-title-base">{item.typeLine || item.baseType}</span>
-      </div>
-
-      <!-- Small inline sockets indicator in Compact mode -->
-      {#if styleMode === "compact" && item.sockets && item.sockets.length > 0}
-        <div class="inline-sockets" title="{item.sockets.length} Sockets">
-          {#each item.sockets as sock, si}
-            {#if si > 0 && item.sockets[si - 1].group === sock.group}
-              <span class="inline-socket-link"></span>
-            {/if}
-            <span
-              class="inline-socket-dot"
-              style:background={getSocketColor(sock)}
-            ></span>
-          {/each}
-        </div>
-      {/if}
-    </div>
 
     <!-- Wrapped Properties Grid -->
     {#if item.properties && item.properties.length > 0}
@@ -341,27 +318,6 @@
             <span class="skill-name">{skill.name}</span>
           </div>
         {/each}
-      </div>
-    {/if}
-
-    <!-- Bottom Status Tags -->
-    {#if item.identified === false || item.corrupted || item.sanctified || item.fractured || mutatedTag}
-      <div class="bottom-tags-container">
-        {#if item.identified === false}
-          <span class="status-tag tag-unidentified">UNIDENTIFIED</span>
-        {/if}
-        {#if item.fractured}
-          <span class="status-tag tag-fractured">FRACTURED</span>
-        {/if}
-        {#if item.sanctified}
-          <span class="status-tag tag-sanctified">SANCTIFIED</span>
-        {/if}
-        {#if item.corrupted}
-          <span class="status-tag tag-corrupted">CORRUPTED</span>
-        {/if}
-        {#if mutatedTag}
-          <span class="status-tag tag-mutated">{mutatedTag}</span>
-        {/if}
       </div>
     {/if}
   </div>

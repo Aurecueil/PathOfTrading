@@ -65,6 +65,8 @@
     {alt}
     class={className}
     {loading}
+    decoding="async"
+    draggable="false"
     class:loading={isLoading}
     class:error={hasError}
     on:error={() => {
@@ -78,9 +80,13 @@
 
 <style>
   img {
-    transition: opacity 0.15s ease-in-out;
+    transition: opacity 0.2s ease-in-out;
   }
   img.loading {
-    opacity: 0.6;
+    opacity: 0.4;
+  }
+  /* cache failed and we fell back to the raw URL: keep it visible */
+  img.error {
+    opacity: 1;
   }
 </style>

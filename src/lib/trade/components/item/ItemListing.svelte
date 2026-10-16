@@ -44,12 +44,17 @@
     return [];
   }
 
+  $: ageSec = listing?.indexed
+    ? Math.max(
+        0,
+        Math.floor((Date.now() - new Date(listing.indexed).getTime()) / 1000),
+      )
+    : null;
+  $: isFresh = ageSec !== null && ageSec < 300;
+
   $: relativeAge = (() => {
-    if (!listing?.indexed) return "";
-    const diffSec = Math.max(
-      0,
-      Math.floor((Date.now() - new Date(listing.indexed).getTime()) / 1000),
-    );
+    if (ageSec === null) return "";
+    const diffSec = ageSec;
     if (diffSec < 60) return `${diffSec}s ago`;
     const diffMin = Math.floor(diffSec / 60);
     if (diffMin < 60) return `${diffMin}m ago`;
@@ -91,13 +96,20 @@
       type="button"
       class="btn-icon-travel"
       disabled={isTraveling || isQueued}
-      title="Travel to Hideout ({account?.name ?? 'Seller'})"
+      title="Travel to hideout ({account?.name ?? 'Seller'})"
+      aria-label="Travel to hideout"
       on:click|stopPropagation={onTravel}
     >
       {#if isTraveling || isQueued}
-        <span class="spin">↻</span>
+        <svg class="spin" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M21 12a9 9 0 1 1-3-6.7M21 3v6h-6" />
+        </svg>
       {:else}
-        ⚡
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"
+          />
+        </svg>
       {/if}
     </button>
   </div>
@@ -107,10 +119,12 @@
     data-league={league}
     data-search-id={searchId}
   >
-    <!-- Price & Larger Gold Fee -->
+    <!-- Price & gold fee -->
     <div class="price-box">
       <div class="price-headline">
-        <span class="amount">{price?.amount ?? "—"}x</span>
+        <span class="amount"
+          >{price?.amount ?? "—"}<span class="times">×</span></span
+        >
         {#if currencyEntry?.image}
           <CdnImage
             src={currencyEntry.image}
@@ -124,20 +138,40 @@
         </span>
       </div>
       {#if listing?.fee}
-        <div class="fee-text">+ {listing.fee} gold fee</div>
+        <div class="fee-text" title="Gold fee for travelling to this hideout">
+          <span class="coin" aria-hidden="true"></span>
+          {listing.fee.toLocaleString()} gold
+        </div>
       {/if}
     </div>
 
-    <!-- Seller & Larger Indexed Time (Stash position removed) -->
+    <!-- Seller & listing age -->
     <div class="seller-box">
       <div class="seller-row">
-        <span class="status-dot" class:online={account?.online} />
+        <span
+          class="status-dot"
+          class:online={account?.online === true}
+          class:offline={account?.online === false}
+          title={account?.online === true
+            ? "Online"
+            : account?.online === false
+              ? "Offline"
+              : "Status unknown"}
+        ></span>
         <span class="seller-name" title={account?.name}>
           {account?.name ?? "Anonymous"}
         </span>
       </div>
       {#if relativeAge}
-        <div class="age-badge">{relativeAge}</div>
+        <div
+          class="age-badge"
+          class:fresh={isFresh}
+          title={listing?.indexed
+            ? new Date(listing.indexed).toLocaleString()
+            : ""}
+        >
+          Listed {relativeAge}
+        </div>
       {/if}
     </div>
 
@@ -149,7 +183,7 @@
       </div>
     {/if}
 
-    <!-- Trade Action Buttons -->
+    <!-- Trade actions -->
     <div class="action-box">
       <div class="primary-actions">
         <button
@@ -161,11 +195,22 @@
           on:click|stopPropagation={onTravel}
         >
           {#if isTraveling}
-            <span class="spin">↻</span> Traveling...
+            <svg class="spin" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M21 12a9 9 0 1 1-3-6.7M21 3v6h-6" />
+            </svg>
+            Traveling…
           {:else if isQueued}
-            <span class="spin">↻</span> Queued...
+            <svg class="spin" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M21 12a9 9 0 1 1-3-6.7M21 3v6h-6" />
+            </svg>
+            Queued…
           {:else}
-            Travel to Hideout
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"
+              />
+            </svg>
+            Travel to hideout
           {/if}
         </button>
 
@@ -173,77 +218,122 @@
           <button
             type="button"
             class="btn-whisper"
-            title="Copy trade whisper"
+            class:is-copied={whisperCopied}
+            title={whisperCopied ? "Whisper copied" : "Copy trade whisper"}
+            aria-label="Copy trade whisper"
             on:click|stopPropagation={copyWhisper}
           >
-            {whisperCopied ? "✓" : "💬"}
+            {#if whisperCopied}
+              <svg viewBox="0 0 24 24" aria-hidden="true"
+                ><path d="M20 6 9 17l-5-5" /></svg
+              >
+            {:else}
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+                />
+              </svg>
+            {/if}
           </button>
         {/if}
       </div>
 
       {#if travelError}
-        <span class="travel-error" title={travelError}>{travelError}</span>
+        <span class="travel-error" role="alert" title={travelError}
+          >{travelError}</span
+        >
       {/if}
     </div>
   </div>
 {/if}
 
 <style>
-  /* Minimal Mode */
+  /* Shared tokens (match the trade site's price colours) */
+  .listing-minimal,
+  .listing-panel {
+    --price: #e9cf9f;
+    --currency: #aa9e82;
+    --gold: #facc15;
+    --btn-bg: #3a2608;
+    --btn-bg-hover: #5a3806;
+    --btn-border: #6b4a14;
+    --btn-border-hover: #b8892f;
+    font-family: "FontinRegular", "Fontin", "Palatino Linotype", Georgia, serif;
+  }
+
+  svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* ---------------- Minimal ---------------- */
   .listing-minimal {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.5rem;
   }
   .min-price {
     display: flex;
-    align-items: baseline;
-    gap: 0.2rem;
+    align-items: center;
+    gap: 0.25rem;
     white-space: nowrap;
   }
   .min-price .amount {
-    font-size: 0.88rem;
+    font-size: 1rem;
     font-weight: 700;
-    color: #38bdf8;
+    color: var(--price);
   }
   .min-price .currency {
-    font-size: 0.7rem;
-    color: #94a3b8;
+    font-size: 0.78rem;
+    color: var(--currency);
   }
   .btn-icon-travel {
-    background: #1e293b;
-    border: 1px solid #334155;
-    color: #f8fafc;
+    background: var(--btn-bg);
+    border: 1px solid var(--btn-border);
+    color: #f1e3c4;
     width: 28px;
     height: 28px;
-    border-radius: 4px;
+    border-radius: 0;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.78rem;
+    transition:
+      background-color 0.12s ease,
+      border-color 0.12s ease;
   }
-  .btn-icon-travel:hover:not(:disabled) {
-    background: #2563eb;
-    border-color: #3b82f6;
+  .btn-icon-travel:hover:not(:disabled),
+  .btn-icon-travel:focus-visible {
+    background: var(--btn-bg-hover);
+    border-color: var(--btn-border-hover);
+    outline: none;
+  }
+  .btn-icon-travel:disabled {
+    opacity: 0.6;
+    cursor: default;
   }
 
-  /* Compact & Full Panel */
+  /* ---------------- Full & compact panel ---------------- */
   .listing-panel {
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: center;
     text-align: center;
-    gap: 0.45rem;
-    width: 160px;
-    min-width: 145px;
-    padding-top: 0.4rem;
+    gap: 0.5rem;
+    width: 164px;
+    min-width: 148px;
   }
   .listing-panel.mode-compact {
-    width: 135px;
-    min-width: 125px;
-    gap: 0.3rem;
+    width: 140px;
+    min-width: 128px;
+    gap: 0.35rem;
   }
 
   @container tile-body (max-width: 470px) {
@@ -253,101 +343,135 @@
       flex-direction: row;
       justify-content: space-between;
       flex-wrap: wrap;
-      padding-top: 0;
     }
     .action-box {
       width: auto !important;
     }
   }
+
   :global(.currency-img) {
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
     object-fit: contain;
     align-self: center;
-  }
-  .price-headline {
-    display: flex;
-    align-items: baseline;
-    justify-content: center;
-    gap: 0.25rem;
-  }
-  .amount {
-    font-size: 1.15rem;
-    font-weight: 700;
-    color: #38bdf8;
-  }
-  .mode-compact .amount {
-    font-size: 0.98rem;
-  }
-  .currency {
-    font-size: 0.8rem;
-    color: #94a3b8;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
   }
   .mode-compact :global(.currency-img),
   .min-price :global(.currency-img) {
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
   }
-  /* Bigger Gold Fee */
+
+  .price-headline {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+  .amount {
+    font-size: 1.3rem;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--price);
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  }
+  .amount .times {
+    margin-left: 1px;
+    font-size: 0.8em;
+    opacity: 0.6;
+    font-weight: 400;
+  }
+  .mode-compact .amount {
+    font-size: 1.08rem;
+  }
+  .currency {
+    font-size: 0.85rem;
+    color: var(--currency);
+  }
+
   .fee-text {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin-top: 0.2rem;
     font-size: 0.78rem;
-    font-weight: 600;
-    color: #facc15;
-    margin-top: 1px;
+    color: var(--gold);
+    font-variant-numeric: tabular-nums;
+  }
+  .coin {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #fff1a8, #d9a60b 70%);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
   }
 
   .seller-box {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.18rem;
-    font-size: 0.74rem;
+    gap: 0.15rem;
+    max-width: 100%;
+    padding-top: 0.45rem;
+    border-top: 1px dotted rgba(255, 255, 255, 0.12);
+    width: 100%;
   }
   .seller-row {
     display: flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: 0.35rem;
+    max-width: 100%;
   }
   .seller-name {
+    font-size: 0.84rem;
     font-weight: 600;
-    color: #e2e8f0;
-    max-width: 125px;
+    color: #d8d3c4;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .status-dot {
-    width: 6px;
-    height: 6px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
-    background: #ef4444;
+    background: #6b6b6b;
     flex-shrink: 0;
   }
   .status-dot.online {
-    background: #22c55e;
-    box-shadow: 0 0 4px rgba(34, 197, 94, 0.6);
+    background: #3fcf6a;
+    box-shadow: 0 0 5px rgba(63, 207, 106, 0.7);
+  }
+  .status-dot.offline {
+    background: #d9534f;
   }
 
-  /* Bigger Time Display */
   .age-badge {
-    font-size: 0.78rem;
-    font-weight: 600;
-    color: #cbd5e1;
+    font-size: 0.76rem;
+    color: #8f8a7b;
+  }
+  .age-badge.fresh {
+    color: #7fd18f;
   }
 
   .sort-tag {
-    font-size: 0.64rem;
-    color: #38bdf8;
-    background: #090e17;
-    border: 1px solid #1e293b;
-    padding: 1px 5px;
-    border-radius: 3px;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.68rem;
+    color: #8f8a7b;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 1px 6px;
   }
+
   .action-box {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.3rem;
     width: 100%;
   }
   .primary-actions {
@@ -356,45 +480,89 @@
     width: 100%;
     justify-content: center;
   }
+
   .btn-travel {
-    background: #1e293b;
-    border: 1px solid #334155;
-    color: #f1f5f9;
-    padding: 0.32rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.7rem;
-    font-weight: 600;
-    cursor: pointer;
     flex: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.25rem;
-  }
-  .btn-travel:hover:not(:disabled) {
-    background: #2563eb;
-    border-color: #3b82f6;
-    color: #ffffff;
-  }
-  .btn-whisper {
-    background: #172030;
-    border: 1px solid #2e3b54;
-    color: #cbd5e1;
-    padding: 0.25rem 0.4rem;
-    border-radius: 4px;
-    font-size: 0.7rem;
+    gap: 0.35rem;
+    padding: 0.4rem 0.55rem;
+    background: linear-gradient(180deg, #4a3210 0%, #2e1f08 100%);
+    border: 1px solid var(--btn-border);
+    border-radius: 0;
+    color: #f4e6c6;
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
     cursor: pointer;
+    transition:
+      background 0.12s ease,
+      border-color 0.12s ease,
+      color 0.12s ease;
   }
-  .btn-whisper:hover {
-    background: #28354d;
-    color: #38bdf8;
+  .btn-travel:hover:not(:disabled),
+  .btn-travel:focus-visible {
+    background: linear-gradient(180deg, #6a4814 0%, #43290a 100%);
+    border-color: var(--btn-border-hover);
+    color: #fff;
+    outline: none;
   }
+  .btn-travel:active:not(:disabled) {
+    background: #2e1f08;
+  }
+  .btn-travel:disabled {
+    cursor: default;
+    opacity: 0.75;
+  }
+  .btn-travel.is-active,
+  .btn-travel.is-queued {
+    border-color: var(--btn-border-hover);
+  }
+  .mode-compact .btn-travel {
+    font-size: 0.74rem;
+    padding: 0.32rem 0.45rem;
+  }
+
+  .btn-whisper {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    background: #12151b;
+    border: 1px solid #2c3340;
+    border-radius: 0;
+    color: #a9b0be;
+    padding: 0;
+    cursor: pointer;
+    transition:
+      background-color 0.12s ease,
+      border-color 0.12s ease,
+      color 0.12s ease;
+  }
+  .btn-whisper:hover,
+  .btn-whisper:focus-visible {
+    background: #1b212b;
+    border-color: #4a5568;
+    color: #e9cf9f;
+    outline: none;
+  }
+  .btn-whisper.is-copied {
+    border-color: #3a7a4a;
+    color: #7fd18f;
+  }
+
   .travel-error {
-    font-size: 0.62rem;
-    color: #f87171;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.72rem;
+    color: #ff7b7b;
   }
+
   .spin {
-    display: inline-block;
     animation: rotate 1s linear infinite;
   }
   @keyframes rotate {
@@ -403,6 +571,11 @@
     }
     to {
       transform: rotate(360deg);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .spin {
+      animation-duration: 3s;
     }
   }
 </style>

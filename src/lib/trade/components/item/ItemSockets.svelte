@@ -2,7 +2,7 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import type { Item, ItemSocket } from "$lib/types/tradeItem";
-  import ItemStats from "$lib/trade/components/drawer/ItemStats.svelte";
+  import ItemStats from "$lib/trade/components/item/ItemStats.svelte";
   import CdnImage from "./CdnImage.svelte";
 
   export let sockets: ItemSocket[] = [];
@@ -328,7 +328,11 @@
   }
   .slot.has-item:hover .box,
   .slot.has-item:focus-visible .box {
-    filter: brightness(1.25) drop-shadow(0 0 4px rgba(147, 197, 253, 0.7));
+    filter: brightness(1.3) drop-shadow(0 0 5px rgba(233, 207, 159, 0.75));
+  }
+  .slot.has-item:focus-visible .box {
+    outline: 1px dotted #e9cf9f;
+    outline-offset: 2px;
   }
 
   .box {
@@ -359,12 +363,14 @@
     pointer-events: none;
   }
 
+  /* fallback for socket types without a sprite */
   .ring {
     width: 28px;
     height: 28px;
     border-radius: 50%;
-    border: 2px solid #475569;
-    background: #090a0f;
+    border: 2px solid #5b5b5b;
+    background: radial-gradient(circle at 35% 30%, #1d1f26, #07080b 70%);
+    box-shadow: inset 0 0 6px rgba(0, 0, 0, 0.9);
     box-sizing: border-box;
   }
 
@@ -395,12 +401,15 @@
     max-height: 80vh;
     overflow-y: auto;
     box-sizing: border-box;
-    padding: 0.5rem;
-    background: #10141d;
-    border: 1px solid #334155;
-    border-left: 3px solid #475569;
-    border-radius: 6px;
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.7);
+    padding: 0.55rem 0.6rem;
+    background: rgba(4, 5, 7, 0.97);
+    border: 1px solid #3a3326;
+    border-top: 2px solid #8a6a2e;
+    border-radius: 0;
+    box-shadow:
+      0 14px 34px rgba(0, 0, 0, 0.8),
+      0 0 0 1px #000;
     pointer-events: none;
+    scrollbar-width: thin;
   }
 </style>

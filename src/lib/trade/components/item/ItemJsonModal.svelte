@@ -8,8 +8,37 @@
   export let onClose: () => void;
 
   let copied = false;
+  let closeBtn: HTMLButtonElement | undefined;
 
   $: formattedJson = rawData ? JSON.stringify(rawData, null, 2) : "{}";
+  // Only pay for highlighting while the modal is actually visible.
+  $: highlighted = isOpen ? highlight(formattedJson) : "";
+  $: lineCount = isOpen ? formattedJson.split("\n").length : 0;
+  $: sizeKb = isOpen ? (formattedJson.length / 1024).toFixed(1) : "0";
+
+  // Move focus into the dialog as soon as it renders.
+  $: if (isOpen && closeBtn) queueMicrotask(() => closeBtn?.focus());
+
+  function escapeHtml(s: string): string {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  /** Tiny JSON tokenizer: keys, strings, numbers, booleans/null. */
+  function highlight(json: string): string {
+    return escapeHtml(json).replace(
+      /("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"\s*:?)|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
+      (m, str?: string, kw?: string, num?: string) => {
+        if (str) {
+          return str.endsWith(":")
+            ? `<span class="j-key">${str.slice(0, -1)}</span>:`
+            : `<span class="j-str">${str}</span>`;
+        }
+        if (kw) return `<span class="j-kw">${kw}</span>`;
+        if (num) return `<span class="j-num">${num}</span>`;
+        return m;
+      },
+    );
+  }
 
   async function handleCopy() {
     if (!rawData) return;
@@ -39,38 +68,41 @@
 </script>
 
 {#if isOpen}
-  <!-- Backdrop -->
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
   <div class="modal-backdrop" on:click|self={onClose} role="presentation">
     <div class="modal-card" role="dialog" aria-modal="true" aria-label={title}>
-      <!-- Header -->
       <div class="modal-header">
         <div class="modal-title">
           <span class="json-icon">&#123;&nbsp;&#125;</span>
-          <span>{title}</span>
+          <span class="title-text" {title}>{title}</span>
         </div>
 
         <div class="header-actions">
-          <button type="button" class="btn-copy" on:click={handleCopy}>
-            {#if copied}
-              ✓ Copied
-            {:else}
-              Copy JSON
-            {/if}
+          <span class="meta">{lineCount} lines · {sizeKb} KB</span>
+          <button
+            type="button"
+            class="btn-copy"
+            class:is-copied={copied}
+            on:click={handleCopy}
+          >
+            {copied ? "Copied" : "Copy JSON"}
           </button>
           <button
+            bind:this={closeBtn}
             type="button"
             class="btn-close"
             on:click={onClose}
             aria-label="Close"
           >
-            ✕
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
           </button>
         </div>
       </div>
 
-      <!-- JSON Viewer -->
       <div class="modal-body">
-        <pre><code>{formattedJson}</code></pre>
+        <pre><code>{@html highlighted}</code></pre>
       </div>
     </div>
   </div>
@@ -80,7 +112,7 @@
   .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(4, 7, 13, 0.75);
+    background: rgba(2, 3, 6, 0.78);
     backdrop-filter: blur(3px);
     display: flex;
     align-items: center;
@@ -90,17 +122,18 @@
   }
 
   .modal-card {
-    background: #0f131a;
-    border: 1px solid #293244;
-    border-radius: 6px;
+    background: #07090c;
+    border: 1px solid #3a3326;
+    border-top: 2px solid #8a6a2e;
+    border-radius: 0;
     width: 100%;
-    max-width: 780px;
+    max-width: 800px;
     max-height: 85vh;
     display: flex;
     flex-direction: column;
     box-shadow:
-      0 10px 25px -5px rgba(0, 0, 0, 0.8),
-      0 8px 10px -6px rgba(0, 0, 0, 0.8);
+      0 18px 48px rgba(0, 0, 0, 0.85),
+      0 0 0 1px #000;
     overflow: hidden;
   }
 
@@ -108,82 +141,137 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.75rem 1rem;
-    background: #141924;
-    border-bottom: 1px solid #232a3b;
+    gap: 1rem;
+    padding: 0.6rem 0.75rem 0.6rem 1rem;
+    background: linear-gradient(180deg, #17130c 0%, #0a0907 100%);
+    border-bottom: 1px solid #2e281c;
   }
 
   .modal-title {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: #e2e8f0;
+    gap: 0.6rem;
+    min-width: 0;
+    font-family: "FontinRegular", "Fontin", Georgia, serif;
+    font-size: 1rem;
+    color: #e9cf9f;
+  }
+  .title-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .json-icon {
-    color: #38bdf8;
-    font-family: monospace;
+    color: #8a6a2e;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
     font-weight: 700;
+    flex-shrink: 0;
   }
 
   .header-actions {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.6rem;
+    flex-shrink: 0;
+  }
+
+  .meta {
+    font-size: 0.72rem;
+    color: #6f6755;
+    font-variant-numeric: tabular-nums;
   }
 
   .btn-copy {
-    background: #1e293b;
-    border: 1px solid #334155;
-    color: #e2e8f0;
-    font-size: 0.72rem;
-    padding: 0.25rem 0.6rem;
-    border-radius: 3px;
+    background: #2a1f0c;
+    border: 1px solid #5c4519;
+    color: #e9cf9f;
+    font-family: inherit;
+    font-size: 0.78rem;
+    padding: 0.28rem 0.75rem;
+    border-radius: 0;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition:
+      background-color 0.12s ease,
+      border-color 0.12s ease,
+      color 0.12s ease;
   }
-
   .btn-copy:hover {
-    background: #334155;
-    color: #38bdf8;
-    border-color: #475569;
+    background: #3b2c10;
+    border-color: #8a6a2e;
+    color: #fff3d6;
+  }
+  .btn-copy.is-copied {
+    border-color: #4a7a3a;
+    background: #12220e;
+    color: #8fd17a;
   }
 
   .btn-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
     background: transparent;
-    border: none;
-    color: #94a3b8;
-    font-size: 0.85rem;
+    border: 1px solid transparent;
+    color: #8a8372;
     cursor: pointer;
-    padding: 0.25rem 0.4rem;
-    border-radius: 3px;
-    transition: color 0.15s ease;
+    padding: 0;
+    transition:
+      color 0.12s ease,
+      border-color 0.12s ease;
   }
-
-  .btn-close:hover {
-    color: #ef4444;
+  .btn-close svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+  .btn-close:hover,
+  .btn-close:focus-visible {
+    color: #ff6b6b;
+    border-color: #4a2020;
+    outline: none;
   }
 
   .modal-body {
-    padding: 1rem;
+    padding: 0.9rem 1rem;
     overflow: auto;
-    background: #090c12;
+    background: #040507;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
       "Liberation Mono", "Courier New", monospace;
+    scrollbar-width: thin;
+    scrollbar-color: #3a3326 transparent;
   }
 
   pre {
     margin: 0;
     font-size: 0.76rem;
-    line-height: 1.45;
-    color: #94a3b8;
+    line-height: 1.5;
+    color: #7d8590;
     white-space: pre-wrap;
     word-break: break-all;
+    tab-size: 2;
+  }
+  code {
+    color: inherit;
+    font-family: inherit;
   }
 
-  code {
-    color: #38bdf8;
+  /* Syntax tokens (injected via {@html}, so they must be :global) */
+  code :global(.j-key) {
+    color: #e9cf9f;
+  }
+  code :global(.j-str) {
+    color: #9fc27a;
+  }
+  code :global(.j-num) {
+    color: #7fb4ff;
+  }
+  code :global(.j-kw) {
+    color: #cf8ee8;
   }
 </style>
