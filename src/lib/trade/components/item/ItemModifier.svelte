@@ -16,6 +16,7 @@
     | "bonded"
     | "crucible"
     | "scourge"
+    | "pseudo"
     | "generic" = "generic";
   export let realm: string = "poe";
   export let compact: boolean = false;
@@ -295,6 +296,10 @@
   .scourge {
     --mod: #ff6e25;
     --mod-rgb: 255, 110, 37;
+  }
+  .pseudo {
+    --mod: #7f7f7f;
+    --mod-rgb: 127, 127, 127;
   }
 
   /* ---- Special states ---- */

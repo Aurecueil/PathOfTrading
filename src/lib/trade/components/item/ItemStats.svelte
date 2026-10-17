@@ -13,6 +13,7 @@
   import { SHEET_1, SOCKET_SIZE, LINK_H, getBase } from "./socketSprites";
 
   export let item: Item;
+  export let payload: any = null;
   export let realm: string = "poe";
   export let styleMode: ResolvedDisplayStyle = "full";
   export let tileWidth: number = 600;
@@ -572,6 +573,7 @@
 
   $: enchantMods = item.enchantMods ?? [];
   $: crucibleMods = item.crucibleMods ?? [];
+  $: pseudoMods = (item.pseudoMods ?? []) as Array<string | ItemMod>;
 
   // Scourge mods (displayed above implicits) + tier (displayed with state tags)
   $: scourgeMods = (item.scourgeMods ?? []) as Array<string | ItemMod>;
@@ -630,6 +632,122 @@
       poe2Data: VEILED_POE2[key] || VEILED_POE2.prefix01,
     };
   });
+
+  /* ------------------------------------------------------------------ */
+  /* Stat Groups Calculation (count, weight, weight2 from payload)      */
+  /* ------------------------------------------------------------------ */
+  function normalizeModHash(hash?: string): string {
+    if (!hash) return "";
+    return hash.startsWith("stat.") ? hash.slice(5) : hash;
+  }
+
+  function extractModNumericValue(mod: string | ItemMod): number {
+    const desc = cleanBracketText(
+      typeof mod === "string" ? mod : mod.description || "",
+    );
+    const matches = desc.match(/[+-]?\d+(?:\.\d+)?/g);
+    if (!matches || matches.length === 0) return 0;
+    const nums = matches.map(Number).filter((n) => !Number.isNaN(n));
+    if (nums.length === 0) return 0;
+    const sum = nums.reduce((acc, n) => acc + n, 0);
+    return sum / nums.length;
+  }
+
+  function buildItemModHashValues(it: Item): Map<string, number> {
+    const map = new Map<string, number>();
+    if (!it) return map;
+
+    const lists: Array<Array<string | ItemMod> | undefined> = [
+      it.implicitMods,
+      it.explicitMods,
+      it.enchantMods,
+      it.runeMods,
+      it.scourgeMods,
+      it.bondedMods,
+      it.crucibleMods,
+      it.veiledMods,
+      it.pseudoMods,
+    ];
+
+    for (const list of lists) {
+      if (!list) continue;
+      for (const mod of list) {
+        if (typeof mod === "string" || !mod.hash) continue;
+        const normHash = normalizeModHash(mod.hash);
+        if (!normHash) continue;
+        const val = extractModNumericValue(mod);
+        map.set(normHash, (map.get(normHash) ?? 0) + val);
+      }
+    }
+
+    return map;
+  }
+
+  function formatGroupValue(n: number): string {
+    const rounded = Math.round(n * 100) / 100;
+    return Number.isInteger(rounded)
+      ? String(rounded)
+      : rounded.toFixed(2).replace(/\.?0+$/, "");
+  }
+
+  interface StatGroupSummary {
+    label: string;
+    value: string;
+  }
+
+  $: statGroupSummaries = ((): StatGroupSummary[] => {
+    if (isTooltip || !payload) return [];
+    const rawStats = payload?.query?.stats ?? payload?.stats;
+    if (!Array.isArray(rawStats) || rawStats.length === 0) return [];
+
+    const modHashValues = buildItemModHashValues(item);
+    const summaries: StatGroupSummary[] = [];
+
+    for (const group of rawStats) {
+      if (!group || group.disabled) continue;
+      const type = String(group.type || "").toLowerCase();
+      if (type !== "count" && type !== "weight" && type !== "weight2") continue;
+
+      const filters = Array.isArray(group.filters) ? group.filters : [];
+      if (filters.length === 0) continue;
+
+      if (type === "count") {
+        let countVal = 0;
+        for (const f of filters) {
+          if (!f || f.disabled) continue;
+          const id = normalizeModHash(f.id);
+          if (id && modHashValues.has(id)) {
+            countVal += 1;
+          }
+        }
+        summaries.push({
+          label: "Count",
+          value: String(countVal),
+        });
+      } else {
+        let weightedSum = 0;
+        for (const f of filters) {
+          if (!f || f.disabled) continue;
+          const id = normalizeModHash(f.id);
+          if (id && modHashValues.has(id)) {
+            const rawWeight = f.value?.weight;
+            const weight =
+              rawWeight !== undefined && rawWeight !== null && rawWeight !== ""
+                ? Number(rawWeight)
+                : 1;
+            const statVal = modHashValues.get(id) ?? 0;
+            weightedSum += statVal * (Number.isNaN(weight) ? 1 : weight);
+          }
+        }
+        summaries.push({
+          label: type === "weight2" ? "Sum2" : "Sum",
+          value: formatGroupValue(weightedSum),
+        });
+      }
+    }
+
+    return summaries;
+  })();
 
   /* ------------------------------------------------------------------ */
   /* Exclusive Bottom State Tag + Split (split or duplicated)           */
@@ -1099,8 +1217,8 @@
       </div>
     {/if}
 
-    <!-- Explicit Mods + Veiled / Unrevealed Mods -->
-    {#if classifiedExplicits.length > 0 || veiledEntries.length > 0}
+    <!-- Explicit Mods + Veiled / Unrevealed Mods + Pseudo Mods -->
+    {#if classifiedExplicits.length > 0 || veiledEntries.length > 0 || pseudoMods.length > 0}
       <div class="separator-line" />
       <div class="stat-group">
         {#each classifiedExplicits as entry}
@@ -1140,6 +1258,17 @@
               </div>
             {/each}
           </div>
+        {/if}
+
+        {#if pseudoMods.length > 0}
+          {#each pseudoMods as pMod}
+            <ItemModifier
+              mod={pMod}
+              {realm}
+              category="pseudo"
+              compact={isCompact}
+            />
+          {/each}
         {/if}
       </div>
     {/if}
@@ -1213,6 +1342,22 @@
             Scourge (Tier {scourgeTier})
           </div>
         {/if}
+      </div>
+    {/if}
+
+    <!-- Stat Groups Summary Line (Count, Sum, Sum2) at the bottom of the item -->
+    {#if statGroupSummaries.length > 0}
+      <div class="separator-line" />
+      <div class="stat-group-summary-line">
+        {#each statGroupSummaries as sg, sgi}
+          <span class="sg-entry"
+            ><span class="sg-label">{sg.label}:</span>
+            <strong class="sg-val">{sg.value}</strong>{sgi <
+            statGroupSummaries.length - 1
+              ? ","
+              : ""}</span
+          >
+        {/each}
       </div>
     {/if}
   </div>
@@ -1749,6 +1894,37 @@
     height: 35px;
     width: 56px;
     background: var(--foresight-url) no-repeat center / contain;
+  }
+
+  /* Stat Groups Summary Line (Count, Sum, Sum2) */
+  .stat-group-summary-line {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    column-gap: 0.65rem;
+    row-gap: 0.1rem;
+    width: 100%;
+    font-size: 0.95rem;
+    line-height: 1.22;
+    color: #cbd5e1;
+    text-align: center;
+  }
+  .mode-compact .stat-group-summary-line {
+    font-size: 0.9rem;
+  }
+  .sg-entry {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    white-space: nowrap;
+  }
+  .sg-label {
+    color: #8b9bb4;
+  }
+  .sg-val {
+    font-weight: 600;
+    color: #f1f5f9;
   }
 
   /* Portaled Skill/Socket Tooltip */

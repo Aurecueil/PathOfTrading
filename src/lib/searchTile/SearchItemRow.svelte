@@ -1,8 +1,9 @@
 <!-- src/lib/searchTile/SearchItemRow.svelte -->
 <script lang="ts">
+  import { createEventDispatcher } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import type { ResolvedDisplayStyle } from "$lib/types/types";
-  import type { Item, TradeFetchResult } from "$lib/types/tradeItem";
+  import type { Item, ItemMod, TradeFetchResult } from "$lib/types/tradeItem";
   import ItemIcon from "$lib/trade/components/item/ItemIcon.svelte";
   import ItemStats from "$lib/trade/components/item/ItemStats.svelte";
   import ItemListing from "$lib/trade/components/item/ItemListing.svelte";
@@ -20,6 +21,10 @@
   export let tileWidth: number = 600;
   export let tileHeight: number = 400;
 
+  const dispatch = createEventDispatcher<{
+    sortvalue: { id: string; value: any };
+  }>();
+
   let isTraveling = false;
   let isQueued = false;
   let travelError: string | null = null;
@@ -29,6 +34,7 @@
   let statsEl: HTMLDivElement | null = null;
   let titleInsetLeft = 10;
   let titleInsetRight = 10;
+  let lastDispatchedSortValue: any = undefined;
 
   /**
    * Pads the title bar so the title is centered on the stats column
@@ -66,6 +72,190 @@
   $: fullItemTitle = item
     ? [item.name, item.typeLine || item.baseType].filter(Boolean).join(" ")
     : "";
+
+  /* ------------------------------------------------------------------ */
+  /* Sort Value Extraction from Payload & Item                          */
+  /* ------------------------------------------------------------------ */
+  function cleanBracketText(text: string): string {
+    if (!text) return "";
+    return text.replace(/\[([^\]]+)\]/g, (_, inner: string) => {
+      const parts = inner.split("|");
+      return parts[parts.length - 1];
+    });
+  }
+
+  function normalizeModHash(hash?: string): string {
+    if (!hash) return "";
+    return hash.startsWith("stat.") ? hash.slice(5) : hash;
+  }
+
+  function extractModNumericValue(mod: string | ItemMod): number {
+    const desc = cleanBracketText(
+      typeof mod === "string" ? mod : mod.description || "",
+    );
+    const matches = desc.match(/[+-]?\d+(?:\.\d+)?/g);
+    if (!matches || matches.length === 0) return 0;
+    const nums = matches.map(Number).filter((n) => !Number.isNaN(n));
+    if (nums.length === 0) return 0;
+    return nums.reduce((acc, n) => acc + n, 0) / nums.length;
+  }
+
+  function buildItemModHashValues(it?: Item): Map<string, number> {
+    const map = new Map<string, number>();
+    if (!it) return map;
+
+    const lists: Array<Array<string | ItemMod> | undefined> = [
+      it.implicitMods,
+      it.explicitMods,
+      it.enchantMods,
+      it.runeMods,
+      it.scourgeMods,
+      it.bondedMods,
+      it.crucibleMods,
+      it.veiledMods,
+      it.pseudoMods,
+    ];
+
+    for (const list of lists) {
+      if (!list) continue;
+      for (const mod of list) {
+        if (typeof mod === "string" || !mod.hash) continue;
+        const normHash = normalizeModHash(mod.hash);
+        if (!normHash) continue;
+        const val = extractModNumericValue(mod);
+        map.set(normHash, (map.get(normHash) ?? 0) + val);
+      }
+    }
+
+    return map;
+  }
+
+  function computeStatGroupValue(
+    groupType: "count" | "weight" | "weight2",
+    modHashValues: Map<string, number>,
+    pl: any,
+  ): number | null {
+    const rawStats = pl?.query?.stats ?? pl?.stats;
+    if (!Array.isArray(rawStats)) return null;
+
+    const matchingGroup = rawStats.find(
+      (g: any) =>
+        g &&
+        !g.disabled &&
+        String(g.type || "").toLowerCase() === groupType &&
+        Array.isArray(g.filters) &&
+        g.filters.length > 0,
+    );
+
+    if (!matchingGroup) return null;
+
+    if (groupType === "count") {
+      let count = 0;
+      for (const f of matchingGroup.filters) {
+        if (!f || f.disabled) continue;
+        const normId = normalizeModHash(f.id);
+        if (normId && modHashValues.has(normId)) {
+          count += 1;
+        }
+      }
+      return count;
+    }
+
+    let sum = 0;
+    for (const f of matchingGroup.filters) {
+      if (!f || f.disabled) continue;
+      const normId = normalizeModHash(f.id);
+      if (normId && modHashValues.has(normId)) {
+        const rawW = f.value?.weight;
+        const weight =
+          rawW !== undefined && rawW !== null && rawW !== "" ? Number(rawW) : 1;
+        sum +=
+          (modHashValues.get(normId) ?? 0) *
+          (Number.isNaN(weight) ? 1 : weight);
+      }
+    }
+    return sum;
+  }
+
+  function computeSortValueFromPayload(
+    entry: TradeFetchResult | null,
+    pl: any,
+  ): any {
+    if (!entry) return null;
+    const sortObj = pl?.sort;
+    const field =
+      sortObj && typeof sortObj === "object"
+        ? Object.keys(sortObj)[0] || "price"
+        : "price";
+
+    if (field === "price") {
+      return entry.listing?.price?.amount ?? null;
+    }
+
+    const it = entry.item;
+    const modHashValues = buildItemModHashValues(it);
+    const normField = normalizeModHash(field);
+    const lowerField = normField.toLowerCase();
+
+    if (
+      lowerField === "weight" ||
+      lowerField === "weight2" ||
+      lowerField === "count"
+    ) {
+      const groupVal = computeStatGroupValue(
+        lowerField as "count" | "weight" | "weight2",
+        modHashValues,
+        pl,
+      );
+      if (groupVal !== null) return groupVal;
+    }
+
+    if (modHashValues.has(normField)) {
+      return modHashValues.get(normField)!;
+    }
+
+    if (it?.extended && normField in it.extended) {
+      return (it.extended as any)[normField];
+    }
+    if (field in entry) return (entry as any)[field];
+    if (it && field in it) return (it as any)[field];
+    if (entry.listing && field in entry.listing) {
+      return (entry.listing as any)[field];
+    }
+
+    if (it?.properties) {
+      for (const p of it.properties) {
+        const pHash = normalizeModHash(p.hash);
+        const pName = cleanBracketText(p.name).trim().toLowerCase();
+        if ((pHash && pHash === normField) || pName === lowerField) {
+          const valStr = cleanBracketText(p.values?.[0]?.[0] || "");
+          const matches = valStr.match(/[+-]?\d+(?:\.\d+)?/g);
+          if (matches && matches.length > 0) {
+            const nums = matches.map(Number).filter((n) => !Number.isNaN(n));
+            if (nums.length > 0) {
+              return nums.reduce((a, b) => a + b, 0) / nums.length;
+            }
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  $: computedSortValue = data
+    ? computeSortValueFromPayload(data, payload)
+    : sortValue;
+
+  $: effectiveSortValue =
+    computedSortValue !== null && computedSortValue !== undefined
+      ? computedSortValue
+      : sortValue;
+
+  $: if (data && effectiveSortValue !== lastDispatchedSortValue) {
+    lastDispatchedSortValue = effectiveSortValue;
+    dispatch("sortvalue", { id, value: effectiveSortValue });
+  }
 
   /* ------------------------------------------------------------------ */
   /* Rarity                                                             */
@@ -452,6 +642,7 @@
     >
       <ItemStats
         {item}
+        {payload}
         {realm}
         styleMode={resolvedStyle}
         tileWidth={boxWidth}
@@ -462,7 +653,7 @@
     <div class="col-listing">
       <ItemListing
         {listing}
-        {sortValue}
+        sortValue={effectiveSortValue}
         {isTraveling}
         {isQueued}
         {travelError}

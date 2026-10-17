@@ -43,6 +43,8 @@ pub struct FetchJob {
     pub is_token: bool,
     #[serde(default, alias = "uiId")]
     pub ui_id: Option<String>,
+    #[serde(default)]
+    pub pseudos: Vec<String>,
 }
 
 #[derive(Clone, Serialize, PartialEq, Eq, Debug)]
@@ -814,7 +816,6 @@ impl ApiRateLimiter {
             {
                 let queues = self.fetch_queues.lock().await;
                 'outer: for (realm, queue) in queues.iter() {
-                    // Reverse iteration so the newest token job is picked first
                     for (idx, pf) in queue.iter().enumerate().rev() {
                         if pf.job.is_token && !pf.tx.is_closed() {
                             token_target = Some((realm.clone(), idx));
@@ -858,8 +859,17 @@ impl ApiRateLimiter {
                 self.telemetry_notify.notify_one();
 
                 let query_id = pending.job.id.clone();
+                let pseudos = pending
+                    .job
+                    .pseudos
+                    .iter()
+                    .map(|p| p.trim().to_string())
+                    .filter(|p| !p.is_empty())
+                    .collect::<Vec<String>>();
+
                 let response =
-                    fetch::fetch_items_trade(token_id.clone(), realm.clone(), query_id).await;
+                    fetch::fetch_items_trade(token_id.clone(), realm.clone(), query_id, pseudos)
+                        .await;
 
                 match response {
                     Ok(resp) => {
@@ -890,7 +900,6 @@ impl ApiRateLimiter {
                                 )
                                 .await;
 
-                            // Re-insert at the back so it remains at the top of the LIFO priority
                             if !pending.tx.is_closed() {
                                 let mut queues = self.fetch_queues.lock().await;
                                 let queue = queues.entry(realm).or_default();
@@ -958,6 +967,7 @@ impl ApiRateLimiter {
             };
 
             let mut selected_ids: Vec<String> = Vec::with_capacity(10);
+            let mut combined_pseudos: Vec<String> = Vec::new();
             let mut job_allocations: Vec<(String, Vec<String>)> = Vec::new();
             let mut reservation_to_charge: Option<String> = None;
             let mut primary_query_id: Option<String> = None;
@@ -972,7 +982,6 @@ impl ApiRateLimiter {
 
                 queue.retain(|pf| !pf.tx.is_closed());
 
-                // Filter strictly to ready, non-token jobs, ordered newest-first (rev)
                 let candidate_indices: Vec<usize> = (0..queue.len())
                     .filter(|&i| !queue[i].job.is_token && queue[i].ready_at <= now)
                     .rev()
@@ -1037,7 +1046,7 @@ impl ApiRateLimiter {
                     }
                 }
 
-                // Pass 3: Drain and sanitize allocated IDs in newest-first order
+                // Pass 3: Drain and sanitize allocated IDs + merge pseudos
                 for &idx in &candidate_indices {
                     let pending = &mut queue[idx];
                     if let Some(&count) = allocation_plan.get(&pending.job.id) {
@@ -1056,6 +1065,16 @@ impl ApiRateLimiter {
                             }
 
                             if !clean_drained.is_empty() {
+                                // Connect & deduplicate pseudos from all jobs in the batch
+                                for pseudo in &pending.job.pseudos {
+                                    let clean_pseudo = pseudo.trim().to_string();
+                                    if !clean_pseudo.is_empty()
+                                        && !combined_pseudos.contains(&clean_pseudo)
+                                    {
+                                        combined_pseudos.push(clean_pseudo);
+                                    }
+                                }
+
                                 job_allocations.push((pending.job.id.clone(), clean_drained));
                             }
                         }
@@ -1087,7 +1106,9 @@ impl ApiRateLimiter {
                 .or_else(|| job_allocations.first().map(|(id, _)| id.clone()))
                 .unwrap_or_default();
 
-            let response = fetch::fetch_items_trade(joined_ids, realm.clone(), query_id).await;
+            let response =
+                fetch::fetch_items_trade(joined_ids, realm.clone(), query_id, combined_pseudos)
+                    .await;
 
             match response {
                 Ok(resp) => {
@@ -1218,7 +1239,7 @@ impl ApiRateLimiter {
             self.telemetry_notify.notify_one();
         }
     }
-
+    // ... [rest of the response handling remains identical]
     async fn fail_jobs_by_id(
         &self,
         realm: &str,

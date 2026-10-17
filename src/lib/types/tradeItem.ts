@@ -216,6 +216,7 @@ export interface ExtendedModHashes {
   fractured?: string[][];
   crafted?: string[][];
   scourge?: string[][];
+  pseudo?: string[][];
   [key: string]: string[][] | undefined;
 }
 
@@ -301,9 +302,9 @@ export interface Item {
   scourgeMods?: Array<string | ItemMod>;
   bondedMods?: Array<string | ItemMod>;
   crucibleMods?: Array<string | ItemMod>;
-  pseudoMods?: Array<string | ItemMod>;
   cosmeticMods?: string[];
   veiledMods?: Array<string | ItemMod>;
+  pseudoMods?: Array<string | ItemMod>;
 
   // Mechanics & League Sub-objects
   properties?: ItemProperty[];

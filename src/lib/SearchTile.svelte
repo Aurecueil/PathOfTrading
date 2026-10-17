@@ -10,6 +10,7 @@
     ResolvedDisplayStyle,
   } from "$lib/types/types";
   import type {
+    ItemMod,
     TradeFetchResult,
     TradeFetchResponse,
   } from "$lib/types/tradeItem";
@@ -186,6 +187,43 @@
     }
   }
 
+  function normalizeModHash(hash?: string): string {
+    if (!hash) return "";
+    return hash.startsWith("stat.") ? hash.slice(5) : hash;
+  }
+
+  function extractPseudoStatsFromPayload(pl: any): string[] {
+    if (!pl || typeof pl !== "object") return [];
+    const pseudos = new Set<string>();
+    const rawStats = pl?.query?.stats ?? pl?.stats;
+
+    if (Array.isArray(rawStats)) {
+      for (const group of rawStats) {
+        if (!group || group.disabled) continue;
+        const filters = Array.isArray(group.filters) ? group.filters : [];
+        for (const f of filters) {
+          if (!f || f.disabled || typeof f.id !== "string") continue;
+          const normId = normalizeModHash(f.id.trim());
+          if (normId.startsWith("pseudo.")) {
+            pseudos.add(normId);
+          }
+        }
+      }
+    }
+
+    const sortObj = pl?.sort;
+    if (sortObj && typeof sortObj === "object") {
+      for (const key of Object.keys(sortObj)) {
+        const normKey = normalizeModHash(key.trim());
+        if (normKey.startsWith("pseudo.")) {
+          pseudos.add(normKey);
+        }
+      }
+    }
+
+    return Array.from(pseudos);
+  }
+
   function getSortConfig(): { field: string; dir: "asc" | "desc" } {
     const sortObj = activePayload?.sort;
     if (!sortObj || typeof sortObj !== "object") {
@@ -198,16 +236,123 @@
     };
   }
 
+  function cleanBracketText(text: string): string {
+    if (!text) return "";
+    return text.replace(/\[([^\]]+)\]/g, (_, inner: string) => {
+      const parts = inner.split("|");
+      return parts[parts.length - 1];
+    });
+  }
+
+  function extractModNumericValue(mod: string | ItemMod): number {
+    const desc = cleanBracketText(
+      typeof mod === "string" ? mod : mod.description || "",
+    );
+    const matches = desc.match(/[+-]?\d+(?:\.\d+)?/g);
+    if (!matches || matches.length === 0) return 0;
+    const nums = matches.map(Number).filter((n) => !Number.isNaN(n));
+    if (nums.length === 0) return 0;
+    return nums.reduce((acc, n) => acc + n, 0) / nums.length;
+  }
+
   function extractSortValue(entry: TradeFetchResult, field: string): any {
     if (!entry) return null;
     if (field === "price") {
       return entry.listing?.price?.amount ?? null;
     }
+
+    const it = entry.item;
+    const normField = normalizeModHash(field);
+    const lowerField = normField.toLowerCase();
+
+    if (it) {
+      const modMap = new Map<string, number>();
+      const lists: Array<Array<string | ItemMod> | undefined> = [
+        it.implicitMods,
+        it.explicitMods,
+        it.enchantMods,
+        it.runeMods,
+        it.scourgeMods,
+        it.bondedMods,
+        it.crucibleMods,
+        it.veiledMods,
+        it.pseudoMods,
+      ];
+      for (const list of lists) {
+        if (!list) continue;
+        for (const mod of list) {
+          if (typeof mod === "string" || !mod.hash) continue;
+          const h = normalizeModHash(mod.hash);
+          if (!h) continue;
+          modMap.set(h, (modMap.get(h) ?? 0) + extractModNumericValue(mod));
+        }
+      }
+
+      if (
+        lowerField === "weight" ||
+        lowerField === "weight2" ||
+        lowerField === "count"
+      ) {
+        const rawStats = activePayload?.query?.stats ?? activePayload?.stats;
+        if (Array.isArray(rawStats)) {
+          const group = rawStats.find(
+            (g: any) =>
+              g &&
+              !g.disabled &&
+              String(g.type || "").toLowerCase() === lowerField &&
+              Array.isArray(g.filters),
+          );
+          if (group) {
+            if (lowerField === "count") {
+              let c = 0;
+              for (const f of group.filters) {
+                if (!f || f.disabled) continue;
+                if (modMap.has(normalizeModHash(f.id))) c += 1;
+              }
+              return c;
+            } else {
+              let sum = 0;
+              for (const f of group.filters) {
+                if (!f || f.disabled) continue;
+                const h = normalizeModHash(f.id);
+                if (modMap.has(h)) {
+                  const w =
+                    f.value?.weight !== undefined && f.value?.weight !== null
+                      ? Number(f.value.weight)
+                      : 1;
+                  sum += (modMap.get(h) ?? 0) * (Number.isNaN(w) ? 1 : w);
+                }
+              }
+              return sum;
+            }
+          }
+        }
+      }
+
+      if (modMap.has(normField)) {
+        return modMap.get(normField)!;
+      }
+
+      if (it.extended && normField in it.extended) {
+        return (it.extended as any)[normField];
+      }
+    }
+
     if (field in entry) return (entry as any)[field];
-    if (entry.item && field in entry.item) return (entry.item as any)[field];
+    if (it && field in it) return (it as any)[field];
     if (entry.listing && field in entry.listing)
       return (entry.listing as any)[field];
     return null;
+  }
+
+  function handleRowSortValue(e: CustomEvent<{ id: string; value: any }>) {
+    const { id, value } = e.detail;
+    const existing = itemsMap.get(id);
+    if (!existing || existing.sortValue === value) return;
+    existing.sortValue = value;
+    if (mode === "mixed") {
+      sortOrderedList();
+    }
   }
 
   function sortOrderedList() {
@@ -476,6 +621,7 @@
 
     const minCount = Math.ceil(batchIds.length / 2);
     const uiId = String(tile.id);
+    const pseudos = extractPseudoStatsFromPayload(activePayload);
 
     try {
       const rawData: string | TradeFetchResponse = await invoke("fetch_items", {
@@ -489,7 +635,9 @@
           realm: tile.realm,
           is_token: false,
           ui_id: uiId,
+          pseudos,
         },
+        pseudos,
       });
 
       if (isDestroyed) return;
@@ -564,6 +712,7 @@
 
     let fetchedResults: TradeFetchResult[] = [];
     const uiId = String(tile.id);
+    const pseudos = extractPseudoStatsFromPayload(activePayload);
 
     try {
       const rawData: string | TradeFetchResponse = await invoke("fetch_items", {
@@ -577,7 +726,9 @@
           realm: tile.realm,
           is_token: true,
           ui_id: uiId,
+          pseudos,
         },
+        pseudos,
       });
 
       if (isDestroyed) return;
@@ -1136,6 +1287,7 @@
             {effectiveStyle}
             tileWidth={tile.w}
             tileHeight={tile.h}
+            on:sortvalue={handleRowSortValue}
           />
         {/each}
 

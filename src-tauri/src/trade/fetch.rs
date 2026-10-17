@@ -3,7 +3,12 @@ use reqwest::header::{COOKIE, USER_AGENT};
 use reqwest::{Client, Response};
 
 #[tauri::command]
-pub async fn fetch_items_trade(ids: String, realm: String, id: String) -> Result<Response, String> {
+pub async fn fetch_items_trade(
+    ids: String,
+    realm: String,
+    id: String,
+    pseudos: Vec<String>,
+) -> Result<Response, String> {
     let client = Client::new();
     let endpoint = crate::trade::get_endpoint();
 
@@ -19,8 +24,17 @@ pub async fn fetch_items_trade(ids: String, realm: String, id: String) -> Result
         (Some(sessid), None) => Some(format!("POESESSID={sessid}")),
         (None, _) => None,
     };
+
     let trade_path = if realm == "poe2" { "trade2" } else { "trade" };
-    let url = format!("{endpoint}/api/{trade_path}/fetch/{ids}?query={id}");
+    let mut url = format!("{endpoint}/api/{trade_path}/fetch/{ids}?query={id}");
+
+    for pseudo in pseudos {
+        let p = pseudo.trim();
+        if !p.is_empty() {
+            url.push_str(&format!("&pseudos[]={p}"));
+        }
+    }
+
     let mut req = client
         .get(&url)
         .header(USER_AGENT, "Aurecueil.PathOfTrading (dc:aurecueil)");
