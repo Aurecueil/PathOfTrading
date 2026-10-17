@@ -42,7 +42,6 @@ const OAUTH_HOOK_SCRIPT: &str = r#"
         this.__poeUrl = String(url || '');
         return origOpen.call(this, method, url, ...rest);
     };
-
     const origSend = XMLHttpRequest.prototype.send;
     XMLHttpRequest.prototype.send = function(...args) {
         if (this.__poeUrl && this.__poeUrl.includes('/oauth/token')) {
@@ -85,7 +84,6 @@ pub async fn get_poe_auth_status() -> Result<AuthStatusPayload, String> {
     let username = env::load_secret("poe_username")?.filter(|s| !s.trim().is_empty());
 
     let logged_in = sessid.is_some() || poetoken.is_some();
-
     Ok(AuthStatusPayload {
         logged_in,
         username,
@@ -117,7 +115,6 @@ pub async fn open_poe_login(app: tauri::AppHandle) -> Result<(), String> {
         .initialization_script(OAUTH_HOOK_SCRIPT)
         .on_navigation(move |nav_url| {
             let path = nav_url.path();
-
             if path.starts_with("/trade") || path.starts_with("/my-account") {
                 if path.starts_with("/my-account") {
                     if let Some(w) = app_handle.get_webview_window("poe_login") {
@@ -135,9 +132,12 @@ pub async fn open_poe_login(app: tauri::AppHandle) -> Result<(), String> {
                 let handling_flag = is_handling_auth.clone();
 
                 tauri::async_runtime::spawn(async move {
-                    let poe_domain: Url = "https://www.pathofexile.com".parse().unwrap();
+                    let domains = [
+                        "https://www.pathofexile.com".parse::<Url>().unwrap(),
+                        "https://pathofexile.com".parse::<Url>().unwrap(),
+                    ];
                     let mut attempts = 0;
-                    const MAX_ATTEMPTS: usize = 60; // Retains 60-attempt limit from new version
+                    const MAX_ATTEMPTS: usize = 60;
 
                     while attempts < MAX_ATTEMPTS {
                         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -151,9 +151,9 @@ pub async fn open_poe_login(app: tauri::AppHandle) -> Result<(), String> {
 
                         let mut captured_sessid = None;
                         let mut captured_poetoken = None;
+                        let mut captured_cf_clearance = None;
                         let mut captured_username = None;
 
-                        // Account name extraction from window title (New version logic)
                         if let Ok(title) = w.title() {
                             if let Some(name) = title.strip_prefix("__POE_USER__:") {
                                 let clean = name.trim();
@@ -163,24 +163,25 @@ pub async fn open_poe_login(app: tauri::AppHandle) -> Result<(), String> {
                             }
                         }
 
-                        // Cookie extraction
-                        if let Ok(cookies) = w.cookies_for_url(poe_domain.clone()) {
-                            for c in &cookies {
-                                if c.name() == "POESESSID" && !c.value().is_empty() {
-                                    captured_sessid = Some(c.value().to_string());
-                                } else if c.name() == "POETOKEN" && !c.value().is_empty() {
-                                    captured_poetoken = Some(c.value().to_string());
-                                } else if c.name() == "POE_USERNAME"
-                                    && !c.value().is_empty()
-                                    && captured_username.is_none()
-                                {
-                                    // Account name extraction from cookie fallback (New version logic)
-                                    captured_username = Some(percent_decode(c.value()));
+                        for domain in &domains {
+                            if let Ok(cookies) = w.cookies_for_url(domain.clone()) {
+                                for c in &cookies {
+                                    if c.name() == "POESESSID" && !c.value().is_empty() {
+                                        captured_sessid = Some(c.value().to_string());
+                                    } else if c.name() == "POETOKEN" && !c.value().is_empty() {
+                                        captured_poetoken = Some(c.value().to_string());
+                                    } else if c.name() == "cf_clearance" && !c.value().is_empty() {
+                                        captured_cf_clearance = Some(c.value().to_string());
+                                    } else if c.name() == "POE_USERNAME"
+                                        && !c.value().is_empty()
+                                        && captured_username.is_none()
+                                    {
+                                        captured_username = Some(percent_decode(c.value()));
+                                    }
                                 }
                             }
                         }
 
-                        // Fetch account name via endpoint if missing (New version logic)
                         if captured_sessid.is_some()
                             && captured_poetoken.is_some()
                             && captured_username.is_none()
@@ -200,15 +201,16 @@ pub async fn open_poe_login(app: tauri::AppHandle) -> Result<(), String> {
                             );
                         }
 
-                        // Fast cookie exit matching the old extraction behavior
                         if let (Some(sessid), Some(poetoken)) = (captured_sessid, captured_poetoken)
                         {
                             let _ = env::save_secret("poesessid", &sessid);
                             let _ = env::save_secret("poetoken", &poetoken);
+                            if let Some(ref cf) = captured_cf_clearance {
+                                let _ = env::save_secret("cf_clearance", cf);
+                            }
                             if let Some(ref uname) = captured_username {
                                 let _ = env::save_secret("poe_username", uname);
                             }
-
                             let _ = w.close();
                             let _ = app_h.emit(
                                 "poe_auth_success",
@@ -220,13 +222,10 @@ pub async fn open_poe_login(app: tauri::AppHandle) -> Result<(), String> {
                             return;
                         }
                     }
-
                     handling_flag.store(false, Ordering::SeqCst);
                 });
-
                 return true;
             }
-
             true
         })
         .build()
@@ -262,6 +261,7 @@ pub async fn logout_poe(app: tauri::AppHandle) -> Result<(), String> {
     // 1. Wipe locally saved secrets immediately
     let _ = env::save_secret("poesessid", "");
     let _ = env::save_secret("poetoken", "");
+    let _ = env::save_secret("cf_clearance", "");
     let _ = env::save_secret("poe_username", "");
 
     // 2. Close any open webview windows using the profile
@@ -272,10 +272,8 @@ pub async fn logout_poe(app: tauri::AppHandle) -> Result<(), String> {
         let _ = w.close();
     }
 
-    // Short pause to allow webview processes to unlock profile files on disk
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    // 3. Clear webview cookies natively using a temporary window, querying both root & subdomains
     let mut profile_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     profile_dir.push("poe_webview_profile");
 
@@ -293,12 +291,10 @@ pub async fn logout_poe(app: tauri::AppHandle) -> Result<(), String> {
                 "https://www.pathofexile.com".parse::<Url>().unwrap(),
                 "https://pathofexile.com".parse::<Url>().unwrap(),
             ];
-
             for poe_domain in &domains {
                 if let Ok(cookies) = window.cookies_for_url(poe_domain.clone()) {
                     for c in cookies {
                         let name = c.name();
-                        // Preserve Cloudflare anti-bot cookies to prevent repeated Cloudflare challenges
                         if !name.starts_with("cf_")
                             && !name.starts_with("__cf")
                             && !name.starts_with("_cf")
@@ -309,7 +305,6 @@ pub async fn logout_poe(app: tauri::AppHandle) -> Result<(), String> {
                 }
             }
 
-            // Flush storage clear via JavaScript execution
             let _ = window.eval(
                 r#"
                 try {
@@ -324,7 +319,6 @@ pub async fn logout_poe(app: tauri::AppHandle) -> Result<(), String> {
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
 
-        // 4. Fallback: Clean remaining storage & cookie database folders from profile directory
         let storage_paths = [
             profile_dir.join("Default").join("Cookies"),
             profile_dir.join("Default").join("Network").join("Cookies"),
@@ -358,7 +352,6 @@ pub async fn logout_poe(app: tauri::AppHandle) -> Result<(), String> {
         }
     }
 
-    // 5. Emit logout event to notify UI
     let _ = app.emit(
         "poe_auth_logout",
         AuthStatusPayload {
@@ -369,6 +362,7 @@ pub async fn logout_poe(app: tauri::AppHandle) -> Result<(), String> {
 
     Ok(())
 }
+
 #[tauri::command]
 pub async fn open_external_url(url: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]

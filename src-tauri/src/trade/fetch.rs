@@ -14,15 +14,28 @@ pub async fn fetch_items_trade(
 
     let poesessid = load_secret("poesessid")?;
     let poe_token = load_secret("poetoken")?;
+    let cf_clearance = load_secret("cf_clearance")?;
 
-    // Determine cookie header based on secret presence:
-    // - If poesessid is missing: include neither
-    // - If poetoken is missing but poesessid exists: include only POESESSID
-    // - Otherwise: include both
-    let cookie_header = match (poesessid, poe_token) {
-        (Some(sessid), Some(token)) => Some(format!("POESESSID={sessid}; poetoken={token}")),
-        (Some(sessid), None) => Some(format!("POESESSID={sessid}")),
-        (None, _) => None,
+    let mut cookies = Vec::new();
+
+    // Only add POESESSID and poetoken if poesessid exists
+    if let Some(sessid) = poesessid {
+        cookies.push(format!("POESESSID={sessid}"));
+
+        if let Some(token) = poe_token {
+            cookies.push(format!("poetoken={token}"));
+        }
+    }
+
+    // Append cf_clearance if it exists
+    if let Some(clearance) = cf_clearance {
+        cookies.push(format!("cf_clearance={clearance}"));
+    }
+
+    let cookie_header = if cookies.is_empty() {
+        None
+    } else {
+        Some(cookies.join("; "))
     };
 
     let trade_path = if realm == "poe2" { "trade2" } else { "trade" };

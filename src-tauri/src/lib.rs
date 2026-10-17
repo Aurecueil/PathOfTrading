@@ -32,7 +32,7 @@ pub fn run() {
                     Ok(true) => {
                         println!("Existing session found. Refreshing POETOKEN...");
                         match auth::refresh::refresh_poetoken_background(app_handle).await {
-                            Ok(_) => println!("POETOKEN refreshed successfully"),
+                            Ok(t) => println!("POETOKEN refreshed successfully {t}"),
                             Err(err) => eprintln!("Background POETOKEN refresh failed: {err}"),
                         }
                     }

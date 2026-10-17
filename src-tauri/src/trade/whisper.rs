@@ -19,7 +19,11 @@ pub async fn whisper(
     let poe_token = load_secret("poetoken")?
         .ok_or_else(|| "400 Bad Request: poe_token is required".to_string())?;
 
-    let cookie_header = format!("POESESSID={poesessid}; POETOKEN={poe_token}");
+    let cf_clearance = load_secret("cf_clearance")?.filter(|s| !s.trim().is_empty());
+    let mut cookie_header = format!("POESESSID={poesessid}; POETOKEN={poe_token}");
+    if let Some(cf) = cf_clearance {
+        cookie_header.push_str(&format!("; cf_clearance={cf}"));
+    }
     let trade_path = if realm == "poe2" { "trade2" } else { "trade" };
     let url = format!("{endpoint}/api/{trade_path}/whisper");
 

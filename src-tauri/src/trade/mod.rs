@@ -11,9 +11,11 @@ pub mod stats;
 pub mod whisper;
 
 use reqwest::header::HeaderMap;
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
@@ -25,6 +27,40 @@ pub static ENDPOINT: RwLock<&'static str> = RwLock::new("https://www.pathofexile
 pub fn get_endpoint() -> &'static str {
     *ENDPOINT.read().unwrap()
 }
+
+pub fn is_cloudflare_response(status: StatusCode, headers: &HeaderMap, body: &str) -> bool {
+    if headers
+        .get("cf-mitigated")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.eq_ignore_ascii_case("challenge"))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    if status == StatusCode::FORBIDDEN
+        || status == StatusCode::SERVICE_UNAVAILABLE
+        || status.as_u16() == 429
+    {
+        let lower = body.to_lowercase();
+        if lower.contains("cf-chl-bypass")
+            || lower.contains("_cf_chl_opt")
+            || lower.contains("jschl-answer")
+            || lower.contains("cf-spinner-please-wait")
+            || lower.contains("challenges.cloudflare.com")
+            || (lower.contains("cloudflare")
+                && (lower.contains("just a moment")
+                    || lower.contains("attention required")
+                    || lower.contains("enable javascript and cookies to continue")
+                    || lower.contains("ray id")))
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
 // ===========================================================================
 // 1. Data Structures & Telemetry Models
 // ===========================================================================
@@ -126,7 +162,6 @@ impl Default for RateLimiterCore {
     fn default() -> Self {
         let mut configured_reservations = HashMap::new();
         configured_reservations.insert("outside".to_string(), 1);
-
         Self {
             rules: vec![
                 ServerRule {
@@ -167,7 +202,6 @@ impl RateLimiterCore {
                 break;
             }
         }
-
         if self.history.is_empty() {
             self.used_reservations.clear();
         }
@@ -189,7 +223,6 @@ impl RateLimiterCore {
                 .iter()
                 .filter(|&&t| now.duration_since(t) < rule.window)
                 .count();
-
             if hits >= rule.max {
                 if let Some(&oldest) = self
                     .history
@@ -210,11 +243,10 @@ impl RateLimiterCore {
                 .iter()
                 .filter(|&&t| now.duration_since(t) < rule.window)
                 .count();
-
             let total_reserved: usize = self.configured_reservations.values().sum();
             let general_pool_capacity = rule.max.saturating_sub(total_reserved);
-
             let res_key = reservation.unwrap_or("general");
+
             if res_key != "general" {
                 let max_res = self
                     .configured_reservations
@@ -222,7 +254,6 @@ impl RateLimiterCore {
                     .copied()
                     .unwrap_or(0);
                 let used_res = self.used_reservations.get(res_key).copied().unwrap_or(0);
-
                 if used_res >= max_res {
                     let used_general = primary_window_hits
                         .saturating_sub(self.used_reservations.values().sum::<usize>());
@@ -238,7 +269,6 @@ impl RateLimiterCore {
                 }
             }
         }
-
         None
     }
 
@@ -258,7 +288,6 @@ impl RateLimiterCore {
             .get("x-rate-limit-account")
             .or_else(|| headers.get("x-rate-limit-ip"))
             .and_then(|v| v.to_str().ok());
-
         let state_hdr = headers
             .get("x-rate-limit-account-state")
             .or_else(|| headers.get("x-rate-limit-ip-state"))
@@ -292,11 +321,9 @@ impl RateLimiterCore {
                 if parts.len() == 3 {
                     let hits = parts[0].trim().parse::<usize>().unwrap_or(0);
                     let penalty_secs = parts[2].trim().parse::<u64>().unwrap_or(0);
-
                     if server_primary_hits.is_none() {
                         server_primary_hits = Some(hits);
                     }
-
                     if penalty_secs > 0 {
                         let penalty =
                             Duration::from_secs(penalty_secs) + Duration::from_millis(500);
@@ -340,7 +367,6 @@ impl RateLimiterCore {
             .primary_rule()
             .map(|r| (r.max, r.window))
             .unwrap_or((12, Duration::from_secs(4)));
-
         let active_hits = if window.as_secs() > 0 {
             self.history
                 .iter()
@@ -349,9 +375,7 @@ impl RateLimiterCore {
         } else {
             0
         };
-
         let available = max.saturating_sub(active_hits);
-
         let retry_after_ms = self
             .penalty_until
             .and_then(|u| u.checked_duration_since(now))
@@ -391,7 +415,6 @@ impl SharedRateLimiter {
         core.purge_expired(now);
 
         let mut next_change: Option<Instant> = None;
-
         if let Some(until) = core.penalty_until {
             if until > now {
                 next_change = Some(until);
@@ -407,7 +430,6 @@ impl SharedRateLimiter {
                 }
             }
         }
-
         next_change.map(|t| t.saturating_duration_since(now))
     }
 
@@ -417,7 +439,6 @@ impl SharedRateLimiter {
                 let mut core = self.core.lock().await;
                 core.check_delay(Instant::now(), reservation)
             };
-
             match delay {
                 Some(d) => tokio::time::sleep(d).await,
                 None => break,
@@ -458,7 +479,7 @@ impl SharedRateLimiter {
 }
 
 // ===========================================================================
-// 5. Unified Service with Diff Emission
+// 5. Unified Service with Diff Emission & Cloudflare Gate
 // ===========================================================================
 
 struct PendingFetch {
@@ -487,6 +508,8 @@ pub struct ApiRateLimiter {
     telemetry_notify: Arc<Notify>,
     app_handle: Arc<Mutex<Option<AppHandle>>>,
     last_emitted_state: Arc<Mutex<Option<FullTelemetryState>>>,
+    cf_paused: Arc<AtomicBool>,
+    cf_notify: Arc<Notify>,
 }
 
 impl ApiRateLimiter {
@@ -502,7 +525,34 @@ impl ApiRateLimiter {
             telemetry_notify,
             app_handle: Arc::new(Mutex::new(None)),
             last_emitted_state: Arc::new(Mutex::new(None)),
+            cf_paused: Arc::new(AtomicBool::new(false)),
+            cf_notify: Arc::new(Notify::new()),
         }
+    }
+
+    pub async fn wait_if_cf_paused(&self) {
+        while self.cf_paused.load(Ordering::SeqCst) {
+            self.cf_notify.notified().await;
+        }
+    }
+
+    pub async fn trigger_cloudflare_challenge(&self) {
+        if self.cf_paused.swap(true, Ordering::SeqCst) {
+            // Another worker already triggered the challenge; wait for it to finish
+            self.wait_if_cf_paused().await;
+            return;
+        }
+        self.telemetry_notify.notify_one();
+
+        let app_opt = self.app_handle.lock().await.clone();
+        if let Some(app) = app_opt {
+            let _ = crate::auth::refresh::run_poe_refresh_or_challenge(app, true).await;
+        }
+
+        self.cf_paused.store(false, Ordering::SeqCst);
+        self.cf_notify.notify_waiters();
+        self.queue_notify.notify_waiters();
+        self.telemetry_notify.notify_one();
     }
 
     pub fn start_workers(&self, app: AppHandle) {
@@ -554,12 +604,10 @@ impl ApiRateLimiter {
 
     pub async fn emit_telemetry_if_changed(&self) {
         let current_state = self.get_telemetry_state().await;
-
         let mut last_state = self.last_emitted_state.lock().await;
         if last_state.as_ref() == Some(&current_state) {
             return;
         }
-
         *last_state = Some(current_state.clone());
         drop(last_state);
 
@@ -570,8 +618,13 @@ impl ApiRateLimiter {
     }
 
     pub async fn get_telemetry_state(&self) -> FullTelemetryState {
-        let search_telemetry = self.search_limiter.get_telemetry().await;
-        let fetch_telemetry = self.fetch_limiter.get_telemetry().await;
+        let mut search_telemetry = self.search_limiter.get_telemetry().await;
+        let mut fetch_telemetry = self.fetch_limiter.get_telemetry().await;
+
+        if self.cf_paused.load(Ordering::SeqCst) {
+            search_telemetry.is_rate_limited = true;
+            fetch_telemetry.is_rate_limited = true;
+        }
 
         let mut queue_status = HashMap::new();
         {
@@ -598,18 +651,14 @@ impl ApiRateLimiter {
         }
     }
 
-    // --- Queue Cleanup for Deleted UI Elements ---
-
     pub async fn cancel_ui_jobs(&self, target_id: &str) -> usize {
         let mut removed = 0;
-
         {
             let mut searches = self.search_tasks.lock().await;
             let before = searches.len();
             searches.retain(|task| task.ui_id.as_deref() != Some(target_id));
             removed += before - searches.len();
         }
-
         {
             let mut fetches = self.fetch_queues.lock().await;
             for queue in fetches.values_mut() {
@@ -620,16 +669,13 @@ impl ApiRateLimiter {
                 removed += before - queue.len();
             }
         }
-
         if removed > 0 {
             self.telemetry_notify.notify_one();
         }
-
         removed
     }
 
     // --- Search Pipeline ---
-
     pub async fn search_items(
         &self,
         realm: String,
@@ -655,7 +701,6 @@ impl ApiRateLimiter {
                 tx,
             });
         }
-
         self.queue_notify.notify_one();
         self.telemetry_notify.notify_one();
 
@@ -665,9 +710,10 @@ impl ApiRateLimiter {
 
     async fn run_search_worker(&self) {
         loop {
+            self.wait_if_cf_paused().await;
+
             let task = loop {
                 let mut tasks = self.search_tasks.lock().await;
-                // LIFO: Pop the most recent search task first
                 if let Some(t) = tasks.pop_back() {
                     break t;
                 }
@@ -680,7 +726,9 @@ impl ApiRateLimiter {
                 continue;
             }
 
+            self.wait_if_cf_paused().await;
             self.search_limiter.wait_for_slot(None).await;
+            self.wait_if_cf_paused().await;
             self.search_limiter.record(None).await;
             self.telemetry_notify.notify_one();
 
@@ -690,15 +738,25 @@ impl ApiRateLimiter {
                 task.league.clone(),
             )
             .await;
+
             match result {
                 Ok(resp) => {
                     let status = resp.status();
                     let headers = resp.headers().clone();
-
                     self.search_limiter.reconcile(&headers).await;
 
                     let is_429 = status.as_u16() == 429;
                     let text = resp.text().await.unwrap_or_default();
+
+                    if is_cloudflare_response(status, &headers, &text) {
+                        if !task.tx.is_closed() {
+                            let mut tasks = self.search_tasks.lock().await;
+                            tasks.push_back(task);
+                        }
+                        self.trigger_cloudflare_challenge().await;
+                        continue;
+                    }
+
                     let parsed_json: Option<Value> = serde_json::from_str(&text).ok();
                     let error_code = parsed_json
                         .as_ref()
@@ -706,21 +764,17 @@ impl ApiRateLimiter {
                         .and_then(|e| e.get("code"))
                         .and_then(|c| c.as_i64());
 
-                    // Check for rate limit condition (HTTP 429 or error code 3)
                     if is_429 || error_code == Some(3) {
                         let retry_secs = headers
                             .get("retry-after")
                             .and_then(|v| v.to_str().ok())
                             .and_then(|s| s.parse::<u64>().ok())
                             .unwrap_or(5);
-
                         self.search_limiter
                             .set_penalty(
                                 Duration::from_secs(retry_secs) + Duration::from_millis(500),
                             )
                             .await;
-
-                        // Re-insert at the back so it stays highest priority
                         if !task.tx.is_closed() {
                             let mut tasks = self.search_tasks.lock().await;
                             tasks.push_back(task);
@@ -759,15 +813,12 @@ impl ApiRateLimiter {
     }
 
     // --- Fetch Pipeline ---
-
     pub async fn fetch_items(&self, job: FetchJob) -> Result<Value, String> {
         let realm = job.realm.clone();
 
-        // Non-token jobs can check cache
         if !job.is_token && job.cache_ok {
             let mut all_found = true;
             let mut cached_results = Vec::new();
-
             for id in &job.ids {
                 if let Some(item_val) = self.cache.get_fetch_item(&realm, id).await {
                     cached_results.push(item_val);
@@ -776,14 +827,12 @@ impl ApiRateLimiter {
                     break;
                 }
             }
-
             if all_found && !cached_results.is_empty() {
                 return Ok(serde_json::json!({ "result": cached_results }));
             }
         }
 
         let (tx, rx) = oneshot::channel();
-        // Token jobs skip wait_ms completely and fire immediately
         let ready_at = if job.is_token {
             Instant::now()
         } else {
@@ -800,7 +849,6 @@ impl ApiRateLimiter {
                 tx,
             });
         }
-
         self.queue_notify.notify_one();
         self.telemetry_notify.notify_one();
 
@@ -809,9 +857,11 @@ impl ApiRateLimiter {
 
     async fn run_fetch_batcher(&self) {
         loop {
+            self.wait_if_cf_paused().await;
+
             let now = Instant::now();
 
-            // 1. Priority Check: Find the MOST RECENT `is_token` job (ignores wait_ms / ready_at)
+            // 1. Priority Check: Find the MOST RECENT `is_token` job
             let mut token_target: Option<(String, usize)> = None;
             {
                 let queues = self.fetch_queues.lock().await;
@@ -854,7 +904,9 @@ impl ApiRateLimiter {
                 }
 
                 let res_name = pending.job.reservation.clone();
+                self.wait_if_cf_paused().await;
                 self.fetch_limiter.wait_for_slot(res_name.as_deref()).await;
+                self.wait_if_cf_paused().await;
                 self.fetch_limiter.record(res_name.as_deref()).await;
                 self.telemetry_notify.notify_one();
 
@@ -875,11 +927,22 @@ impl ApiRateLimiter {
                     Ok(resp) => {
                         let status = resp.status();
                         let headers = resp.headers().clone();
-
                         self.fetch_limiter.reconcile(&headers).await;
 
                         let is_429 = status.as_u16() == 429;
                         let text = resp.text().await.unwrap_or_default();
+
+                        // Stop all fetching via rate limiter & display Cloudflare window on challenge
+                        if is_cloudflare_response(status, &headers, &text) {
+                            if !pending.tx.is_closed() {
+                                let mut queues = self.fetch_queues.lock().await;
+                                let queue = queues.entry(realm).or_default();
+                                queue.push_back(pending);
+                            }
+                            self.trigger_cloudflare_challenge().await;
+                            continue;
+                        }
+
                         let parsed_json: Option<Value> = serde_json::from_str(&text).ok();
                         let error_code = parsed_json
                             .as_ref()
@@ -893,13 +956,11 @@ impl ApiRateLimiter {
                                 .and_then(|v| v.to_str().ok())
                                 .and_then(|s| s.parse::<u64>().ok())
                                 .unwrap_or(5);
-
                             self.fetch_limiter
                                 .set_penalty(
                                     Duration::from_secs(retry_secs) + Duration::from_millis(500),
                                 )
                                 .await;
-
                             if !pending.tx.is_closed() {
                                 let mut queues = self.fetch_queues.lock().await;
                                 let queue = queues.entry(realm).or_default();
@@ -935,7 +996,6 @@ impl ApiRateLimiter {
                         let _ = pending.tx.send(Err(err));
                     }
                 }
-
                 self.telemetry_notify.notify_one();
                 continue;
             }
@@ -972,14 +1032,12 @@ impl ApiRateLimiter {
             let mut reservation_to_charge: Option<String> = None;
             let mut primary_query_id: Option<String> = None;
 
-            // Batch allocation (Newest-first / LIFO priority)
             {
                 let mut queues = self.fetch_queues.lock().await;
                 let queue = match queues.get_mut(&realm) {
                     Some(q) => q,
                     None => continue,
                 };
-
                 queue.retain(|pf| !pf.tx.is_closed());
 
                 let candidate_indices: Vec<usize> = (0..queue.len())
@@ -1003,21 +1061,17 @@ impl ApiRateLimiter {
                     }
                 }
 
-                // Pass 1: Give newest ready jobs their `min` requirement first
                 for &idx in &candidate_indices {
                     if batch_count >= 10 {
                         break;
                     }
-
                     let job = &queue[idx].job;
                     let target_min = job.min.clamp(1, job.ids.len());
                     let current_allocated = allocation_plan.get(&job.id).copied().unwrap_or(0);
-
                     if current_allocated < target_min {
                         let needed = target_min - current_allocated;
                         let space_left = 10 - batch_count;
                         let take = needed.min(space_left);
-
                         if take > 0 {
                             *allocation_plan.entry(job.id.clone()).or_insert(0) += take;
                             batch_count += take;
@@ -1025,20 +1079,16 @@ impl ApiRateLimiter {
                     }
                 }
 
-                // Pass 2: Top off remaining slots greedily from the newest ready jobs first
                 if batch_count < 10 {
                     for &idx in &candidate_indices {
                         if batch_count >= 10 {
                             break;
                         }
-
                         let job = &queue[idx].job;
                         let current_allocated = allocation_plan.get(&job.id).copied().unwrap_or(0);
                         let remaining_in_job = job.ids.len().saturating_sub(current_allocated);
-
                         let space_left = 10 - batch_count;
                         let take = remaining_in_job.min(space_left);
-
                         if take > 0 {
                             *allocation_plan.entry(job.id.clone()).or_insert(0) += take;
                             batch_count += take;
@@ -1046,7 +1096,6 @@ impl ApiRateLimiter {
                     }
                 }
 
-                // Pass 3: Drain and sanitize allocated IDs + merge pseudos
                 for &idx in &candidate_indices {
                     let pending = &mut queue[idx];
                     if let Some(&count) = allocation_plan.get(&pending.job.id) {
@@ -1055,7 +1104,6 @@ impl ApiRateLimiter {
                             let drained: Vec<String> =
                                 pending.job.ids.drain(0..take_count).collect();
                             let mut clean_drained = Vec::with_capacity(drained.len());
-
                             for raw_id in drained {
                                 let clean_id = raw_id.trim().trim_matches('"').to_string();
                                 if !clean_id.is_empty() && selected_ids.len() < 10 {
@@ -1063,9 +1111,7 @@ impl ApiRateLimiter {
                                     clean_drained.push(clean_id);
                                 }
                             }
-
                             if !clean_drained.is_empty() {
-                                // Connect & deduplicate pseudos from all jobs in the batch
                                 for pseudo in &pending.job.pseudos {
                                     let clean_pseudo = pseudo.trim().to_string();
                                     if !clean_pseudo.is_empty()
@@ -1074,7 +1120,6 @@ impl ApiRateLimiter {
                                         combined_pseudos.push(clean_pseudo);
                                     }
                                 }
-
                                 job_allocations.push((pending.job.id.clone(), clean_drained));
                             }
                         }
@@ -1087,9 +1132,11 @@ impl ApiRateLimiter {
                 continue;
             }
 
+            self.wait_if_cf_paused().await;
             self.fetch_limiter
                 .wait_for_slot(reservation_to_charge.as_deref())
                 .await;
+            self.wait_if_cf_paused().await;
             self.fetch_limiter
                 .record(reservation_to_charge.as_deref())
                 .await;
@@ -1101,7 +1148,6 @@ impl ApiRateLimiter {
                 .cloned()
                 .collect::<Vec<String>>()
                 .join(",");
-
             let query_id = primary_query_id
                 .or_else(|| job_allocations.first().map(|(id, _)| id.clone()))
                 .unwrap_or_default();
@@ -1114,11 +1160,31 @@ impl ApiRateLimiter {
                 Ok(resp) => {
                     let status = resp.status();
                     let headers = resp.headers().clone();
-
                     self.fetch_limiter.reconcile(&headers).await;
 
                     let is_429 = status.as_u16() == 429;
                     let text = resp.text().await.unwrap_or_default();
+
+                    // Stop all fetching via rate limiter & display Cloudflare window on challenge
+                    if is_cloudflare_response(status, &headers, &text) {
+                        {
+                            let mut queues = self.fetch_queues.lock().await;
+                            if let Some(queue) = queues.get_mut(&realm) {
+                                for (job_id, drained) in job_allocations {
+                                    if let Some(pending) =
+                                        queue.iter_mut().find(|p| p.job.id == job_id)
+                                    {
+                                        for id in drained.into_iter().rev() {
+                                            pending.job.ids.insert(0, id);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        self.trigger_cloudflare_challenge().await;
+                        continue;
+                    }
+
                     let parsed_json: Option<Value> = serde_json::from_str(&text).ok();
                     let error_code = parsed_json
                         .as_ref()
@@ -1132,13 +1198,11 @@ impl ApiRateLimiter {
                             .and_then(|v| v.to_str().ok())
                             .and_then(|s| s.parse::<u64>().ok())
                             .unwrap_or(5);
-
                         self.fetch_limiter
                             .set_penalty(
                                 Duration::from_secs(retry_secs) + Duration::from_millis(500),
                             )
                             .await;
-
                         let mut queues = self.fetch_queues.lock().await;
                         if let Some(queue) = queues.get_mut(&realm) {
                             for (job_id, drained) in job_allocations {
@@ -1174,7 +1238,6 @@ impl ApiRateLimiter {
 
                     if let Some(json) = parsed_json {
                         let mut returned_items_by_id: HashMap<String, Value> = HashMap::new();
-
                         if let Some(items) = json.get("result").and_then(|r| r.as_array()) {
                             for (idx, item) in items.iter().enumerate() {
                                 if let Some(req_id) = selected_ids.get(idx) {
@@ -1185,7 +1248,6 @@ impl ApiRateLimiter {
                                         returned_items_by_id.insert(req_id.clone(), item.clone());
                                     }
                                 }
-
                                 if let Some(item_id) = item.get("id").and_then(|v| v.as_str()) {
                                     returned_items_by_id.insert(item_id.to_string(), item.clone());
                                 }
@@ -1209,7 +1271,6 @@ impl ApiRateLimiter {
                             while i < queue.len() {
                                 let is_finished = queue[i].job.ids.is_empty()
                                     || queue[i].collected_results.len() >= queue[i].job.min;
-
                                 if is_finished {
                                     let finished = queue.remove(i).unwrap();
                                     let response_payload = serde_json::json!({
@@ -1235,11 +1296,10 @@ impl ApiRateLimiter {
                         .await;
                 }
             }
-
             self.telemetry_notify.notify_one();
         }
     }
-    // ... [rest of the response handling remains identical]
+
     async fn fail_jobs_by_id(
         &self,
         realm: &str,

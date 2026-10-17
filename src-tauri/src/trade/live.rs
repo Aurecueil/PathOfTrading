@@ -63,7 +63,11 @@ pub async fn start_live_search(
         load_secret("poetoken")?.ok_or_else(|| "Missing 'poetoken' secret".to_string())?;
     let poesessid =
         load_secret("poesessid")?.ok_or_else(|| "Missing 'poesessid' secret".to_string())?;
-    let cookie_header = format!("POESESSID={poesessid}; POETOKEN={poe_token}");
+    let cf_clearance = load_secret("cf_clearance")?.filter(|s| !s.trim().is_empty());
+    let mut cookie_header = format!("POESESSID={poesessid}; POETOKEN={poe_token}");
+    if let Some(cf) = cf_clearance {
+        cookie_header.push_str(&format!("; cf_clearance={cf}"));
+    }
 
     let request = Request::builder()
         .uri(&ws_url)
