@@ -25,6 +25,34 @@
   let travelError: string | null = null;
   let isJsonModalOpen = false;
   let rowWidth: number = 0;
+  let titleWrapEl: HTMLDivElement | null = null;
+  let statsEl: HTMLDivElement | null = null;
+  let titleInsetLeft = 10;
+  let titleInsetRight = 10;
+
+  /**
+   * Pads the title bar so the title is centered on the stats column
+   * (not on the whole row). Uses offset* so canvas zoom doesn't skew it.
+   */
+  function measureTitleInsets() {
+    if (!titleWrapEl || !statsEl) return;
+    const wrapLeft = titleWrapEl.offsetLeft;
+    const wrapRight = wrapLeft + titleWrapEl.offsetWidth;
+    const statsLeft = statsEl.offsetLeft;
+    const statsRight = statsLeft + statsEl.offsetWidth;
+    titleInsetLeft = Math.max(10, statsLeft - wrapLeft);
+    titleInsetRight = Math.max(10, wrapRight - statsRight);
+  }
+
+  function watchSize(node: HTMLElement) {
+    const ro = new ResizeObserver(() => measureTitleInsets());
+    ro.observe(node);
+    return {
+      destroy() {
+        ro.disconnect();
+      },
+    };
+  }
 
   $: boxWidth = rowWidth > 0 ? rowWidth : tileWidth;
   $: resolvedStyle = ((): ResolvedDisplayStyle => {
@@ -90,29 +118,168 @@
   $: rarityKey = getRarityKey(item);
 
   /* ------------------------------------------------------------------ */
-  /* Influences (shown as small diamonds in front of the item name)     */
+  /* Category symbols (shown on both sides of the title bar)            */
   /* ------------------------------------------------------------------ */
-  const INFLUENCES: { key: string; label: string; color: string }[] = [
-    { key: "shaper", label: "Shaper", color: "#4aa3ff" },
-    { key: "elder", label: "Elder", color: "#a17bd6" },
-    { key: "crusader", label: "Crusader", color: "#e6e0c8" },
-    { key: "hunter", label: "Hunter", color: "#6fbf4a" },
-    { key: "redeemer", label: "Redeemer", color: "#4fd0d6" },
-    { key: "warlord", label: "Warlord", color: "#d1a23a" },
-    { key: "searing", label: "Searing Exarch", color: "#ff7a3d" },
-    { key: "tangled", label: "Eater of Worlds", color: "#7f6fe0" },
+  const SYM = (file: string) =>
+    `https://web.poecdn.com/protected/image/item/${file}`;
+
+  type Sym = {
+    key: string;
+    label: string;
+    url: string;
+    test: (it: Item) => boolean;
+  };
+
+  const flag = (it: Item, k: string) =>
+    Boolean(it.influences?.[k]) ||
+    Boolean((it as unknown as Record<string, unknown>)[k]);
+
+  const POE1_SYMBOLS: Sym[] = [
+    {
+      key: "shaper",
+      label: "Shaper",
+      url: SYM(
+        "popup/shaper-symbol.png?v=1709582916256&key=PQH0ATL4n268OngTnsQ0MQ",
+      ),
+      test: (i) => flag(i, "shaper"),
+    },
+    {
+      key: "elder",
+      label: "Elder",
+      url: SYM(
+        "popup/elder-symbol.png?v=1709582916256&key=YS6Fsnxyuc8gpqfPz_mykw",
+      ),
+      test: (i) => flag(i, "elder"),
+    },
+    {
+      key: "crusader",
+      label: "Crusader",
+      url: SYM(
+        "popup/crusader-symbol.png?v=1709582916256&key=dcLGV7cDJf-dulB8P_Q-yQ",
+      ),
+      test: (i) => flag(i, "crusader"),
+    },
+    {
+      key: "redeemer",
+      label: "Redeemer",
+      url: SYM(
+        "popup/redeemer-symbol.png?v=1709582916256&key=nEc-TPctqwszY696cmlaZQ",
+      ),
+      test: (i) => flag(i, "redeemer"),
+    },
+    {
+      key: "hunter",
+      label: "Hunter",
+      url: SYM(
+        "popup/hunter-symbol.png?v=1709582916256&key=x7-F-t4jlxzMd1eJOUSafA",
+      ),
+      test: (i) => flag(i, "hunter"),
+    },
+    {
+      key: "warlord",
+      label: "Warlord",
+      url: SYM(
+        "popup/warlord-symbol.png?v=1709582916256&key=76scs3jk3FrVGOLHdM5AuA",
+      ),
+      test: (i) => flag(i, "warlord"),
+    },
+    {
+      key: "searing",
+      label: "Searing Exarch",
+      url: SYM(
+        "popup/searing-symbol.png?v=1709582916256&key=iiOWJvWHj8-0bH0e28X7Xw",
+      ),
+      test: (i) => flag(i, "searing"),
+    },
+    {
+      key: "tangled",
+      label: "Eater of Worlds",
+      url: SYM(
+        "popup/tangled-symbol.png?v=1709582916256&key=b-SVlhPy2jy-UJSTBaV2Cw",
+      ),
+      test: (i) => flag(i, "tangled"),
+    },
+    {
+      key: "veiled",
+      label: "Veiled",
+      url: SYM(
+        "popup/veiled-symbol.png?v=1709582916256&key=FQrrJgHpP4bo1Im-sOGTcA",
+      ),
+      test: (i) => Boolean(i.veiled),
+    },
+    {
+      key: "fractured",
+      label: "Fractured",
+      url: SYM(
+        "popup/fractured-symbol.png?v=1709582916256&key=fM_bl3SW2hozdEIw5vh4GA",
+      ),
+      test: (i) => Boolean(i.fractured),
+    },
+    {
+      key: "synthetic",
+      label: "Synthesised",
+      url: SYM(
+        "popup/synthetic-symbol.png?v=1709582916256&key=CUVu3Zqxrzd1CwWcIH-6xg",
+      ),
+      test: (i) => Boolean(i.synthesised),
+    },
+    {
+      key: "replica",
+      label: "Replica",
+      url: SYM(
+        "popup/experimented-symbol.png?v=1709582916256&key=dWh87tRCnnyVEMYjjf6RbQ",
+      ),
+      test: (i) => Boolean(i.replica),
+    },
+    {
+      key: "memory",
+      label: "Memory",
+      url: SYM(
+        "popup/memory-symbol.png?v=1747803259967&key=4CDrYIxVWDUKPLGXGOhO3g",
+      ),
+      test: (i) => Boolean(i.memoryItem),
+    },
+    {
+      key: "breach",
+      label: "Mutated",
+      url: SYM(
+        "popup/breach-symbol.png?v=1759709093664&key=R8ypjmI1TuM6RE_WWWHxiw",
+      ),
+      test: (i) => Boolean(i.mutated),
+    },
+    {
+      key: "vestigial",
+      label: "Vestigial",
+      url: SYM(
+        "popup/vestigial-symbol.png?v=1783395650713&key=-YB_ZzmxB0qautKiuSQ1CQ",
+      ),
+      test: (i) => Boolean(i.vestigial),
+    },
   ];
 
-  function activeInfluences(it?: Item) {
-    if (!it) return [];
-    return INFLUENCES.filter(
-      (i) =>
-        Boolean(it.influences?.[i.key]) ||
-        Boolean((it as unknown as Record<string, unknown>)[i.key]),
-    );
-  }
+  const POE2_SYMBOLS: Sym[] = [
+    {
+      key: "desecrated",
+      label: "Desecrated",
+      url: SYM(
+        "popup2/desecrated-symbol.png?v=1754628199421&key=hgK5C6v-SqzlKR0q0MrYDg",
+      ),
+      test: (i) => Boolean(i.desecrated),
+    },
+    {
+      key: "vaal",
+      label: "Mutated",
+      url: SYM(
+        "popup2/vaal-symbol.png?v=1764542264625&key=6qnhCPxsLIuTvtF8K_8R8A",
+      ),
+      test: (i) => Boolean(i.mutated),
+    },
+  ];
 
-  $: influences = activeInfluences(item);
+  $: isPoe2 = (item?.realm || realm || "").toLowerCase() === "poe2";
+  $: symbols = item
+    ? (isPoe2 ? POE2_SYMBOLS : POE1_SYMBOLS).filter((s) => s.test(item!))
+    : [];
 
   /* ------------------------------------------------------------------ */
   /* Travel / Whisper & Error Extraction                                */
@@ -213,28 +380,50 @@
     bind:clientWidth={rowWidth}
   >
     {#if resolvedStyle !== "minimal"}
-      <!-- Header: influences, name, base type, raw JSON -->
-      <div class="row-title-bar">
-        <div class="title-text" title={fullItemTitle}>
-          {#if influences.length}
-            <span class="influences">
-              {#each influences as inf (inf.key)}
-                <span
-                  class="influence"
-                  style="--ic: {inf.color}"
-                  title="{inf.label} influence"
-                ></span>
+      <!-- Header: category symbols, name, base type (raw JSON button sits under it) -->
+      <div class="title-wrap" bind:this={titleWrapEl}>
+        <div
+          class="row-title-bar"
+          style:padding-left="{titleInsetLeft}px"
+          style:padding-right="{titleInsetRight}px"
+        >
+          {#if symbols.length}
+            <span class="symbols left">
+              {#each symbols as s (s.key)}
+                <img
+                  class="symbol-img"
+                  src={s.url}
+                  alt={s.label}
+                  title={s.label}
+                  loading="lazy"
+                />
               {/each}
             </span>
           {/if}
-          {#if item.name}
-            <span class="item-name">{item.name}</span>
-          {/if}
-          {#if item.typeLine || item.baseType}
-            <span class="item-type">{item.typeLine || item.baseType}</span>
+
+          <div class="title-text" title={fullItemTitle}>
+            {#if item.name}
+              <span class="item-name">{item.name}</span>
+            {/if}
+            {#if item.typeLine || item.baseType}
+              <span class="item-type">{item.typeLine || item.baseType}</span>
+            {/if}
+          </div>
+
+          {#if symbols.length}
+            <span class="symbols right">
+              {#each symbols as s (s.key)}
+                <img
+                  class="symbol-img"
+                  src={s.url}
+                  alt={s.label}
+                  title={s.label}
+                  loading="lazy"
+                />
+              {/each}
+            </span>
           {/if}
         </div>
-
         <button
           type="button"
           class="btn-top-json"
@@ -245,17 +434,6 @@
           &#123;&nbsp;&#125;
         </button>
       </div>
-    {:else}
-      <!-- Floating top-right JSON button for minimal mode -->
-      <button
-        type="button"
-        class="btn-top-json minimal-json"
-        title="View full raw JSON received for this item"
-        aria-label="View raw JSON"
-        on:click|stopPropagation={() => (isJsonModalOpen = true)}
-      >
-        &#123;&nbsp;&#125;
-      </button>
     {/if}
 
     <!-- Left: vertically centered icon (full & minimal only) -->
@@ -266,7 +444,12 @@
     {/if}
 
     <!-- Center: stats & modifiers -->
-    <div class="col-stats" class:hide-inner-title={resolvedStyle !== "minimal"}>
+    <div
+      class="col-stats"
+      class:hide-inner-title={resolvedStyle !== "minimal"}
+      bind:this={statsEl}
+      use:watchSize
+    >
       <ItemStats
         {item}
         {realm}
@@ -405,14 +588,18 @@
   /* ---------------------------------------------------------------- */
   /* Title bar                                                        */
   /* ---------------------------------------------------------------- */
-  .row-title-bar {
+  .title-wrap {
     grid-column: 1 / -1;
+    position: relative;
+    min-width: 0;
+  }
+  .row-title-bar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
     gap: 8px;
     min-width: 0;
-    padding: 5px 6px 5px 10px;
+    padding: 5px 10px;
     background: linear-gradient(
       90deg,
       rgba(var(--rc-rgb), 0.24) 0%,
@@ -429,9 +616,10 @@
     gap: 8px;
     min-width: 0;
     flex: 1;
+    justify-content: center;
     overflow: hidden;
     white-space: nowrap;
-    font-size: 18px;
+    font-size: 22px;
     line-height: 1.2;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
   }
@@ -456,29 +644,31 @@
     flex-shrink: 2;
   }
 
-  .influences {
+  /* Category symbols (influence, fractured, veiled, ...) */
+  .symbols {
     display: inline-flex;
     align-items: center;
-    gap: 3px;
+    gap: 2px;
     align-self: center;
     flex-shrink: 0;
   }
-  .influence {
-    width: 9px;
-    height: 9px;
-    background: var(--ic);
-    transform: rotate(45deg);
-    box-shadow:
-      0 0 6px var(--ic),
-      inset 0 0 0 1px rgba(0, 0, 0, 0.45);
+  .symbol-img {
+    height: 24px;
+    width: 24px;
+    object-fit: contain;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
   }
 
   /* ---------------------------------------------------------------- */
   /* Raw JSON button                                                  */
   /* ---------------------------------------------------------------- */
   .btn-top-json {
-    flex-shrink: 0;
-    background: rgba(0, 0, 0, 0.55);
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 4px;
+    z-index: 15;
+    opacity: 0.45;
+    background: rgba(0, 0, 0, 0.3);
     border: 1px solid #3a3a3a;
     border-radius: 0;
     color: #8a8a8a;
@@ -489,18 +679,14 @@
     padding: 3px 6px;
     cursor: pointer;
     transition:
+      opacity 0.1s ease,
       border-color 0.1s ease,
       color 0.1s ease,
       background-color 0.1s ease;
   }
-  .btn-top-json.minimal-json {
-    position: absolute;
-    top: 4px;
-    right: 4px;
-    z-index: 15;
-  }
   .btn-top-json:hover,
   .btn-top-json:focus-visible {
+    opacity: 1;
     border-color: var(--rc);
     color: #fff;
     background: rgba(var(--rc-rgb), 0.18);
@@ -558,7 +744,7 @@
     padding: 0 0.7rem 0.65rem;
     align-items: center;
   }
-  .item-row.mode-full .row-title-bar {
+  .item-row.mode-full .title-wrap {
     margin: 0 -0.7rem;
   }
   .item-row.mode-full .col-listing {
@@ -573,7 +759,7 @@
     padding: 0 0.6rem 0.5rem;
     align-items: center;
   }
-  .item-row.mode-compact .row-title-bar {
+  .item-row.mode-compact .title-wrap {
     margin: 0 -0.6rem;
   }
   .item-row.mode-compact .col-listing {

@@ -33,6 +33,13 @@
     SavedProject,
     ShareCodePayload,
   } from "$lib/types/types";
+  import { migrateItemRef } from "$lib/trade/utilis/tradePayload";
+  import {
+    currentLanguage,
+    isLoading,
+    itemsPoe,
+    itemsPoe2,
+  } from "$lib/trade/tradeStore";
 
   interface CanvasSnapshot {
     tiles: SearchTile[];
@@ -126,6 +133,37 @@
     }
   }
 
+  function migrateTileItems() {
+    let changedAny = false;
+    for (const t of tiles) {
+      if (!t.full_payload) continue;
+      const { payload, changed } = migrateItemRef(
+        t.full_payload,
+        t.realm || "poe",
+        $currentLanguage,
+      );
+      if (!changed) continue;
+      t.full_payload = payload;
+      t.payload = ""; // force the regular payload to rebuild
+      changedAny = true;
+    }
+    if (changedAny) {
+      tiles = tiles;
+      markDirty();
+    }
+  }
+
+  // runs after hydration, after catalogs finish (re)loading, and on any tile/realm change
+  $: if (
+    !isHydratingProject &&
+    !$isLoading &&
+    $currentLanguage &&
+    $itemsPoe &&
+    $itemsPoe2 &&
+    tiles
+  ) {
+    migrateTileItems();
+  }
   // Sync camera movements into session memory without marking project dirty
   $: if (!isHydratingProject && currentProjectId) {
     setSessionCamera(currentProjectId, { scale, offsetX, offsetY });
@@ -1157,9 +1195,21 @@
 
     for (const t of tiles) {
       if (targets.has(t.id)) {
+        const realmChanged = t.realm !== realm;
         t.realm = realm;
         t.league = league;
-        t.payload = "";
+
+        if (realmChanged) {
+          // regular payload was built for the old realm: drop it so the next
+          // search rebuilds it from full_payload for the new realm
+          t.payload = "";
+          t.results = [];
+          t.searchId = undefined;
+        } else if (t.payload && typeof t.payload === "object") {
+          // league-only change keeps the payload, just retargets the league
+          t.payload = { ...t.payload, league };
+        }
+
         if (t.full_payload && typeof t.full_payload === "object") {
           t.full_payload = { ...t.full_payload, league };
         }
@@ -1336,6 +1386,7 @@
         {tile}
         {scale}
         {snapToGrid}
+        filtersOpen={activeTileId === tile.id}
         z={zOrder.get(tile.id) ?? 0}
         gridSize={GRID_SIZE}
         selected={selectedIds.has(tile.id)}

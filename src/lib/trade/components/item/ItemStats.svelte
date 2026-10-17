@@ -28,6 +28,37 @@
 
   const FORESIGHT_ICON = `${CDN_BASE}/protected/image/item/popup/foresight.png?v=1709582916256&key=Lef8eETW43fyBwYaZ_f3SA`;
 
+  /* Special properties (Memory Strands = type 99, Intangibility = type 110) */
+  const MEMORY_TITLE = `${CDN_BASE}/protected/image/item/popup/memory-title.png?v=1747803262058&key=aRX2e62z7JqOmhJAqx2X_A`;
+  const MEMORY_ICON = `${CDN_BASE}/protected/image/item/popup/memory-icon.png?v=1747803262058&key=arrpAm9BhRVgnxJXEjRh4w`;
+  const INTANGIBILITY_TITLE = `${CDN_BASE}/protected/image/item/popup/intangibility-title.png?v=1783487784104&key=0e1saVG59Xab1DG11bkEqw`;
+  const INTANGIBILITY_ICON = `${CDN_BASE}/protected/image/item/popup/intangibility-icon.png?v=1783487784104&key=NAq3DpnrGeivTtsJRPTMww`;
+
+  const SPECIAL_PROPS = {
+    memory: {
+      title: MEMORY_TITLE,
+      icon: MEMORY_ICON,
+      nameColor: "#bfe2fa",
+      valueColor: "#ffffff",
+      skipTop: 8,
+      skipBottom: 3,
+    },
+    intangibility: {
+      title: INTANGIBILITY_TITLE,
+      icon: INTANGIBILITY_ICON,
+      nameColor: "#9bf5bd",
+      valueColor: "#ffffff",
+      skipTop: 7,
+      skipBottom: 2,
+    },
+  } as const;
+
+  function getSpecialKind(p: ItemProperty): "memory" | "intangibility" | null {
+    if (p.type === 99) return "memory";
+    if (p.type === 110) return "intangibility";
+    return null;
+  }
+
   const VEILED_POE1: Record<string, string> = {
     prefix01: `${CDN_BASE}/protected/image/item/veiled/prefix_01a.png?v=1709582916256&key=NuxfQF016Bg_bUvrRy1gAQ`,
     prefix02: `${CDN_BASE}/protected/image/item/veiled/prefix_02a.png?v=1709582916256&key=DXwfEPfOw-uVqS_20dZaPw`,
@@ -188,6 +219,7 @@
     label: string;
     values: FormattedPropValue[];
     icon?: string;
+    special?: "memory" | "intangibility";
   }
 
   function formatProperty(prop: ItemProperty, compact: boolean): FormattedProp {
@@ -273,12 +305,23 @@
     const defenceLine: FormattedProp[] = [];
     const weaponRateEntries: { order: number; prop: FormattedProp }[] = [];
     const singleLines: FormattedProp[] = [];
+    const specialLines: FormattedProp[] = [];
     let mergedDamage: FormattedProp | null = null;
     let qualityProp: FormattedProp | null = null;
 
     for (const p of rawProps) {
       const cleanName = cleanBracketText(p.name).trim();
       if (!cleanName) continue;
+
+      // Special styled properties (Memory Strands, Intangibility)
+      const specialKind = getSpecialKind(p);
+      if (specialKind) {
+        specialLines.push({
+          ...formatProperty(p, isCompact),
+          special: specialKind,
+        });
+        continue;
+      }
 
       // Hide property if its name is already in baseType / typeLine
       if (
@@ -337,6 +380,7 @@
       defenceLine,
       weaponRateLine,
       singleLines,
+      specialLines,
       qualityProp,
     };
   })();
@@ -529,6 +573,11 @@
   $: enchantMods = item.enchantMods ?? [];
   $: crucibleMods = item.crucibleMods ?? [];
 
+  // Scourge mods (displayed above implicits) + tier (displayed with state tags)
+  $: scourgeMods = (item.scourgeMods ?? []) as Array<string | ItemMod>;
+  $: scourgeTier =
+    typeof item.scourged?.tier === "number" ? item.scourged.tier : null;
+
   $: classifiedExplicits = (() => {
     const prefixes: Array<{
       mod: string | ItemMod;
@@ -572,8 +621,11 @@
       .toLowerCase()
       .trim();
     const key = VEILED_POE1[raw] ? raw : "prefix01";
+    const isPrefix = key.startsWith("prefix");
     return {
       key,
+      tier: isPrefix ? "P" : "S",
+      tierColor: isPrefix ? "#DD3E14" : "#58AFF1",
       poe1Url: VEILED_POE1[key],
       poe2Data: VEILED_POE2[key] || VEILED_POE2.prefix01,
     };
@@ -683,7 +735,7 @@
     {/if}
 
     <!-- Top Properties Block -->
-    {#if kpiStats.length > 0 || groupedProps.defenceLine.length > 0 || groupedProps.weaponRateLine.length > 0 || groupedProps.singleLines.length > 0 || hasMetaReqQualityLine || inlineSockets.length > 0}
+    {#if kpiStats.length > 0 || groupedProps.defenceLine.length > 0 || groupedProps.weaponRateLine.length > 0 || groupedProps.singleLines.length > 0 || groupedProps.specialLines.length > 0 || hasMetaReqQualityLine || inlineSockets.length > 0}
       <div class="top-stats-block">
         <!-- Exception 1: DPS, pDPS, eDPS in one line -->
         {#if kpiStats.length > 0}
@@ -745,6 +797,29 @@
                   <StatColorText text={formatted.label} />
                 </span>
               {/if}
+            </span>
+          </div>
+        {/each}
+
+        <!-- Special styled properties: Memory Strands (99), Intangibility (110) -->
+        {#each groupedProps.specialLines as sp}
+          {@const cfg = SPECIAL_PROPS[sp.special ?? "memory"]}
+          <div class="prop-line">
+            <span
+              class="special-prop"
+              style:background-image="url('{cfg.title}')"
+              style:background-position="center -{cfg.skipTop}px"
+              style:height="{40 - cfg.skipTop - cfg.skipBottom}px"
+            >
+              <span style="color: {cfg.nameColor}">
+                <StatColorText text={sp.label} />{sp.values.length ? ":" : ""}
+              </span>
+              {#each sp.values as val}
+                <strong style="color: {cfg.valueColor}">
+                  <StatColorText text={val.text} />
+                </strong>
+              {/each}
+              <CdnImage src={cfg.icon} alt="" className="special-prop-icon" />
             </span>
           </div>
         {/each}
@@ -984,6 +1059,16 @@
       </div>
     {/if}
 
+    <!-- Scourge Mods (above implicit mods) -->
+    {#if scourgeMods.length > 0}
+      <div class="separator-line" />
+      <div class="stat-group">
+        {#each scourgeMods as mod}
+          <ItemModifier {mod} {realm} category="scourge" compact={isCompact} />
+        {/each}
+      </div>
+    {/if}
+
     <!-- Implicit Mods -->
     {#if separatedMods.implicitRegular.length > 0}
       <div class="separator-line" />
@@ -1035,6 +1120,11 @@
                 class:poe2={isPoe2}
                 class:compact={isCompact}
               >
+                <span
+                  class="veiled-tier"
+                  style="color: {vm.tierColor}"
+                  title={vm.tier === "P" ? "Prefix" : "Suffix"}>{vm.tier}</span
+                >
                 {#if isPoe2}
                   <div
                     class="lc {vm.key}"
@@ -1100,8 +1190,8 @@
       </div>
     {/if}
 
-    <!-- Split (split or duplicated) + Exclusive Bottom State -->
-    {#if isSplit || exclusiveState}
+    <!-- Split (split or duplicated) + Exclusive Bottom State + Scourge tier -->
+    {#if isSplit || exclusiveState || scourgeTier !== null}
       <div class="separator-line" />
       <div class="stat-group bottom-state-group">
         {#if isSplit}
@@ -1116,6 +1206,11 @@
         {:else if exclusiveState?.kind === "text"}
           <div class="state-stat-line {exclusiveState.cls}">
             {exclusiveState.label}
+          </div>
+        {/if}
+        {#if scourgeTier !== null}
+          <div class="state-stat-line state-scourge">
+            Scourge (Tier {scourgeTier})
           </div>
         {/if}
       </div>
@@ -1283,6 +1378,31 @@
     width: 15px;
     height: 15px;
     object-fit: contain;
+  }
+
+  /* Special props: Memory Strands / Intangibility (title image as background) */
+  .special-prop {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    width: 100%;
+    max-width: 300px;
+    box-sizing: border-box;
+    background-repeat: no-repeat;
+    background-size: 100% 40px;
+    font-size: 1rem;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+  .special-prop strong {
+    font-weight: 600;
+  }
+  :global(.special-prop-icon) {
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+    flex-shrink: 0;
   }
 
   /* Sockets on their own centered line */
@@ -1462,6 +1582,7 @@
     width: 100%;
   }
   .item-mod--veiled {
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1470,6 +1591,29 @@
     overflow: hidden;
     background: none;
     border: none;
+    transition: background-color 0.12s ease;
+  }
+  /* PoE1: light gray hover highlight */
+  .item-mod--veiled:not(.poe2):hover {
+    background-color: rgba(200, 200, 200, 0.16);
+  }
+  /* PoE2: green hover highlight */
+  .item-mod--veiled.poe2:hover {
+    background-color: rgba(120, 178, 10, 0.18);
+  }
+  .veiled-tier {
+    position: absolute;
+    left: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 5;
+    font-family: "FontinRegular", "Fontin", "Palatino Linotype", Georgia, serif;
+    font-size: 1.24rem;
+    font-weight: 600;
+    line-height: 1.22;
+  }
+  .item-mod--veiled.compact .veiled-tier {
+    font-size: 1.14rem;
   }
   .item-mod--veiled:not(.poe2) .lc {
     width: 220px;
@@ -1592,6 +1736,9 @@
   }
   .state-split {
     color: #6588ff;
+  }
+  .state-scourge {
+    color: #ff6e25;
   }
 
   .item-popup__desc-text--foreseeing::before {

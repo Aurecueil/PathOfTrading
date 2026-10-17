@@ -298,9 +298,10 @@ export interface Item {
   enchantMods?: Array<string | ItemMod>;
   runeMods?: Array<string | ItemMod>;
   utilityMods?: string[];
-  scourgeMods?: string[];
+  scourgeMods?: Array<string | ItemMod>;
   bondedMods?: Array<string | ItemMod>;
   crucibleMods?: Array<string | ItemMod>;
+  pseudoMods?: Array<string | ItemMod>;
   cosmeticMods?: string[];
   veiledMods?: Array<string | ItemMod>;
 

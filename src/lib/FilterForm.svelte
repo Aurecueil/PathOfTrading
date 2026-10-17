@@ -185,9 +185,16 @@
   );
 
   $: if (realm !== previousRealm) {
+    const prev = selectedItem;
     previousRealm = realm;
-    selectedItem = null;
-    searchQuery = "";
+    const match =
+      prev?.name && prev.flags?.unique
+        ? (allItemEntries.find(
+            (e) => e.flags?.unique && e.name === prev.name,
+          ) ?? null)
+        : null;
+    selectedItem = match;
+    searchQuery = match ? getItemDisplayName(match) : "";
     isItemDropdownOpen = false;
   }
 

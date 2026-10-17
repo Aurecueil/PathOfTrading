@@ -98,18 +98,6 @@ export async function initItemData(): Promise<void> {
 
 // Global toggle for stat color coding (true = enabled, false = disabled)
 export const statColorCodingEnabled = writable<boolean>(true);
-export async function initUserSettings(): Promise<void> {
-  try {
-    const settings = await invoke<{ colorCoding: boolean }>(
-      "get_user_settings",
-    );
-    if (typeof settings?.colorCoding === "boolean") {
-      statColorCodingEnabled.set(settings.colorCoding);
-    }
-  } catch (err) {
-    console.error("Failed to load user settings:", err);
-  }
-}
 export interface StatColorRule {
   partial?: string[];
   literal?: string[];
@@ -198,3 +186,27 @@ export const STAT_KEYWORD_COLORS: StatColorRule[] = [
   },
   { partial: ["to spirit", "increased spirit"], literal: [], color: "#EBEB6E" },
 ];
+
+// In $lib/trade/tradeStore.ts
+export const currentLanguage = writable<string>("EN");
+
+export async function initUserSettings(): Promise<void> {
+  try {
+    const [settings, lang] = await Promise.allSettled([
+      invoke<{ colorCoding: boolean }>("get_user_settings"),
+      invoke<string>("get_language"),
+    ]);
+
+    if (
+      settings.status === "fulfilled" &&
+      typeof settings.value?.colorCoding === "boolean"
+    ) {
+      statColorCodingEnabled.set(settings.value.colorCoding);
+    }
+    if (lang.status === "fulfilled" && lang.value) {
+      currentLanguage.set(lang.value);
+    }
+  } catch (err) {
+    console.error("Failed to load user settings:", err);
+  }
+}

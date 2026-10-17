@@ -47,14 +47,10 @@
 
   <button
     type="button"
-    class="cm-item"
+    class="cm-btn"
     on:click={() => dispatch("toggledisable")}
   >
-    {#if allDisabled}
-      ✅ Enable Search
-    {:else}
-      🚫 Disable Search
-    {/if}
+    {allDisabled ? "Enable Search" : "Disable Search"}
   </button>
 
   <div class="cm-divider"></div>
@@ -83,10 +79,10 @@
 
     <button
       type="button"
-      class="cm-apply-btn"
+      class="cm-btn"
       on:click={() => dispatch("applyrealmleague", { realm, league })}
     >
-      Apply Realm & League
+      Apply Realm &amp; League
     </button>
   </div>
 </div>
@@ -95,79 +91,109 @@
   .context-menu {
     position: fixed;
     z-index: 200;
-    width: 220px;
-    background: #1b1f2a;
-    border: 1px solid #333b4d;
-    border-radius: 8px;
-    padding: 0.45rem;
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.65);
+    width: 260px;
+    box-sizing: border-box;
+    background-color: #040608;
+    border: 1px solid #7f7f7f;
+    border-radius: 0;
+    padding: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: 8px;
+    color: #d3d3d3;
+    font-family: "Fontin", monospace, sans-serif;
+    user-select: none;
   }
+
   .cm-header {
-    font-size: 0.72rem;
-    font-weight: 700;
-    color: #94a3b8;
-    padding: 0.2rem 0.4rem;
-    text-transform: uppercase;
+    font-size: 18px;
+    line-height: 1.1;
+    color: #ffffff;
+    padding: 2px 2px 6px;
+    border-bottom: 1px solid #7f7f7f;
   }
-  .cm-item {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    background: #252b3b;
-    color: #fff;
-    border: none;
-    border-radius: 4px;
-    padding: 0.42rem 0.55rem;
-    font-size: 0.8rem;
-    cursor: pointer;
-  }
-  .cm-item:hover {
-    background: #3b4257;
-  }
+
   .cm-divider {
     height: 1px;
-    background: #2e3444;
-    margin: 0.15rem 0;
+    background: #7f7f7f;
+    opacity: 0.5;
   }
+
   .cm-section {
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
-    padding: 0.2rem;
+    gap: 8px;
   }
+
   .cm-section label {
     display: flex;
     flex-direction: column;
-    gap: 0.2rem;
-    font-size: 0.72rem;
-    color: #cbd5e1;
+    gap: 3px;
+    font-size: 16px;
+    color: #9a9a9a;
   }
+
   .cm-section select,
   .cm-section input {
-    background: #12151c;
-    color: #e2e8f0;
-    border: 1px solid #334155;
-    border-radius: 4px;
-    padding: 0.3rem;
-    font-size: 0.78rem;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 18px;
+    height: 28px;
+    line-height: 1;
+    width: 100%;
+    box-sizing: border-box;
+    background-color: #000000;
+    border: 2px solid #7f7f7f;
+    border-radius: 0;
+    color: #ffffff;
+    padding: 0 8px;
     outline: none;
   }
-  .cm-apply-btn {
-    background: #3a57e8;
-    color: #fff;
-    border: none;
-    border-radius: 4px;
-    width: 100%;
-    padding: 0.42rem;
-    font-size: 0.78rem;
-    margin-top: 0.15rem;
+
+  .cm-section select {
     cursor: pointer;
   }
-  .cm-apply-btn:hover {
-    background: #2d45c5;
+
+  .cm-section select:hover,
+  .cm-section select:focus,
+  .cm-section input:hover,
+  .cm-section input:focus {
+    border-color: #ffffff;
+  }
+
+  .cm-section select option {
+    background-color: #000000;
+    color: #9a9a9a;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 18px;
+  }
+
+  .cm-section select option:checked {
+    color: #ffffff;
+  }
+
+  .cm-btn {
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 18px;
+    height: 28px;
+    line-height: 1;
+    width: 100%;
+    padding: 0 8px;
+    border-radius: 0;
+    cursor: pointer;
+    border: 2px solid #7f7f7f;
+    background-color: #000000;
+    color: #ffffff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    transition: border-color 0.1s ease;
+  }
+
+  .cm-btn:hover,
+  .cm-btn:focus-visible {
+    border-color: #ffffff;
+    outline: none;
   }
 </style>

@@ -15,6 +15,7 @@
     | "suffix"
     | "bonded"
     | "crucible"
+    | "scourge"
     | "generic" = "generic";
   export let realm: string = "poe";
   export let compact: boolean = false;
@@ -81,6 +82,7 @@
   }
 
   function getTierColor(token: string, cat: string): string {
+    if (cat === "scourge") return "#FF6E25";
     const upper = token.toUpperCase();
     if (upper.startsWith("P") || cat === "prefix") return "#DD3E14";
     if (upper.startsWith("S") || cat === "suffix") return "#58AFF1";
@@ -289,6 +291,10 @@
   .crucible {
     --mod: #ff7339;
     --mod-rgb: 255, 115, 57;
+  }
+  .scourge {
+    --mod: #ff6e25;
+    --mod-rgb: 255, 110, 37;
   }
 
   /* ---- Special states ---- */

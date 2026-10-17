@@ -22,6 +22,7 @@
   export let selected: boolean = false;
   export let disabled: boolean = false;
   export let z: number = 0;
+  export let filtersOpen: boolean = false;
 
   const dispatch = createEventDispatcher<{
     openfilters: void;
@@ -975,6 +976,7 @@
 <div
   class="tile-root style-{effectiveStyle}"
   class:selected
+  class:filters-open={filtersOpen}
   class:is-disabled={disabled}
   style:z-index={z}
   style:transform="translate({tile.x}px, {tile.y}px)"
@@ -1497,5 +1499,11 @@
     width: 14px;
     height: 14px;
     cursor: nwse-resize;
+  }
+  .tile-root.filters-open {
+    border-color: #7dc8ff;
+    box-shadow:
+      0 0 0 1px #7dc8ff,
+      0 8px 24px rgba(0, 0, 0, 0.85);
   }
 </style>

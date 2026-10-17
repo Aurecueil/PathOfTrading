@@ -1,5 +1,4 @@
-use crate::auth::env::load_secret;
-use reqwest::header::{ACCEPT, COOKIE, USER_AGENT};
+use reqwest::header::{ACCEPT, USER_AGENT};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -22,19 +21,10 @@ pub async fn fetch_league_data(realm: &str) -> Result<LeagueData, String> {
     let trade_path = if realm == "poe2" { "trade2" } else { "trade" };
     let url = format!("{endpoint}/api/{trade_path}/data/leagues");
 
-    // Load auth secrets
-    let poe_token =
-        load_secret("poetoken")?.ok_or_else(|| "Missing 'poetoken' secret".to_string())?;
-    let poesessid =
-        load_secret("poesessid")?.ok_or_else(|| "Missing 'poesessid' secret".to_string())?;
-
-    let cookie_header = format!("POESESSID={poesessid}; poetoken={poe_token}");
-
     let response = client
         .get(&url)
         .header(ACCEPT, "application/json")
         .header(USER_AGENT, "Aurecueil.PathOfTrading (dc:aurecueil)")
-        .header(COOKIE, cookie_header)
         .send()
         .await
         .map_err(|e| format!("HTTP request error: {e}"))?;
