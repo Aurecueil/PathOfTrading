@@ -3,6 +3,7 @@
   import { createEventDispatcher, tick } from "svelte";
   import type { StatEntry } from "$lib/types/stats";
   import StatColorText from "$lib/trade/components/drawer/StatColorText.svelte";
+  import RealmIcon from "$lib/trade/components/drawer/RealmIcon.svelte";
 
   export let stat: StatEntry;
   export let allowedStats: Array<StatEntry & { groupLabel?: string }> = [];
@@ -216,6 +217,7 @@
               >
                 {statItem.groupLabel || statItem.type}
               </span>
+              <RealmIcon realms={(statItem as any).realms} />
               <StatColorText className="dropdown-text" text={statItem.text} />
             </li>
           {/each}

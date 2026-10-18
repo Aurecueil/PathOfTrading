@@ -1,11 +1,18 @@
-import { writable } from "svelte/store";
-import { invoke } from "@tauri-apps/api/core"; // For Tauri v2 (`@tauri-apps/api/tauri` in v1)
+// src/lib/trade/tradeStore.ts
+import { writable, get, derived } from "svelte/store";
+import { invoke } from "@tauri-apps/api/core";
+import { emit, listen } from "@tauri-apps/api/event";
 import type { ItemCategory, ItemDataResponse } from "$lib/types/baseItem";
 import type { FilterGroup, FilterDataResponse } from "$lib/types/filters";
 import type { StatGroup, StatsDataResponse } from "$lib/types/stats";
 import type { League, LeagueData } from "$lib/types/leagues";
 import type { StaticCategory, StaticDataResponse } from "$lib/types/statics";
-
+import {
+  statColorCodingEnabled,
+  ensureCrossWindowSync,
+  loadStatColorConfigsFromDisk,
+} from "./statColors";
+export * from "./statColors";
 export const itemsPoe = writable<ItemCategory[]>([]);
 export const itemsPoe2 = writable<ItemCategory[]>([]);
 export const filtersPoe = writable<FilterGroup[]>([]);
@@ -72,11 +79,11 @@ export async function initItemData(): Promise<void> {
 
     if (PoeLeague.status === "fulfilled")
       leaguesPoe.set(PoeLeague.value.result);
-    else errors.push(`PoE Stats: ${PoeLeague.reason}`);
+    else errors.push(`PoE Leagues: ${PoeLeague.reason}`);
 
     if (poe2Leagues.status === "fulfilled")
       leaguesPoe2.set(poe2Leagues.value.result);
-    else errors.push(`PoE2 Stats: ${poe2Leagues.reason}`);
+    else errors.push(`PoE2 Leagues: ${poe2Leagues.reason}`);
 
     if (poeStatics.status === "fulfilled")
       staticsPoe.set(poeStatics.value.result);
@@ -96,246 +103,26 @@ export async function initItemData(): Promise<void> {
   }
 }
 
-export const statColorCodingEnabled = writable<boolean>(true);
-
-export interface StatColorRule {
-  keywords: string[];
-  color: string;
-}
-
-export const STAT_KEYWORD_COLORS: StatColorRule[] = [
-  // defences
-  { keywords: ["energy shield", "es"], color: "#7EEBEB" },
-  { keywords: ["evasion", "evasion rating", "ev"], color: "#30EB6E" },
-  { keywords: ["armour", "ar"], color: "#e75e3f" },
-  {
-    keywords: [
-      "attack damage",
-      "attacks",
-      "attack modifiers",
-      "attack skills",
-      "attack",
-    ],
-    color: "#DA814D",
-  },
-  {
-    keywords: [
-      "global defences",
-      "base defence percentile",
-      "defences modifiers",
-      "defence modifiers",
-      "defences",
-    ],
-    color: "#A88F67",
-  },
-
-  //elements
-  {
-    keywords: [
-      "fire resistance",
-      "fire damage",
-      "fire spell skills",
-      "fire skills",
-      "fire gems",
-      "fire modifiers",
-      "extra fire",
-      "fire",
-    ],
-    color: "#AB6921",
-  },
-  {
-    keywords: [
-      "cold resistance",
-      "cold damage",
-      "cold spell skills",
-      "cold skills",
-      "cold gems",
-      "cold modifiers",
-      "extra cold",
-      "cold",
-    ],
-    color: "#3B65A5",
-  },
-  {
-    keywords: [
-      "lightning resistance",
-      "lightning damage",
-      "lightning spell skills",
-      "lightning skills",
-      "lightning gems",
-      "lightning modifiers",
-      "extra lightning",
-      "lightning",
-    ],
-    color: "#A09D42",
-  },
-  {
-    keywords: [
-      "chaos resistance",
-      "chaos damage",
-      "chaos spell skills",
-      "chaos skills",
-      "chaos gems",
-      "chaos modifiers",
-      "extra chaos",
-      "chaos",
-    ],
-    color: "#C01E85",
-  },
-  {
-    keywords: [
-      "physical resistance",
-      "physical damage",
-      "physical spell skills",
-      "physical skills",
-      "physical gems",
-      "physical modifiers",
-      "extra physical",
-      "physical",
-      "pdps",
-    ],
-    color: "#C79D93",
-  },
-  {
-    keywords: [
-      "unique map boss",
-      "unique enemy",
-      "unique boss",
-      "unique enemies",
-      "unique bosses",
-      "non-unique",
-      "unique monster",
-      "unique monsters",
-      "unique modifiers",
-      "unique modifier",
-      "unique",
-      "rogue exile",
-      "rogue exiles",
-    ],
-    color: "#9a5521",
-  },
-  {
-    keywords: [
-      "rare enemy",
-      "rare enemies",
-      "rare monsters",
-      "rare monster",
-      "rare modifiers",
-      "rare modifier",
-      "rare",
-    ],
-    color: "#ffff77",
-  },
-
-  {
-    keywords: [
-      "magic enemy",
-      "magic enemies",
-      "magic monsters",
-      "magic monster",
-      "magic",
-    ],
-    color: "#8888ff",
-  },
-  //atributes
-  { keywords: ["strength", "str"], color: "#CF4A2D" },
-  { keywords: ["dexterity", "dex"], color: "#65E465" },
-  { keywords: ["intelligence", "int"], color: "#6868EB" },
-
-  //basic
-  { keywords: ["life"], color: "#CF4A2D" },
-  { keywords: ["mana"], color: "#6868EB" },
-  { keywords: ["spirit"], color: "#EBEB6E" },
-  { keywords: ["dps"], color: "#E22626" },
-  {
-    keywords: [
-      "global critical strike change",
-      "critical strike change",
-      "global critical strike multiplier",
-      "critical strike multiplier",
-      "critical hit chance",
-      "critical spell damage bonus",
-      "critical damage bonus",
-      "critical hits",
-      "critical hit",
-      "critical modifiers",
-      "critical",
-    ],
-    color: "#B2A7D6",
-  },
-  {
-    keywords: [
-      "cast speed",
-      "action speed",
-      "attack speed",
-      "speed modifiers",
-      "movement speed",
-      "attacks per second",
-    ],
-    color: "#CFEEA5",
-  },
-
-  {
-    keywords: [
-      "crafted modifiers",
-      "crafted prefix modifiers",
-      "crafted suffix modifiers",
-    ],
-    color: "#FFFFFF",
-  },
-  //league
-  {
-    keywords: [
-      "kurgal",
-      "amanamu",
-      "ulaman",
-      "kulemak",
-      "tecrod",
-      "abyss",
-      "abysses",
-      "abyssal pits",
-      "abyssal depths",
-      "abyssal",
-      "unrevealed modifiers",
-      "unrevealed prefix modifiers",
-      "unrevealed suffix modifiers",
-      "unrevealed",
-      "desecrated modifiers",
-      "desecrated prefix modifiers",
-      "desecrated suffix modifiers",
-      "desecrated",
-    ],
-    color: "#72A90A",
-  },
-  {
-    keywords: ["ritual"],
-    color: "#810914",
-  },
-];
-
-// In $lib/trade/tradeStore.ts
+export const displayTiers = writable<boolean>(false);
+export const displayRune = writable<boolean>(true);
 export const currentLanguage = writable<string>("EN");
 
 export async function initUserSettings(): Promise<void> {
-  try {
-    const [settings, lang] = await Promise.allSettled([
-      invoke<{ colorCoding: boolean }>("get_user_settings"),
-      invoke<string>("get_language"),
-    ]);
+  await ensureCrossWindowSync();
 
-    if (
-      settings.status === "fulfilled" &&
-      typeof settings.value?.colorCoding === "boolean"
-    ) {
-      statColorCodingEnabled.set(settings.value.colorCoding);
-    }
-    if (lang.status === "fulfilled" && lang.value) {
-      currentLanguage.set(lang.value);
-    }
-  } catch (err) {
-    console.error("Failed to load user settings:", err);
+  const [settings, lang] = await Promise.allSettled([
+    invoke<{ colorCoding: boolean }>("get_user_settings"),
+    invoke<string>("get_language"),
+    loadStatColorConfigsFromDisk(false),
+  ]);
+
+  if (
+    settings.status === "fulfilled" &&
+    typeof settings.value?.colorCoding === "boolean"
+  ) {
+    statColorCodingEnabled.set(settings.value.colorCoding);
+  }
+  if (lang.status === "fulfilled" && lang.value) {
+    currentLanguage.set(lang.value);
   }
 }
-
-export const displayTiers = writable<boolean>(false);
-export const displayRune = writable<boolean>(true);

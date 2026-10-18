@@ -1,3 +1,5 @@
+pub mod colorCodingSettings;
+pub mod statgroup;
 // src-tauri/src/projects.rs
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};

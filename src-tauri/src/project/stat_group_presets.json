@@ -1,0 +1,140 @@
+[
+  {
+    "id": "c594c8b4-d596-4516-bb3c-394e1bfe875e",
+    "name": "Resist SUM",
+    "game": "any",
+    "groups": [
+      {
+        "id": "d502934b-9a04-4bb2-b7a6-4fb08d9724a9",
+        "name": "Attack Flats",
+        "game": "any",
+        "groups": [
+          {
+            "id": "stat_group_1792357992357",
+            "type": "weight2",
+            "filters": [
+              {
+                "id": "explicit.stat_3032590688",
+                "text": "Adds # to # Physical Damage to Attacks",
+                "value": {}
+              },
+              {
+                "id": "explicit.stat_4067062424",
+                "text": "Adds # to # Cold damage to Attacks",
+                "value": {}
+              },
+              {
+                "id": "explicit.stat_1754445556",
+                "text": "Adds # to # Lightning damage to Attacks",
+                "value": {}
+              },
+              {
+                "id": "explicit.stat_1573130764",
+                "text": "Adds # to # Fire damage to Attacks",
+                "value": {}
+              },
+              {
+                "id": "explicit.stat_674553446",
+                "text": "Adds # to # Chaos Damage to Attacks",
+                "value": {}
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "stat_group_1792355545908",
+        "type": "weight2",
+        "filters": [
+          {
+            "id": "explicit.stat_4220027924",
+            "text": "#% to Cold Resistance",
+            "value": {}
+          },
+          {
+            "id": "explicit.stat_3372524247",
+            "text": "#% to Fire Resistance",
+            "value": {}
+          },
+          {
+            "id": "explicit.stat_1671376347",
+            "text": "#% to Lightning Resistance",
+            "value": {}
+          },
+          {
+            "id": "explicit.stat_2923486259",
+            "text": "#% to Chaos Resistance",
+            "value": {
+              "weight": "1.6"
+            }
+          },
+          {
+            "id": "explicit.stat_2901986750",
+            "text": "#% to all Elemental Resistances",
+            "value": {
+              "weight": "3"
+            }
+          },
+          {
+            "id": "implicit.stat_2923486259",
+            "text": "#% to Chaos Resistance",
+            "value": {
+              "weight": "1.6"
+            }
+          },
+          {
+            "id": "implicit.stat_2901986750",
+            "text": "#% to all Elemental Resistances",
+            "value": {
+              "weight": "3"
+            }
+          },
+          {
+            "id": "implicit.stat_4220027924",
+            "text": "#% to Cold Resistance",
+            "value": {}
+          },
+          {
+            "id": "implicit.stat_1671376347",
+            "text": "#% to Lightning Resistance",
+            "value": {}
+          },
+          {
+            "id": "implicit.stat_3372524247",
+            "text": "#% to Fire Resistance",
+            "value": {}
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "9121e49c-e5ba-4379-bbdd-3841c01b4829",
+    "name": "non-hybrid Phys",
+    "game": "any",
+    "groups": [
+      {
+        "id": "stat_group_1792357814280",
+        "type": "and",
+        "filters": [
+          {
+            "id": "explicit.stat_1509134228",
+            "text": "#% increased Physical Damage",
+            "value": {}
+          }
+        ]
+      },
+      {
+        "id": "stat_group_1792357851295",
+        "type": "not",
+        "filters": [
+          {
+            "id": "explicit.stat_691932474",
+            "text": "# to Accuracy Rating (Local)",
+            "value": {}
+          }
+        ]
+      }
+    ]
+  }
+]

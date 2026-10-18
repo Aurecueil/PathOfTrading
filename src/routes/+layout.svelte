@@ -7,6 +7,7 @@
     initItemData,
     leaguesPoe,
     initUserSettings,
+    loadStatColorConfigsFromDisk,
   } from "$lib/trade/tradeStore";
   import {
     workspaceState,
@@ -54,6 +55,7 @@
     try {
       initItemData();
       initUserSettings();
+      loadStatColorConfigsFromDisk();
     } catch (error) {
       // Dev mode fallback
       console.error("Failed to initialize item data:", error);

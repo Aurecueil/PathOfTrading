@@ -1,13 +1,20 @@
 <!-- src/lib/trade/components/drawer/StatGroupsSection.svelte -->
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
+  import { createEventDispatcher, onMount } from "svelte";
   import StatGroupUI from "$lib/trade/components/drawer/StatGroupUI.svelte";
   import type { StatGroup as StatGroupType, StatEntry } from "$lib/types/stats";
+  import {
+    statGroupPresetsStore,
+    ensureStatGroupPresets,
+    type StatGroupPreset,
+  } from "$lib/trade/statGroupPresets";
 
   export let statGroups: any[] = [];
   export let currentStatCatalog: StatGroupType[] = [];
   export let realm: "poe" | "poe2" = "poe";
   export let isAddGroupMenuOpen: boolean = false;
+  export let dropUp: boolean = true;
+  export let showPresets: boolean = true;
 
   const STAT_GROUP_OPTIONS = [
     { id: "and", label: "And" },
@@ -20,17 +27,57 @@
     { id: "mercenary", label: "Mercenary" },
   ];
 
-  $: availableStatGroupOptions = STAT_GROUP_OPTIONS.filter((opt) => {
-    if (realm === "poe2" && (opt.id === "crucible" || opt.id === "mercenary")) {
-      return false;
-    }
-    return true;
+  const isPoe1Only = (t: string) => t === "crucible" || t === "mercenary";
+
+  $: availableStatGroupOptions = STAT_GROUP_OPTIONS.filter(
+    (opt) => !(realm === "poe2" && isPoe1Only(opt.id)),
+  );
+
+  onMount(() => {
+    if (showPresets) void ensureStatGroupPresets();
   });
+
+  $: visiblePresets = showPresets
+    ? $statGroupPresetsStore.filter((p) => p.game === "any" || p.game === realm)
+    : [];
 
   const dispatch = createEventDispatcher<{
     deleteGroup: string;
     addGroup: string;
   }>();
+
+  function injectPreset(preset: StatGroupPreset) {
+    // Resolve saved ids against the stats of the current realm
+    const byId = new Map<string, any>();
+    for (const g of currentStatCatalog) {
+      for (const e of g.entries || []) {
+        byId.set(e.id, { ...e, groupLabel: g.label || g.id });
+      }
+    }
+
+    const stamp = Date.now();
+    const added = preset.groups
+      .filter((g) => !(realm === "poe2" && isPoe1Only(g.type)))
+      .map((g, i) => ({
+        id: `stat_group_${stamp}_${i}`,
+        type: g.type,
+        collapsed: false,
+        value: g.value ? { ...g.value } : undefined,
+        // Stats missing in this realm get auto-disabled by the form
+        filters: g.filters.map((f) => {
+          const entry = byId.get(f.id);
+          return {
+            id: f.id,
+            statEntry: entry,
+            groupLabel: entry?.groupLabel,
+            value: { ...(f.value || {}) },
+            disabled: false,
+          };
+        }),
+      }));
+
+    statGroups = [...statGroups, ...added];
+  }
 
   function addStatToGroup(groupIndex: number, stat: StatEntry) {
     statGroups[groupIndex].filters = [
@@ -87,7 +134,7 @@
 <div class="stats-section">
   <div class="stats-list">
     {#each statGroups as group, gIndex (group.id)}
-      {#if !(realm === "poe2" && (group.type === "crucible" || group.type === "mercenary"))}
+      {#if !(realm === "poe2" && isPoe1Only(group.type))}
         <StatGroupUI
           {group}
           statCatalog={currentStatCatalog}
@@ -126,7 +173,11 @@
         + Add Stat Group
       </button>
       {#if isAddGroupMenuOpen}
-        <ul class="dropdown add-group-dropdown" on:wheel|stopPropagation>
+        <ul
+          class="dropdown add-group-dropdown"
+          class:drop-down={!dropUp}
+          on:wheel|stopPropagation
+        >
           {#each availableStatGroupOptions as opt}
             <li
               on:click={() => {
@@ -137,6 +188,22 @@
               {opt.label}
             </li>
           {/each}
+
+          {#if visiblePresets.length > 0}
+            <li class="divider" aria-hidden="true"></li>
+            {#each visiblePresets as preset (preset.id)}
+              <li
+                class="preset-item"
+                title="Insert {preset.groups.length} stat group(s)"
+                on:click={() => {
+                  injectPreset(preset);
+                  isAddGroupMenuOpen = false;
+                }}
+              >
+                {preset.name || "Untitled"}
+              </li>
+            {/each}
+          {/if}
         </ul>
       {/if}
     </div>
@@ -169,7 +236,6 @@
     position: relative;
   }
 
-  /* Retro Button Control Styling */
   .add-stat-group-btn {
     font-family: "Fontin", monospace, sans-serif;
     font-size: 12px;
@@ -193,13 +259,13 @@
     background: #111111;
   }
 
-  /* Expanded Dropdown Popover Styling */
   .add-group-dropdown {
     position: absolute;
     bottom: 100%;
     right: 0;
     margin-bottom: 2px;
-    width: 170px;
+    width: 190px;
+    max-height: 280px;
     background: #000000;
     border: 1px solid #ffffff;
     border-radius: 0px;
@@ -207,7 +273,16 @@
     padding: 2px 0;
     z-index: 1000;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
-    overflow: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: #555555 #000000;
+  }
+
+  .add-group-dropdown.drop-down {
+    bottom: auto;
+    top: 100%;
+    margin: 2px 0 0 0;
   }
 
   .add-group-dropdown li {
@@ -226,5 +301,19 @@
   .add-group-dropdown li:hover {
     background: #545454;
     color: #ffffff;
+  }
+
+  /* Thick divider between built-in types and saved presets */
+  .add-group-dropdown li.divider {
+    height: 3px;
+    margin: 3px 0;
+    padding: 0 !important;
+    background: #777777 !important;
+    cursor: default;
+    pointer-events: none;
+  }
+
+  .add-group-dropdown li.preset-item {
+    color: #d3d3d3;
   }
 </style>

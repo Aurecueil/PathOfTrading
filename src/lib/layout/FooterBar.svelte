@@ -400,11 +400,12 @@
 
 <style>
   footer {
-    border-top: 1px solid #333333;
+    border-top: 1px solid #777777;
     background: #000000;
     position: relative;
     z-index: 900;
     height: 26px;
+    font-family: "Fontin", monospace, sans-serif;
   }
 
   .footer {
@@ -427,7 +428,7 @@
 
   .disclaimer {
     font-size: 10px;
-    color: #666666;
+    color: #888888;
   }
 
   .ratelimiter-container {
@@ -444,8 +445,8 @@
     gap: 4px;
     background: transparent;
     border: none;
-    border-left: 1px solid #333333;
-    padding: 3px 4px;
+    border-left: 1px solid #777777;
+    padding: 2px 4px;
     cursor: pointer;
     box-sizing: border-box;
     outline: none;
@@ -467,10 +468,10 @@
   @keyframes border-alert {
     0%,
     100% {
-      background-color: rgba(211, 47, 47, 0.15);
+      background-color: rgba(211, 47, 47, 0.2);
     }
     50% {
-      background-color: rgba(255, 82, 82, 0.3);
+      background-color: rgba(255, 82, 82, 0.4);
     }
   }
 
@@ -478,8 +479,9 @@
     position: relative;
     width: 82px;
     height: 100%;
-    background-color: #111111;
-    border: 1px solid #2e2e2e;
+    background-color: #000000;
+    border: 1px solid #7f7f7f;
+    border-radius: 0px;
     overflow: hidden;
     display: flex;
     box-sizing: border-box;
@@ -520,19 +522,18 @@
 
   .count-overlay-text {
     font-size: 10px;
-    font-weight: 700;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: bold;
+    font-family: "Fontin", monospace, sans-serif;
     color: #ffffff;
     text-shadow:
       0 1px 3px rgba(0, 0, 0, 0.95),
       0 0 2px rgba(0, 0, 0, 0.9);
-    letter-spacing: -0.2px;
   }
 
   .penalty-overlay-text {
     font-size: 10px;
-    font-weight: 800;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: bold;
+    font-family: "Fontin", monospace, sans-serif;
     color: #ff5252;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
   }
@@ -541,15 +542,16 @@
     position: absolute;
     bottom: 100%;
     right: 0;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
     width: 275px;
-    background: #0d0d0d;
-    border: 1px solid #444444;
-    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.9);
-    padding: 10px;
+    background: #050505;
+    border: 1px solid #ffffff;
+    border-radius: 0px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
+    padding: 8px 10px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
     z-index: 1200;
   }
 
@@ -557,23 +559,23 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-bottom: 1px solid #222222;
-    padding-bottom: 6px;
+    border-bottom: 1px solid #333333;
+    padding-bottom: 4px;
   }
 
   .popover-title {
     font-size: 11px;
-    font-weight: 700;
+    font-weight: bold;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
     color: #888888;
   }
 
   .popover-pill {
     font-size: 9px;
     text-transform: uppercase;
-    font-weight: 700;
-    padding: 1px 5px;
+    font-weight: bold;
+    padding: 1px 4px;
+    border-radius: 0px;
   }
 
   .popover-pill.is-penalized {
@@ -589,17 +591,18 @@
   }
 
   .op-card {
-    background: #141414;
-    border: 1px solid #2a2a2a;
-    padding: 6px 8px;
+    background: #000000;
+    border: 1px solid #777777;
+    border-radius: 0px;
+    padding: 4px 6px;
     display: flex;
     flex-direction: column;
     gap: 4px;
   }
 
   .op-card.penalized {
-    border-color: #7f1d1d;
-    background: #180d0d;
+    border-color: #ff3333;
+    background: #1a0000;
   }
 
   .op-header {
@@ -610,26 +613,27 @@
   }
 
   .op-name {
-    font-weight: 600;
-    color: #d4d4d4;
+    font-weight: bold;
+    color: #ffffff;
   }
 
   .op-counts {
     color: #888888;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: "Fontin", monospace, sans-serif;
   }
 
   .penalty-tag {
-    color: #ef5350;
-    font-weight: 600;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #ff5252;
+    font-weight: bold;
+    font-family: "Fontin", monospace, sans-serif;
   }
 
   .bar-pip-track {
     height: 6px;
     background: #000000;
     display: flex;
-    border: 1px solid #222222;
+    border: 1px solid #7f7f7f;
+    border-radius: 0px;
     overflow: hidden;
   }
 
@@ -637,22 +641,22 @@
     display: flex;
     justify-content: space-between;
     font-size: 9px;
-    color: #666666;
+    color: #888888;
   }
 
   .queue-section {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    border-top: 1px solid #1f1f1f;
+    border-top: 1px solid #333333;
     padding-top: 6px;
   }
 
   .queue-header {
     font-size: 10px;
     text-transform: uppercase;
-    font-weight: 700;
-    color: #666666;
+    font-weight: bold;
+    color: #888888;
   }
 
   .queue-row {
@@ -663,7 +667,7 @@
   }
 
   .queue-label {
-    color: #999999;
+    color: #aaaaaa;
   }
 
   .queue-badges {
@@ -673,9 +677,10 @@
   }
 
   .realm-badge {
-    background: #1c1917;
-    border: 1px solid #443722;
-    color: #f59e0b;
+    background: #000000;
+    border: 1px solid #7f7f7f;
+    border-radius: 0px;
+    color: #e6c200;
     font-size: 10px;
     padding: 0 4px;
     display: inline-flex;
@@ -687,7 +692,7 @@
   }
 
   .queue-empty {
-    color: #444444;
+    color: #666666;
     font-style: italic;
     font-size: 10px;
   }
@@ -695,10 +700,10 @@
   .legend-row {
     display: flex;
     justify-content: space-between;
-    border-top: 1px solid #1f1f1f;
+    border-top: 1px solid #333333;
     padding-top: 6px;
     font-size: 9px;
-    color: #777777;
+    color: #888888;
   }
 
   .legend-chip {
@@ -712,14 +717,15 @@
     width: 6px;
     height: 6px;
     display: block;
+    border-radius: 0px;
   }
 
   .legend-available::before {
     background-color: #2e7d32;
   }
   .legend-unavailable::before {
-    background-color: #222222;
-    border: 1px solid #444444;
+    background-color: #1f1f1f;
+    border: 1px solid #7f7f7f;
   }
   .legend-reserved::before {
     background-color: #616161;

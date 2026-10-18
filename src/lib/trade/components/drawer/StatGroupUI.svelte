@@ -3,6 +3,7 @@
   import StatRow from "./StatRow.svelte";
   import type { StatEntry, StatGroup } from "$lib/types/stats";
   import StatColorText from "$lib/trade/components/drawer/StatColorText.svelte";
+  import RealmIcon from "$lib/trade/components/drawer/RealmIcon.svelte";
 
   export let group: {
     id: string;
@@ -381,6 +382,7 @@
               >
                 {statItem.groupLabel}
               </span>
+              <RealmIcon realms={(statItem as any).realms} />
               <StatColorText className="dropdown-text" text={statItem.text} />
             </li>
           {/each}

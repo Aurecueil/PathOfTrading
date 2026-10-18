@@ -81,6 +81,11 @@ pub fn run() {
             trade::settings::get_language,
             settings::get_user_settings,
             settings::set_color_coding,
+            project::colorCodingSettings::save_custom_stat_colors,
+            project::colorCodingSettings::save_disabled_default_stat_colors,
+            project::colorCodingSettings::get_stat_color_configs,
+            project::statgroup::get_stat_group_presets,
+            project::statgroup::save_stat_group_presets,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

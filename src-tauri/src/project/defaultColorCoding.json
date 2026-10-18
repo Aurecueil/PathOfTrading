@@ -1,0 +1,334 @@
+[
+  {
+    "id": "basic",
+    "name": "Basic",
+    "elements": [
+      {
+        "id": "defences",
+        "name": "Defences",
+        "elements": [
+          {
+            "id": "def-es",
+            "name": "Energy Shield",
+            "color": "#7EEBEB",
+            "keywords": ["energy shield", "es"]
+          },
+          {
+            "id": "def-ev",
+            "name": "Evasion",
+            "color": "#30EB6E",
+            "keywords": ["evasion", "evasion rating", "ev"]
+          },
+          {
+            "id": "def-ar",
+            "name": "Armour",
+            "color": "#e75e3f",
+            "keywords": ["armour", "ar"]
+          },
+          {
+            "id": "def-global-def",
+            "name": "Global Defences",
+            "color": "#A88F67",
+            "keywords": [
+              "global defences",
+              "base defence percentile",
+              "defences modifiers",
+              "defence modifiers",
+              "defences"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "def-resources",
+        "name": "Resources",
+        "elements": [
+          {
+            "id": "def-life",
+            "name": "Life",
+            "color": "#CF4A2D",
+            "keywords": ["life"]
+          },
+          {
+            "id": "def-mana",
+            "name": "Mana",
+            "color": "#6868EB",
+            "keywords": ["mana"]
+          },
+          {
+            "id": "def-spirit",
+            "name": "Spirit",
+            "color": "#EBEB6E",
+            "keywords": ["spirit"]
+          },
+          {
+            "id": "def-dps",
+            "name": "DPS",
+            "color": "#E22626",
+            "keywords": ["dps"]
+          }
+        ]
+      },
+      {
+        "id": "attributes",
+        "name": "Attributes",
+        "elements": [
+          {
+            "id": "def-str",
+            "name": "Strength",
+            "color": "#CF4A2D",
+            "keywords": ["strength", "str"]
+          },
+          {
+            "id": "def-dex",
+            "name": "Dexterity",
+            "color": "#65E465",
+            "keywords": ["dexterity", "dex"]
+          },
+          {
+            "id": "def-int",
+            "name": "Intelligence",
+            "color": "#6868EB",
+            "keywords": ["intelligence", "int"]
+          }
+        ]
+      },
+      {
+        "id": "types",
+        "name": "Types",
+        "elements": [
+          {
+            "id": "def-attack",
+            "name": "Attack",
+            "color": "#DA814D",
+            "keywords": [
+              "attack damage",
+              "attacks",
+              "attack modifiers",
+              "attack skills",
+              "attack"
+            ]
+          },
+          {
+            "id": "def-physical",
+            "name": "Physical",
+            "color": "#C79D93",
+            "keywords": [
+              "physical resistance",
+              "physical damage",
+              "physical spell skills",
+              "physical skills",
+              "physical gems",
+              "physical modifiers",
+              "extra physical",
+              "physical",
+              "pdps"
+            ]
+          },
+          {
+            "id": "def-lightning",
+            "name": "Lightning",
+            "color": "#A09D42",
+            "keywords": [
+              "lightning resistance",
+              "lightning damage",
+              "lightning spell skills",
+              "lightning skills",
+              "lightning gems",
+              "lightning modifiers",
+              "extra lightning",
+              "lightning"
+            ]
+          },
+          {
+            "id": "def-fire",
+            "name": "Fire",
+            "color": "#AB6921",
+            "keywords": [
+              "fire resistance",
+              "fire damage",
+              "fire spell skills",
+              "fire skills",
+              "fire gems",
+              "fire modifiers",
+              "extra fire",
+              "fire"
+            ]
+          },
+          {
+            "id": "def-cold",
+            "name": "Cold",
+            "color": "#3B65A5",
+            "keywords": [
+              "cold resistance",
+              "cold damage",
+              "cold spell skills",
+              "cold skills",
+              "cold gems",
+              "cold modifiers",
+              "extra cold",
+              "cold"
+            ]
+          },
+          {
+            "id": "def-chaos",
+            "name": "Chaos",
+            "color": "#C01E85",
+            "keywords": [
+              "chaos resistances",
+              "chaos resistance",
+              "chaos damage",
+              "chaos spell skills",
+              "chaos skills",
+              "chaos gems",
+              "chaos modifiers",
+              "extra chaos"
+            ]
+          },
+          {
+            "id": "def-critical",
+            "name": "Critical",
+            "color": "#B2A7D6",
+            "keywords": [
+              "global critical strike change",
+              "critical strike change",
+              "global critical strike multiplier",
+              "critical strike multiplier",
+              "critical hit chance",
+              "critical spell damage bonus",
+              "critical damage bonus",
+              "critical hits",
+              "critical hit",
+              "critical modifiers",
+              "critical"
+            ]
+          },
+          {
+            "id": "def-speed",
+            "name": "Speed",
+            "color": "#CFEEA5",
+            "keywords": [
+              "cast speed",
+              "action speed",
+              "attack speed",
+              "speed modifiers",
+              "movement speed",
+              "attacks per second"
+            ]
+          },
+          {
+            "id": "def-crafted",
+            "name": "Crafted",
+            "color": "#FFFFFF",
+            "keywords": [
+              "crafted modifiers",
+              "crafted prefix modifiers",
+              "crafted suffix modifiers"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "rarities",
+    "name": "Rarities",
+    "elements": [
+      {
+        "id": "def-unique",
+        "name": "Unique",
+        "color": "#9a5521",
+        "keywords": [
+          "unique map boss",
+          "unique enemy",
+          "unique boss",
+          "unique enemies",
+          "unique bosses",
+          "non-unique",
+          "unique monster",
+          "unique monsters",
+          "unique modifiers",
+          "unique modifier",
+          "unique",
+          "rogue exile",
+          "rogue exiles"
+        ]
+      },
+      {
+        "id": "def-rare",
+        "name": "Rare",
+        "color": "#ffff77",
+        "keywords": [
+          "rare enemy",
+          "rare enemies",
+          "rare monsters",
+          "rare monster",
+          "rare modifiers",
+          "rare modifier",
+          "rare"
+        ]
+      },
+      {
+        "id": "def-magic",
+        "name": "Magic",
+        "color": "#8888ff",
+        "keywords": [
+          "magic enemy",
+          "magic enemies",
+          "magic monsters",
+          "magic monster",
+          "magic"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mechanics",
+    "name": "Mechanics",
+    "elements": [
+      {
+        "id": "def-abyss-desecrated",
+        "name": "Abyss & Desecrated",
+        "elements": [
+          {
+            "id": "def-abyss",
+            "name": "Abyss",
+            "color": "#72A90A",
+            "keywords": [
+              "kurgal",
+              "amanamu",
+              "ulaman",
+              "kulemak",
+              "tecrod",
+              "abyss",
+              "abysses",
+              "abyssal pits",
+              "abyssal depths",
+              "abyssal",
+              "unrevealed modifiers",
+              "unrevealed prefix modifiers",
+              "unrevealed suffix modifiers",
+              "unrevealed",
+              "desecrated modifiers",
+              "desecrated prefix modifiers",
+              "desecrated suffix modifiers",
+              "desecrated"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "def-ritual-group",
+        "name": "Ritual",
+        "elements": [
+          {
+            "id": "def-ritual",
+            "name": "Ritual",
+            "color": "#810914",
+            "keywords": ["ritual"]
+          }
+        ]
+      }
+    ]
+  }
+]

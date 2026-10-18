@@ -70,7 +70,9 @@
 </script>
 
 {#if workspaceState.toastMessage}
-  <div class="toast-banner">{workspaceState.toastMessage}</div>
+  <div class="toast-banner" role="status" aria-live="polite">
+    {workspaceState.toastMessage}
+  </div>
 {/if}
 
 <!-- Name Project Prompt Modal (Shown when saving a project with name === "") -->
@@ -88,21 +90,49 @@
       }}
       onclick={(e) => e.stopPropagation()}
     >
-      <h3 class="modal-title">Name Your Project</h3>
+      <div class="modal-header">
+        <h3 class="modal-title">Name Your Project</h3>
+        <button
+          type="button"
+          class="modal-close-btn"
+          onclick={workspaceState.namePrompt.onCancel}
+          title="Close"
+        >
+          ✕
+        </button>
+      </div>
       <p class="modal-desc">
         Please enter a name for this project before saving.
       </p>
       <label class="modal-label">
         <span>Project Name</span>
-        <!-- svelte-ignore a11y_autofocus -->
-        <input
-          type="text"
-          class="modal-input"
-          bind:value={promptNameValue}
-          placeholder="Enter project name..."
-          autofocus
-          required
-        />
+        <div class="input-wrapper">
+          <!-- svelte-ignore a11y_autofocus -->
+          <input
+            type="text"
+            class="modal-input"
+            class:is-modified={promptNameValue.trim().length > 0}
+            bind:value={promptNameValue}
+            placeholder="Enter project name..."
+            autocomplete="off"
+            autofocus
+            required
+          />
+          {#if promptNameValue.length > 0}
+            <button
+              type="button"
+              class="clear-input-btn"
+              onmousedown={(e) => {
+                e.preventDefault();
+                promptNameValue = "";
+              }}
+              title="Clear"
+              aria-label="Clear project name"
+            >
+              ✕
+            </button>
+          {/if}
+        </div>
       </label>
       <div class="modal-actions">
         <button
@@ -137,11 +167,21 @@
       aria-label="Import from Code"
       onclick={(e) => e.stopPropagation()}
     >
-      <h3 class="modal-title">
-        {workspaceState.importModalMode === "elements"
-          ? "Import Elements into Current Project"
-          : "Import New Project from Share Code"}
-      </h3>
+      <div class="modal-header">
+        <h3 class="modal-title">
+          {workspaceState.importModalMode === "elements"
+            ? "Import Elements into Current Project"
+            : "Import New Project from Share Code"}
+        </h3>
+        <button
+          type="button"
+          class="modal-close-btn"
+          onclick={() => (workspaceState.importModalOpen = false)}
+          title="Close"
+        >
+          ✕
+        </button>
+      </div>
       <p class="modal-desc">
         Paste a Base64 + zlib compressed share code below.
       </p>
@@ -149,12 +189,30 @@
       {#if workspaceState.importModalMode === "new-project"}
         <label class="modal-label">
           <span>Project Name (optional)</span>
-          <input
-            type="text"
-            class="modal-input"
-            bind:value={newProjectNameInput}
-            placeholder="Leave blank for unnamed project"
-          />
+          <div class="input-wrapper">
+            <input
+              type="text"
+              class="modal-input"
+              class:is-modified={newProjectNameInput.trim().length > 0}
+              bind:value={newProjectNameInput}
+              placeholder="Leave blank for unnamed project"
+              autocomplete="off"
+            />
+            {#if newProjectNameInput.length > 0}
+              <button
+                type="button"
+                class="clear-input-btn"
+                onmousedown={(e) => {
+                  e.preventDefault();
+                  newProjectNameInput = "";
+                }}
+                title="Clear"
+                aria-label="Clear project name"
+              >
+                ✕
+              </button>
+            {/if}
+          </div>
         </label>
       {/if}
 
@@ -162,10 +220,10 @@
         <span>Share Code (Zlib + Base64)</span>
         <textarea
           class="modal-textarea"
+          class:is-modified={codeInput.trim().length > 0}
           rows="5"
           bind:value={codeInput}
-          placeholder="eJxL..."
-        ></textarea>
+          placeholder="eJxL..."></textarea>
       </label>
 
       {#if codeError}
@@ -202,12 +260,14 @@
       role="alertdialog"
       aria-labelledby="unsaved-heading"
     >
-      <h3 id="unsaved-heading" class="modal-title">
-        This Project has Unsaved changes
-      </h3>
+      <div class="modal-header">
+        <h3 id="unsaved-heading" class="modal-title warning-title">
+          This Project has Unsaved changes
+        </h3>
+      </div>
       <p class="modal-desc">
         Do you want to save the changes you made to
-        <strong
+        <strong class="highlight-name"
           >"{workspaceState.unsavedPrompt.projectName ||
             "Untitled Project"}"</strong
         > before leaving?
@@ -245,136 +305,273 @@
     bottom: 36px;
     left: 50%;
     transform: translateX(-50%);
-    background: #1e293b;
-    border: 1px solid #3a57e8;
-    color: #f8fafc;
-    padding: 6px 14px;
-    border-radius: 4px;
+    background: #000000;
+    border: 1px solid #ffffff;
+    color: #ffffff;
+    padding: 5px 12px;
+    border-radius: 0px;
+    font-family: "Fontin", monospace, sans-serif;
     font-size: 12px;
+    line-height: 1.2;
     z-index: 2500;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
+    pointer-events: none;
   }
 
   .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.72);
-    backdrop-filter: blur(2px);
+    background: rgba(0, 0, 0, 0.75);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 2000;
+    font-family: "Fontin", monospace, sans-serif;
   }
 
   .modal-card {
-    width: 440px;
+    width: 420px;
     max-width: 92vw;
-    background: #12151e;
-    border: 1px solid #2e364f;
-    border-radius: 6px;
-    padding: 16px;
+    background: #050505;
+    border: 1px solid #777777;
+    border-radius: 0px;
+    padding: 12px 14px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    box-shadow: 0 18px 42px rgba(0, 0, 0, 0.75);
+    gap: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.9);
+    color: #d3d3d3;
+    box-sizing: border-box;
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border-bottom: 1px solid #333333;
+    padding-bottom: 4px;
   }
 
   .modal-title {
     margin: 0;
-    font-size: 15px;
-    color: #f1f5f9;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 14px;
+    font-weight: bold;
+    color: #e0e0e0;
+    line-height: 1.2;
+  }
+
+  .modal-title.warning-title {
+    color: #ff5555;
+  }
+
+  .modal-close-btn {
+    font-family: "Fontin", monospace, sans-serif;
+    background: transparent;
+    border: none;
+    border-radius: 0px;
+    color: #888888;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0 4px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .modal-close-btn:hover {
+    color: #ff5555;
+    background: transparent;
   }
 
   .modal-desc {
     margin: 0;
-    font-size: 12.5px;
-    color: #94a3b8;
-    line-height: 1.45;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 12px;
+    color: #d3d3d3;
+    line-height: 1.4;
+  }
+
+  .highlight-name {
+    color: #ffffff;
   }
 
   .modal-label {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    font-size: 12px;
-    color: #cbd5e1;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 11px;
+    color: #d3d3d3;
   }
 
-  .modal-input,
-  .modal-textarea {
-    background: #0b0d13;
-    border: 1px solid #2c344b;
-    color: #f8fafc;
-    border-radius: 4px;
-    padding: 7px 9px;
+  .input-wrapper {
+    position: relative;
+    width: 100%;
+    display: flex;
+    align-items: center;
+  }
+
+  .modal-input {
+    font-family: "Fontin", monospace, sans-serif;
     font-size: 12px;
-    font-family: ui-monospace, monospace;
+    line-height: 1.15;
+    height: 26px;
+    width: 100%;
+    background: #000000;
+    border: 1px solid #7f7f7f;
+    border-radius: 0px;
+    color: #ffffff;
+    padding: 0 1.5rem 0 6px;
     outline: none;
+    box-sizing: border-box;
   }
 
+  .modal-textarea {
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 12px;
+    line-height: 1.25;
+    width: 100%;
+    background: #000000;
+    border: 1px solid #7f7f7f;
+    border-radius: 0px;
+    color: #ffffff;
+    padding: 6px;
+    outline: none;
+    resize: vertical;
+    box-sizing: border-box;
+    scrollbar-width: thin;
+    scrollbar-color: #555555 #000000;
+  }
+
+  .modal-textarea::-webkit-scrollbar {
+    width: 6px;
+  }
+  .modal-textarea::-webkit-scrollbar-track {
+    background: #000000;
+  }
+  .modal-textarea::-webkit-scrollbar-thumb {
+    background: #555555;
+  }
+
+  .modal-input:hover,
   .modal-input:focus,
-  .modal-textarea:focus {
-    border-color: #3a57e8;
+  .modal-input.is-modified,
+  .modal-textarea:hover,
+  .modal-textarea:focus,
+  .modal-textarea.is-modified {
+    border-color: #ffffff;
+  }
+
+  .clear-input-btn {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    color: #888888;
+    cursor: pointer;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 11px;
+    line-height: 1;
+    padding: 2px 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .clear-input-btn:hover {
+    color: #ffffff;
   }
 
   .modal-error {
-    color: #f87171;
-    font-size: 12px;
-    background: rgba(127, 29, 29, 0.25);
-    border: 1px solid #7f1d1d;
-    padding: 6px 8px;
-    border-radius: 4px;
+    font-family: "Fontin", monospace, sans-serif;
+    color: #ff6666;
+    font-size: 11px;
+    background: #1a0000;
+    border: 1px solid #ff3333;
+    padding: 4px 6px;
+    border-radius: 0px;
+    line-height: 1.3;
   }
 
   .modal-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 8px;
+    gap: 6px;
     margin-top: 4px;
   }
 
   .btn-primary,
   .btn-secondary,
   .btn-danger {
-    padding: 6px 12px;
-    border-radius: 4px;
+    font-family: "Fontin", monospace, sans-serif;
     font-size: 12px;
-    font-weight: 600;
+    height: 26px;
+    line-height: 1;
+    padding: 0 10px;
+    border-radius: 0px;
+    font-weight: normal;
     cursor: pointer;
-    border: 1px solid transparent;
+    background: #000000;
+    border: 1px solid #7f7f7f;
+    color: #ffffff;
+    white-space: nowrap;
+    transition:
+      background 0.1s ease,
+      border-color 0.1s ease,
+      color 0.1s ease;
   }
 
   .btn-primary {
-    background: #2563eb;
+    background: #000000;
+    border: 1px solid #ffffff;
     color: #ffffff;
   }
 
-  .btn-primary:hover:not(:disabled) {
-    background: #1d4ed8;
+  .btn-primary:hover:not(:disabled),
+  .btn-primary:focus:not(:disabled) {
+    background: #111111;
+    border-color: #ffffff;
+    color: #ffffff;
+    outline: none;
   }
 
   .btn-primary:disabled {
     opacity: 0.45;
+    border-color: #555555;
+    color: #888888;
     cursor: not-allowed;
   }
 
-  .btn-danger {
-    background: #7f1d1d;
-    border-color: #b91c1c;
-    color: #fecaca;
-  }
-
-  .btn-danger:hover {
-    background: #991b1b;
-  }
-
   .btn-secondary {
-    background: #1e2433;
-    border-color: #334155;
-    color: #cbd5e1;
+    background: #000000;
+    border: 1px solid #7f7f7f;
+    color: #d3d3d3;
   }
 
-  .btn-secondary:hover {
-    background: #2b3346;
+  .btn-secondary:hover,
+  .btn-secondary:focus {
+    background: #111111;
+    border-color: #ffffff;
+    color: #ffffff;
+    outline: none;
+  }
+
+  .btn-danger {
+    background: #000000;
+    border: 1px solid #777777;
+    color: #ff6666;
+  }
+
+  .btn-danger:hover,
+  .btn-danger:focus {
+    background: #330000;
+    border-color: #ff3333;
+    color: #ff3333;
+    outline: none;
   }
 </style>

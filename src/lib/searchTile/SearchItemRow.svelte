@@ -1,6 +1,6 @@
 <!-- src/lib/searchTile/SearchItemRow.svelte -->
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
+  import { createEventDispatcher, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import type { ResolvedDisplayStyle } from "$lib/types/types";
   import type { Item, TradeFetchResult } from "$lib/types/tradeItem";
@@ -32,12 +32,45 @@
   let isQueued = false;
   let travelError: string | null = null;
   let isJsonModalOpen = false;
+  let isCopied = false;
+  let copyTimeout: ReturnType<typeof setTimeout> | null = null;
   let rowWidth: number = 0;
   let titleWrapEl: HTMLDivElement | null = null;
   let statsEl: HTMLDivElement | null = null;
   let titleInsetLeft = 10;
   let titleInsetRight = 10;
   let lastDispatchedSortKey: string | null = null;
+
+  onDestroy(() => {
+    if (copyTimeout) clearTimeout(copyTimeout);
+  });
+
+  function decodeExtendedText(encoded: string): string {
+    try {
+      const binString = atob(encoded.trim());
+      const bytes = Uint8Array.from(binString, (c) => c.charCodeAt(0));
+      return new TextDecoder("utf-8").decode(bytes);
+    } catch {
+      return encoded;
+    }
+  }
+
+  async function handleCopyText() {
+    const rawText = item?.extended?.text;
+    if (!rawText) return;
+
+    try {
+      const decoded = decodeExtendedText(rawText);
+      await navigator.clipboard.writeText(decoded);
+      isCopied = true;
+      if (copyTimeout) clearTimeout(copyTimeout);
+      copyTimeout = setTimeout(() => {
+        isCopied = false;
+      }, 1500);
+    } catch (err) {
+      console.error("Failed to copy item text:", err);
+    }
+  }
 
   /**
    * Pads the title bar so the title is centered on the stats column
@@ -259,7 +292,7 @@
     bind:clientWidth={rowWidth}
   >
     {#if resolvedStyle !== "minimal"}
-      <!-- Header: category symbols + "name base type" (raw JSON button sits under it) -->
+      <!-- Header: category symbols + "name base type" (action buttons sit under it) -->
       <div class="title-wrap" bind:this={titleWrapEl}>
         <ItemTitleBar
           title={fullItemTitle}
@@ -268,14 +301,40 @@
           insetRight={titleInsetRight}
           {boxWidth}
         />
-        <button
-          type="button"
-          class="btn-top-json"
-          aria-label="View raw JSON"
-          on:click|stopPropagation={() => (isJsonModalOpen = true)}
-        >
-          &#123;&nbsp;&#125;
-        </button>
+        <div class="top-actions">
+          {#if item.extended?.text}
+            <button
+              type="button"
+              class="btn-top-action"
+              class:is-copied={isCopied}
+              aria-label="Copy item text"
+              title="Copy item text"
+              on:click|stopPropagation={handleCopyText}
+            >
+              {#if isCopied}
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+              {:else}
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path
+                    d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                  />
+                </svg>
+              {/if}
+            </button>
+          {/if}
+          <button
+            type="button"
+            class="btn-top-action"
+            aria-label="View raw JSON"
+            title="View raw JSON"
+            on:click|stopPropagation={() => (isJsonModalOpen = true)}
+          >
+            &#123;&nbsp;&#125;
+          </button>
+        </div>
       </div>
     {/if}
 
@@ -439,13 +498,22 @@
   }
 
   /* ---------------------------------------------------------------- */
-  /* Raw JSON button                                                  */
+  /* Top action buttons (Copy text & Raw JSON)                        */
   /* ---------------------------------------------------------------- */
-  .btn-top-json {
+  .top-actions {
     position: absolute;
     top: calc(100% + 4px);
     right: 4px;
     z-index: 15;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .btn-top-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     opacity: 0.45;
     background: rgba(0, 0, 0, 0.3);
     border: 1px solid #3a3a3a;
@@ -456,6 +524,8 @@
     font-weight: 700;
     line-height: 1;
     padding: 3px 6px;
+    min-height: 19px;
+    box-sizing: border-box;
     cursor: pointer;
     transition:
       opacity 0.1s ease,
@@ -463,13 +533,31 @@
       color 0.1s ease,
       background-color 0.1s ease;
   }
-  .btn-top-json:hover,
-  .btn-top-json:focus-visible {
+
+  .btn-top-action svg {
+    width: 12px;
+    height: 12px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .btn-top-action:hover,
+  .btn-top-action:focus-visible {
     opacity: 1;
     border-color: var(--rc);
     color: #fff;
     background: rgba(var(--rc-rgb), 0.18);
     outline: none;
+  }
+
+  .btn-top-action.is-copied {
+    opacity: 1;
+    border-color: #4ae63a;
+    color: #4ae63a;
+    background: rgba(74, 230, 58, 0.14);
   }
 
   /* ---------------------------------------------------------------- */

@@ -1,7 +1,9 @@
+<!-- src/lib/trade/components/drawer/FilterRow.svelte -->
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import type { FilterEntry, FilterOptionEntry } from "$lib/types/filters";
   import type { ItemEntry } from "$lib/types/baseItem";
+  import StatColorText from "$lib/trade/components/drawer/StatColorText.svelte";
 
   export let filter: FilterEntry;
   export let value: Record<string, any> = {};
@@ -11,7 +13,7 @@
     change: { field: string; value: any };
   }>();
 
-  // Local combobox state
+  // Local dropdown / combobox state
   let isComboboxOpen: boolean = false;
   let comboboxQuery: string = "";
   let highlightedIndex: number = -1;
@@ -73,25 +75,22 @@
   }
 
   $: allOptions = filter.option ? getResolvedOptions(filter) : [];
-  $: alwaysSelect = isAlwaysSelectFilter(filter) || allOptions.length <= 4;
+  // Uses button trigger when few options or special filter; uses searchable input box when enough options
+  $: alwaysSelect = isAlwaysSelectFilter(filter) || allOptions.length <= 8;
   $: selectedOpt = allOptions.find((o) =>
     value?.option ? o.id === value.option : o.id === null,
   );
   $: nullOpt = allOptions.find((o) => o.id === null);
 
-  $: filteredOptions = comboboxQuery.trim()
-    ? allOptions
-        .filter((o) =>
-          o.text.toLowerCase().includes(comboboxQuery.toLowerCase().trim()),
-        )
-        .slice(0, 50)
-    : allOptions.slice(0, 50);
+  $: filteredOptions =
+    !alwaysSelect && comboboxQuery.trim()
+      ? allOptions
+          .filter((o) =>
+            o.text.toLowerCase().includes(comboboxQuery.toLowerCase().trim()),
+          )
+          .slice(0, 50)
+      : allOptions.slice(0, 50);
 
-  /* ------------------------------------------------------------------------ */
-  /* Non-default tracking. Each value control is "modified" on its own; the   */
-  /* name is modified when at least one of its values is. The row/group box   */
-  /* border is never touched.                                                 */
-  /* ------------------------------------------------------------------------ */
   function has(v: any): boolean {
     return v !== undefined && v !== null && v !== "" && v !== "any";
   }
@@ -133,7 +132,12 @@
     }
 
     if (!isComboboxOpen) {
-      if (e.key === "Enter") {
+      if (e.key === "Enter" && alwaysSelect) {
+        isComboboxOpen = true;
+        highlightedIndex = 0;
+        e.preventDefault();
+        e.stopPropagation();
+      } else if (e.key === "Enter") {
         e.preventDefault();
         e.stopPropagation();
       }
@@ -195,30 +199,44 @@
   </div>
 
   <div class="filter-controls">
-    <!-- Option Dropdown / Combobox -->
+    <!-- Custom Option Dropdown / Searchable Combobox -->
     {#if filter.option}
-      {#if alwaysSelect}
-        <select
-          id={`filter-${filter.id}-opt`}
-          name={`filter_${filter.id}_opt`}
-          class:is-modified={optionModified}
-          value={value?.option ?? ""}
-          on:change={(e) =>
-            updateField("option", e.currentTarget.value || null)}
-        >
-          {#each allOptions as opt}
-            <option value={opt.id ?? ""}>{opt.text}</option>
-          {/each}
-        </select>
-      {:else}
-        <div class={`combobox-wrapper combobox-${filter.id}`}>
+      <div class={`combobox-wrapper combobox-${filter.id} top-custom-dropdown`}>
+        {#if alwaysSelect}
+          <!-- Non-searchable custom dropdown trigger (replaces native <select>) -->
+          <button
+            type="button"
+            id={`filter-${filter.id}-opt`}
+            class="custom-dropdown-trigger"
+            class:is-modified={optionModified}
+            aria-label={filter.text || filter.id}
+            aria-expanded={isComboboxOpen}
+            on:click={() => {
+              isComboboxOpen = !isComboboxOpen;
+              if (isComboboxOpen) {
+                highlightedIndex = 0;
+              }
+            }}
+            on:keydown={handleComboboxKeyDown}
+          >
+            <span class="trigger-label">
+              {selectedOpt?.id !== null
+                ? (selectedOpt?.text ?? "Any")
+                : nullOpt?.text || "Any"}
+            </span>
+          </button>
+        {:else}
+          <!-- Searchable box where typing happens directly inside the box -->
           <input
             id={`filter-${filter.id}-opt-search`}
             name={`filter_${filter.id}_opt_search`}
             type="text"
             autocomplete="off"
+            class="custom-combobox-input"
             class:is-modified={optionModified}
-            placeholder={nullOpt?.text || "Any"}
+            placeholder={selectedOpt?.id !== null
+              ? (selectedOpt?.text ?? "")
+              : nullOpt?.text || "Any"}
             value={isComboboxOpen
               ? comboboxQuery
               : selectedOpt?.id !== null
@@ -236,35 +254,38 @@
             }}
             on:keydown={handleComboboxKeyDown}
           />
+        {/if}
 
-          {#if value?.option !== undefined && value?.option !== null && value?.option !== ""}
-            <button
-              type="button"
-              class="clear-opt-btn"
-              on:click={() =>
-                selectOption(nullOpt || { id: null, text: "Any" })}
-              title="Clear"
-            >
-              ✕
-            </button>
-          {/if}
+        <!-- Right indicator: White '✕' when a value is set, otherwise '▾' -->
+        {#if optionModified}
+          <button
+            type="button"
+            class="clear-opt-btn"
+            on:click|stopPropagation={() =>
+              selectOption(nullOpt || { id: null, text: "Any" })}
+            title="Clear"
+          >
+            ✕
+          </button>
+        {:else}
+          <span class="trigger-arrow">▾</span>
+        {/if}
 
-          {#if isComboboxOpen && filteredOptions.length > 0}
-            <ul class="dropdown" on:wheel|stopPropagation>
-              {#each filteredOptions as opt, idx}
-                <li
-                  class:highlighted={highlightedIndex === idx}
-                  class:selected={opt.id === value?.option ||
-                    (opt.id === null && !value?.option)}
-                  on:mousedown|preventDefault={() => selectOption(opt)}
-                >
-                  {opt.text}
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </div>
-      {/if}
+        {#if isComboboxOpen && filteredOptions.length > 0}
+          <ul class="dropdown" on:wheel|stopPropagation>
+            {#each filteredOptions as opt, idx}
+              <li
+                class:highlighted={highlightedIndex === idx}
+                class:selected={opt.id === value?.option ||
+                  (opt.id === null && !value?.option)}
+                on:mousedown|preventDefault={() => selectOption(opt)}
+              >
+                <StatColorText text={opt.text} />
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
     {/if}
 
     <!-- Text Input -->
@@ -395,7 +416,6 @@
     white-space: nowrap;
   }
 
-  /* Non-default: name text white */
   .filter-label.is-modified {
     color: #ffffff;
   }
@@ -409,7 +429,6 @@
     gap: 0.25rem;
   }
 
-  .filter-controls > select,
   .filter-controls > input,
   .filter-controls > .combobox-wrapper,
   .filter-controls > .min-max-controls {
@@ -453,9 +472,8 @@
     min-width: 0;
   }
 
-  /* Retro Controls Input & Select Styling (default = grey) */
   input,
-  select {
+  .custom-dropdown-trigger {
     font-family: "Fontin", monospace, sans-serif;
     font-size: 11px;
     line-height: 1.15;
@@ -472,23 +490,20 @@
 
   input:hover,
   input:focus,
-  select:hover,
-  select:focus {
+  .custom-dropdown-trigger:hover,
+  .custom-dropdown-trigger:focus {
     border-color: #ffffff;
   }
 
-  /* Non-default value: white text + white border on that control only */
   input.is-modified,
-  select.is-modified {
+  .custom-dropdown-trigger.is-modified {
     color: #ffffff;
     border-color: #ffffff;
   }
 
-  select option {
-    background-color: #000000;
+  .custom-combobox-input.is-modified::placeholder {
     color: #ffffff;
-    font-family: "Fontin", monospace, sans-serif;
-    font-size: 11px;
+    opacity: 1;
   }
 
   input[type="number"]::-webkit-outer-spin-button,
@@ -512,30 +527,60 @@
     z-index: 50;
   }
 
-  .combobox-wrapper input {
+  .combobox-wrapper input,
+  .combobox-wrapper .custom-dropdown-trigger {
     width: 100%;
     padding-right: 1.25rem;
     min-width: 0;
   }
 
+  .custom-dropdown-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .trigger-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    width: 100%;
+  }
+
+  /* Shared position for both the triangle arrow and the white X button */
+  .trigger-arrow,
   .clear-opt-btn {
     position: absolute;
     right: 2px;
     top: 50%;
     transform: translateY(-50%);
-    background: transparent;
-    border: none;
-    color: #777777;
-    cursor: pointer;
     font-size: 10px;
     padding: 1px 3px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .trigger-arrow {
+    color: #777777;
+    pointer-events: none;
+  }
+
+  .clear-opt-btn {
+    background: transparent;
+    border: none;
+    color: #ffffff;
+    cursor: pointer;
   }
 
   .clear-opt-btn:hover {
     color: #ffffff;
+    opacity: 0.85;
   }
 
-  /* Dropdown Popover Container with 3px White Border & Compact Items */
   .dropdown {
     position: absolute;
     top: 100%;
@@ -544,14 +589,15 @@
     max-height: 240px;
     overflow-y: auto;
     overscroll-behavior: contain;
-    background: #000000;
-    border: 1px solid #ffffff;
-    border-radius: 0px;
+    background: #000000 !important;
+    border: 1px solid #ffffff !important;
+    border-radius: 0px !important;
     list-style: none;
-    padding: 2px 0;
-    margin: 2px 0 0 0;
-    z-index: 1000;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
+    padding: 1px 0 !important;
+    margin: 2px 0 0 0 !important;
+    z-index: 1000 !important;
+    box-sizing: border-box !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85) !important;
     scrollbar-width: thin;
     scrollbar-color: #555555 #000000;
   }
@@ -569,27 +615,28 @@
   }
 
   .dropdown li {
-    font-family: "Fontin", monospace, sans-serif;
-    font-size: 11px;
-    line-height: 1.15;
-    padding: 1px 4px;
-    cursor: pointer;
-    color: #9a9a9a;
-    background: #000000;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-family: "Fontin", monospace, sans-serif !important;
+    font-size: 12px !important;
+    line-height: 1.15 !important;
+    padding: 1px 3px !important;
+    cursor: pointer !important;
+    color: #9a9a9a !important;
+    background: #000000 !important;
+    border-radius: 0px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
   }
 
   .dropdown li:hover,
   .dropdown li.highlighted {
-    background: #545454;
-    color: #ffffff;
+    background: #545454 !important;
+    color: #ffffff !important;
   }
 
   .dropdown li.selected {
-    color: #ffffff;
-    background: #000000;
+    color: #ffffff !important;
+    background: #000000 !important;
   }
 
   .tooltip-icon {
@@ -607,7 +654,6 @@
     flex-shrink: 0;
   }
 
-  /* Sockets Control Panel */
   .sockets-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -661,7 +707,6 @@
     border-radius: 0px;
   }
 
-  /* Non-default socket: whole socket frame + its value go white */
   .socket-input.is-modified {
     border-color: #ffffff;
   }
@@ -671,7 +716,6 @@
     border-left-color: #ffffff;
   }
 
-  /* inner socket input has no own frame, so keep it from drawing one on hover */
   .socket-input input:hover,
   .socket-input input:focus {
     border-color: inherit;

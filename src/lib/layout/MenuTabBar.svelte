@@ -17,6 +17,7 @@
     encodeSharePayloadToCode,
     updateActiveProjectDefaults,
     showToast,
+    openExternalUrl,
   } from "$lib/project/projects.svelte";
   import { leaguesPoe, leaguesPoe2 } from "$lib/trade/tradeStore";
 
@@ -29,6 +30,7 @@
   let accountContainerEl: HTMLDivElement | null = null;
   let isLoggedIn = $state(false);
   let accountName = $state<string | null>(null);
+  let loginModalOpen = $state(false);
 
   const currentPathname = $derived($page.url.pathname);
   const isInsideProject = $derived(
@@ -127,10 +129,16 @@
     if (e.key === "Escape") {
       if (fileMenuOpen) closeFileMenu();
       if (accountMenuOpen) closeAccountMenu();
+      if (loginModalOpen) loginModalOpen = false;
     }
   }
 
-  async function handleLoginClick() {
+  function handleLoginClick() {
+    loginModalOpen = true;
+  }
+
+  async function confirmLogin() {
+    loginModalOpen = false;
     try {
       await invoke("open_poe_login");
     } catch (err) {
@@ -479,9 +487,86 @@
   </div>
 </div>
 
+<!-- Notice Modal for Login -->
+{#if loginModalOpen}
+  <div
+    class="modal-backdrop"
+    role="presentation"
+    onclick={() => (loginModalOpen = false)}
+  >
+    <div
+      class="modal-card"
+      role="dialog"
+      aria-label="Login Notice"
+      onclick={(e) => e.stopPropagation()}
+    >
+      <div class="modal-header">
+        <h3 class="modal-title">Notice</h3>
+        <button
+          type="button"
+          class="modal-close-btn"
+          onclick={() => (loginModalOpen = false)}
+          title="Close"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div class="modal-content">
+        <h4>TOU-unsafety</h4>
+        <p>
+          Login works by allowing you to login in webview and then pulling
+          authentication from it. This break <a
+            href="https://www.pathofexile.com/legal/terms-of-use-and-privacy-policy"
+            target="_blank"
+            rel="noreferrer"
+            onclick={(e) => {
+              e.preventDefault();
+              openExternalUrl(
+                "https://www.pathofexile.com/legal/terms-of-use-and-privacy-policy",
+              );
+            }}>GGG ToU</a
+          > section 7i.
+        </p>
+        <p class="small-text">You use the app at your own risk.</p>
+        <p class="small-text">
+          Login is only required to use "Live Search" and "Teleport to hideout".
+        </p>
+
+        <h4>Data Safety</h4>
+        <p>
+          All you data is kept locally. You can verify truthfulness of this
+          claim by checking <a
+            href="https://github.com/Aurecueil/PathOfTrading"
+            target="_blank"
+            rel="noreferrer"
+            onclick={(e) => {
+              e.preventDefault();
+              openExternalUrl("https://github.com/Aurecueil/PathOfTrading");
+            }}>source code.</a
+          >
+        </p>
+      </div>
+
+      <div class="modal-actions">
+        <button
+          type="button"
+          class="btn-secondary"
+          onclick={() => (loginModalOpen = false)}
+        >
+          Cancel
+        </button>
+        <button type="button" class="btn-primary" onclick={confirmLogin}>
+          Proceed & Login
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   :global(*) {
-    font-family: "Fontin", sans-serif !important;
+    font-family: "Fontin", monospace, sans-serif !important;
     box-sizing: border-box;
   }
 
@@ -494,7 +579,7 @@
     background: #040608;
     border-bottom: 1px solid #777777;
     box-sizing: border-box;
-    font-family: "Fontin", sans-serif;
+    font-family: "Fontin", monospace, sans-serif;
     font-size: 12px;
   }
 
@@ -510,7 +595,7 @@
   /* Base Trigger Buttons & Tabs */
   .menu-btn,
   .tab {
-    font-family: "Fontin", sans-serif !important;
+    font-family: "Fontin", monospace, sans-serif !important;
     display: inline-flex;
     align-items: center;
     gap: 5px;
@@ -532,14 +617,14 @@
   .menu-btn:hover,
   .tab:hover {
     background-color: #111111;
-    border-color: #aaaaaa;
+    border-color: #ffffff;
     color: #ffffff;
   }
 
   .menu-btn.active,
   .tab.active-tab {
     background-color: #2a2a2a;
-    border-color: #aaaaaa;
+    border-color: #ffffff;
     color: #ffffff;
     font-weight: normal;
   }
@@ -616,8 +701,8 @@
     background: #000000 !important;
     border: 1px solid #ffffff !important;
     border-radius: 0px !important;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.95);
-    padding: 2px 0 !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
+    padding: 1px 0 !important;
     display: flex;
     flex-direction: column;
     z-index: 1100;
@@ -631,7 +716,7 @@
 
   /* Child Option Items */
   .dropdown-item {
-    font-family: monospace, "Fontin", sans-serif !important;
+    font-family: "Fontin", monospace, sans-serif !important;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -658,7 +743,7 @@
   }
 
   .dropdown-item kbd {
-    font-family: monospace, sans-serif !important;
+    font-family: "Fontin", monospace, sans-serif !important;
     font-size: 11px;
     color: #888888;
   }
@@ -696,7 +781,7 @@
   }
 
   .realm-opt {
-    font-family: "Fontin", sans-serif;
+    font-family: "Fontin", monospace, sans-serif;
     background: #000000;
     border: 1px solid #777777;
     border-radius: 0px;
@@ -708,13 +793,13 @@
 
   .realm-opt.selected {
     background: #2a2a2a;
-    border-color: #aaaaaa;
+    border-color: #ffffff;
     color: #ffffff;
     font-weight: bold;
   }
 
   .submenu-select {
-    font-family: monospace, sans-serif !important;
+    font-family: "Fontin", monospace, sans-serif !important;
     background: #000000 !important;
     border: 1px solid #777777 !important;
     border-radius: 0px !important;
@@ -744,5 +829,150 @@
   .logout-item:hover:not(:disabled) {
     background: #545454 !important;
     color: #ff6666 !important;
+  }
+
+  /* Notice Modal Styles matching WorkspaceModals */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+  }
+
+  .modal-card {
+    width: 440px;
+    max-width: 92vw;
+    background: #050505;
+    border: 1px solid #777777;
+    border-radius: 0px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.9);
+    color: #d3d3d3;
+    box-sizing: border-box;
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border-bottom: 1px solid #333333;
+    padding-bottom: 4px;
+  }
+
+  .modal-title {
+    margin: 0;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 14px;
+    font-weight: bold;
+    color: #e0e0e0;
+    line-height: 1.2;
+  }
+
+  .modal-close-btn {
+    font-family: "Fontin", monospace, sans-serif;
+    background: transparent;
+    border: none;
+    border-radius: 0px;
+    color: #888888;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0 4px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .modal-close-btn:hover {
+    color: #ff5555;
+    background: transparent;
+  }
+
+  .modal-content {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    color: #d3d3d3;
+    line-height: 1.4;
+  }
+
+  .modal-content h4 {
+    margin: 4px 0 0 0;
+    font-size: 13px;
+    color: #ffffff;
+    font-weight: bold;
+  }
+
+  .modal-content p {
+    margin: 0;
+  }
+
+  .modal-content a {
+    color: #66b2ff;
+    text-decoration: underline;
+  }
+
+  .modal-content a:hover {
+    color: #99ccff;
+  }
+
+  .modal-content .small-text {
+    font-size: 11px;
+    color: #9a9a9a;
+  }
+
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 4px;
+  }
+
+  .btn-primary,
+  .btn-secondary {
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 12px;
+    height: 26px;
+    line-height: 1;
+    padding: 0 10px;
+    border-radius: 0px;
+    font-weight: normal;
+    cursor: pointer;
+    background: #000000;
+    border: 1px solid #7f7f7f;
+    color: #ffffff;
+    white-space: nowrap;
+    transition:
+      background 0.1s ease,
+      border-color 0.1s ease,
+      color 0.1s ease;
+  }
+
+  .btn-primary {
+    border-color: #ffffff;
+  }
+
+  .btn-primary:hover,
+  .btn-primary:focus {
+    background: #111111;
+    border-color: #ffffff;
+    color: #ffffff;
+    outline: none;
+  }
+
+  .btn-secondary:hover,
+  .btn-secondary:focus {
+    background: #111111;
+    border-color: #ffffff;
+    color: #ffffff;
+    outline: none;
   }
 </style>
