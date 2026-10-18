@@ -87,7 +87,7 @@
     ];
   });
 
-  const TIP_W = 360;
+  const TIP_W = 450;
   let hovered: { item: Item; left: number; top: number } | null = null;
 
   function showTip(e: Event, item: Item | null) {

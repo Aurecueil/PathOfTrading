@@ -5,6 +5,7 @@
     ItemModInfo,
     ItemModFlags,
   } from "$lib/types/tradeItem";
+  import { displayTiers } from "$lib/trade/tradeStore";
 
   export let mod: string | ItemMod;
   export let category:
@@ -29,6 +30,16 @@
       const parts = inner.split("|");
       return parts[parts.length - 1];
     });
+  }
+
+  /**
+   * Rune mods that are shown inline although bonded ("Bonded: +5% ...") keep
+   * a gray "Bonded:" prefix; the rest of the text uses the normal rune colour.
+   */
+  function splitBondedPrefix(text: string): { prefix: string; rest: string } {
+    if (category !== "rune") return { prefix: "", rest: text };
+    const m = text.match(/^\s*(Bonded:)\s*([\s\S]*)$/i);
+    return m ? { prefix: m[1], rest: m[2] } : { prefix: "", rest: text };
   }
 
   function buildHoveredDescription(
@@ -96,10 +107,11 @@
 
   $: parsed = (() => {
     if (typeof mod === "string") {
-      const clean = cleanBracketText(mod);
+      const { prefix, rest } = splitBondedPrefix(cleanBracketText(mod));
       return {
-        description: clean,
-        hoveredDescription: clean,
+        prefix,
+        description: rest,
+        hoveredDescription: rest,
         tierParts: [] as TierPart[],
         tierTitle: "",
         level: null as number | null,
@@ -133,11 +145,13 @@
       .filter((l): l is number => typeof l === "number" && l > 0);
     const level = levels.length > 0 ? Math.max(...levels) : null;
     const clean = cleanBracketText(mod.description);
-    const hoveredDescription = buildHoveredDescription(clean, subMods);
+    const split = splitBondedPrefix(clean);
+    const hovered = splitBondedPrefix(buildHoveredDescription(clean, subMods));
 
     return {
-      description: clean,
-      hoveredDescription,
+      prefix: split.prefix,
+      description: split.rest,
+      hoveredDescription: hovered.rest,
       tierParts,
       tierTitle: tierParts.map((p) => p.text).join("+"),
       level,
@@ -171,37 +185,39 @@
   class:is-mutated={parsed.flags.mutated}
   class:is-fractured={parsed.flags.fractured}
   class:poe2={isPoe2}
+  style:--badge-count={parsed.tierParts.length > 0
+    ? parsed.tierParts.length - 1
+    : fallbackBadge
+      ? 1
+      : 0}
   on:mouseenter={() => (isHovered = true)}
   on:mouseleave={() => (isHovered = false)}
 >
-  {#if parsed.tierParts.length > 0 || fallbackBadge}
+  {#if (parsed.tierParts.length > 0 || fallbackBadge) && ($displayTiers || isHovered)}
     <div class="side-anchor left">
       {#if parsed.tierParts.length > 0}
-        <span class="side-badge" title={parsed.tierTitle}
+        <span class="side-badge"
           >{#each parsed.tierParts as part, pi}{#if pi > 0}<span
                 class="tier-plus">+</span
               >{/if}<span style="color:{part.color}">{part.text}</span
             >{/each}</span
         >
       {:else if fallbackBadge}
-        <span
-          class="side-badge"
-          style="color:{fallbackBadge.color}"
-          title={fallbackBadge.title}>{fallbackBadge.letter}</span
+        <span class="side-badge" style="color:{fallbackBadge.color}"
+          >{fallbackBadge.letter}</span
         >
       {/if}
     </div>
   {/if}
 
   <div class="mod-text-center" class:has-badge={hasBadge}>
-    {isHovered ? parsed.hoveredDescription : parsed.description}
+    {#if parsed.prefix}<span class="bonded-prefix">{parsed.prefix}</span
+      >&nbsp;{/if}{isHovered ? parsed.hoveredDescription : parsed.description}
   </div>
 
-  {#if parsed.level !== null}
+  {#if parsed.level !== null && ($displayTiers || isHovered)}
     <div class="side-anchor right">
-      <span class="side-badge" title="Required Level ≥{parsed.level}"
-        >≥{parsed.level}</span
-      >
+      <span class="side-badge">{parsed.level}</span>
     </div>
   {/if}
 </div>
@@ -215,12 +231,11 @@
     display: flex;
     align-items: center;
     width: 100%;
-    /* --mod-h is provided by ItemStats so veiled graphics match exactly */
-    min-height: var(--mod-h, 1.7rem);
+    min-height: var(--mod-h, 26px);
     font-family: "FontinRegular", "Fontin", "Palatino Linotype", Georgia, serif;
-    font-size: 1.24rem;
-    line-height: 1.22;
-    padding: 0;
+    font-size: 22px;
+    line-height: 24px;
+    padding: 1px 0;
     border-left: 2px solid transparent;
     border-right: 2px solid transparent;
     box-sizing: border-box;
@@ -230,9 +245,9 @@
   }
 
   .mod-row.compact {
-    min-height: var(--mod-h, 1.5rem);
-    font-size: 1.14rem;
-    line-height: 1.18;
+    min-height: var(--mod-h, 23px);
+    font-size: 20px;
+    line-height: 22px;
   }
 
   .mod-row:hover {
@@ -267,27 +282,63 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Tighter side clearance so modifier text has more horizontal room */
-  .mod-text-center.has-badge {
-    padding: 0 calc(var(--edge) + 2.6rem);
+  /* Gray "Bonded:" prefix on inline (non-collapsed) bonded rune mods */
+  .bonded-prefix {
+    color: #94a3b8;
   }
 
-  /* ---- Category colours ---- */
-  .rune,
-  .enchant {
+  /* Side clearance scaled to 22px badges so text never overlaps tier/level */
+  /* Base padding for single badges/fallback, scaling up by ~14px per additional tier part */
+  .mod-text-center.has-badge {
+    padding: 0 calc(var(--edge) + 8px + (var(--badge-count, 0) * 32px));
+  }
+
+  /* ---- Category colours & box sizes ---- */
+  .mod-row.rune {
     --mod: #ffffff;
     --mod-rgb: 255, 255, 255;
+    min-height: 22px;
+    font-size: 18px;
+    line-height: 20px;
   }
+  .mod-row.rune.compact {
+    min-height: 20px;
+    font-size: 16px;
+    line-height: 18px;
+  }
+
+  .mod-row.enchant {
+    --mod: #ffffff;
+    --mod-rgb: 255, 255, 255;
+    min-height: 24px;
+    font-size: 20px;
+    line-height: 22px;
+  }
+  .mod-row.enchant.compact {
+    min-height: 22px;
+    font-size: 18px;
+    line-height: 20px;
+  }
+
+  .mod-row.bonded {
+    --mod: #94a3b8;
+    --mod-rgb: 148, 163, 184;
+    min-height: 22px;
+    font-size: 18px;
+    line-height: 20px;
+  }
+  .mod-row.bonded.compact {
+    min-height: 20px;
+    font-size: 16px;
+    line-height: 18px;
+  }
+
   .implicit,
   .prefix,
   .suffix,
   .generic {
     --mod: #6588ff;
     --mod-rgb: 101, 136, 255;
-  }
-  .bonded {
-    --mod: #94a3b8;
-    --mod-rgb: 148, 163, 184;
   }
   .crucible {
     --mod: #ff7339;

@@ -96,95 +96,175 @@ export async function initItemData(): Promise<void> {
   }
 }
 
-// Global toggle for stat color coding (true = enabled, false = disabled)
 export const statColorCodingEnabled = writable<boolean>(true);
+
 export interface StatColorRule {
-  partial?: string[];
-  literal?: string[];
+  keywords: string[];
   color: string;
 }
 
 export const STAT_KEYWORD_COLORS: StatColorRule[] = [
-  // Multi-word phrases first so they match before single words
+  // defences
+  { keywords: ["energy shield", "es"], color: "#7EEBEB" },
+  { keywords: ["evasion", "evasion rating", "ev"], color: "#30EB6E" },
+  { keywords: ["armour", "ar"], color: "#e75e3f" },
   {
-    partial: ["increased energy shield", "to energy shield"],
-    literal: ["energy shield", "es"],
-    color: "#7EEBEB",
+    keywords: ["attack damage", "attacks", "attack modifiers", "attack"],
+    color: "#DA814D",
   },
   {
-    partial: ["increased evasion rating", "to evasion rating"],
-    literal: ["evasion rating", "ev"],
-    color: "#30EB6E",
+    keywords: [
+      "global defences",
+      "base defence percentile",
+      "defences modifiers",
+      "defence modifiers",
+      "defences",
+    ],
+    color: "#A88F67",
   },
+
+  //elements
   {
-    partial: ["increased armour", "to armour"],
-    literal: ["armour", "ar"],
-    color: "#e75e3f",
-  },
-  {
-    partial: [
+    keywords: [
       "fire resistance",
       "fire damage",
+      "fire spell skills",
+      "fire skills",
       "fire gems",
-      "level of all fire",
+      "fire modifiers",
+      "extra fire",
+      "fire",
     ],
-    literal: [],
     color: "#AB6921",
   },
   {
-    partial: [
+    keywords: [
       "cold resistance",
       "cold damage",
+      "cold spell skills",
+      "cold skills",
       "cold gems",
-      "level of all cold",
+      "cold modifiers",
+      "extra cold",
+      "cold",
     ],
-    literal: [],
     color: "#3B65A5",
   },
   {
-    partial: [
+    keywords: [
       "lightning resistance",
       "lightning damage",
+      "lightning spell skills",
+      "lightning skills",
       "lightning gems",
-      "level of all lightning",
+      "lightning modifiers",
+      "extra lightning",
+      "lightning",
     ],
-    literal: [],
     color: "#A09D42",
   },
   {
-    partial: [
+    keywords: [
       "chaos resistance",
       "chaos damage",
+      "chaos spell skills",
+      "chaos skills",
       "chaos gems",
-      "level of all chaos",
+      "chaos modifiers",
+      "extra chaos",
+      "chaos",
     ],
-    literal: [],
     color: "#C01E85",
   },
   {
-    partial: [
+    keywords: [
       "physical resistance",
       "physical damage",
+      "physical spell skills",
+      "physical skills",
       "physical gems",
-      "level of all physical",
+      "physical modifiers",
+      "extra physical",
+      "physical",
+      "pdps",
     ],
-    literal: [],
-    color: "#B9B9B9",
+    color: "#C79D93",
   },
-  { partial: ["strength"], literal: [], color: "#CF4A2D" },
-  { partial: ["dexterity"], literal: [], color: "#65E465" },
-  { partial: ["intelligence", "inteligence"], literal: [], color: "#6868EB" },
+
+  //atributes
+  { keywords: ["strength", "str"], color: "#CF4A2D" },
+  { keywords: ["dexterity", "dex"], color: "#65E465" },
+  { keywords: ["intelligence", "int"], color: "#6868EB" },
+
+  //basic
+  { keywords: ["life"], color: "#CF4A2D" },
+  { keywords: ["mana"], color: "#6868EB" },
+  { keywords: ["spirit"], color: "#EBEB6E" },
+  { keywords: ["dps"], color: "#E22626" },
   {
-    partial: ["to life", "increased life", "maximum life"],
-    literal: [],
-    color: "#CF4A2D",
+    keywords: [
+      "global critical strike change",
+      "critical strike change",
+      "global critical strike multiplier",
+      "critical strike multiplier",
+      "critical hit chance",
+      "critical spell damage bonus",
+      "critical damage bonus",
+      "critical hits",
+      "critical hit",
+      "critical modifiers",
+      "critical",
+    ],
+    color: "#B2A7D6",
   },
   {
-    partial: ["to mana", "increased mana", "maximum mana"],
-    literal: [],
-    color: "#6868EB",
+    keywords: [
+      "cast speed",
+      "action speed",
+      "attack speed",
+      "speed modifiers",
+      "movement speed",
+      "attacks per second",
+    ],
+    color: "#CFEEA5",
   },
-  { partial: ["to spirit", "increased spirit"], literal: [], color: "#EBEB6E" },
+
+  {
+    keywords: [
+      "crafted modifiers",
+      "crafted prefix modifiers",
+      "crafted suffix modifiers",
+    ],
+    color: "#FFFFFF",
+  },
+  //league
+  {
+    keywords: [
+      "kurgal",
+      "amanamu",
+      "ulaman",
+      "kulemak",
+      "tecrod",
+      "abyss",
+      "abysses",
+      "abyssal pits",
+      "abyssal depths",
+      "abyssal",
+      "unrevealed modifiers",
+      "unrevealed prefix modifiers",
+      "unrevealed suffix modifiers",
+      "unrevealed",
+      "desecrated modifiers",
+      "desecrated prefix modifiers",
+      "desecrated suffix modifiers",
+      "desecrated",
+    ],
+    color: "#72A90A",
+  },
+  {
+    keywords: ["ritual"],
+    color: "#810914",
+  },
 ];
 
 // In $lib/trade/tradeStore.ts
@@ -210,3 +290,6 @@ export async function initUserSettings(): Promise<void> {
     console.error("Failed to load user settings:", err);
   }
 }
+
+export const displayTiers = writable<boolean>(false);
+export const displayRune = writable<boolean>(true);

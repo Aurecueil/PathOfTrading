@@ -3,11 +3,14 @@
   import { createEventDispatcher } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import type { ResolvedDisplayStyle } from "$lib/types/types";
-  import type { Item, ItemMod, TradeFetchResult } from "$lib/types/tradeItem";
+  import type { Item, TradeFetchResult } from "$lib/types/tradeItem";
   import ItemIcon from "$lib/trade/components/item/ItemIcon.svelte";
   import ItemStats from "$lib/trade/components/item/ItemStats.svelte";
   import ItemListing from "$lib/trade/components/item/ItemListing.svelte";
   import ItemJsonModal from "$lib/trade/components/item/ItemJsonModal.svelte";
+  import ItemTitleBar from "$lib/trade/components/item/ItemTitleBar.svelte";
+  import { getCategorySymbols } from "$lib/trade/components/item/categorySymbols";
+  import { extractSortValue } from "$lib/trade/components/item/sortValue";
 
   export let id: string;
   export let payload: any = null;
@@ -34,7 +37,7 @@
   let statsEl: HTMLDivElement | null = null;
   let titleInsetLeft = 10;
   let titleInsetRight = 10;
-  let lastDispatchedSortValue: any = undefined;
+  let lastDispatchedSortKey: string | null = null;
 
   /**
    * Pads the title bar so the title is centered on the stats column
@@ -74,187 +77,31 @@
     : "";
 
   /* ------------------------------------------------------------------ */
-  /* Sort Value Extraction from Payload & Item                          */
+  /* Sort value: the whole field the payload sorts by, passed to the parent */
   /* ------------------------------------------------------------------ */
-  function cleanBracketText(text: string): string {
-    if (!text) return "";
-    return text.replace(/\[([^\]]+)\]/g, (_, inner: string) => {
-      const parts = inner.split("|");
-      return parts[parts.length - 1];
-    });
-  }
-
-  function normalizeModHash(hash?: string): string {
-    if (!hash) return "";
-    return hash.startsWith("stat.") ? hash.slice(5) : hash;
-  }
-
-  function extractModNumericValue(mod: string | ItemMod): number {
-    const desc = cleanBracketText(
-      typeof mod === "string" ? mod : mod.description || "",
-    );
-    const matches = desc.match(/[+-]?\d+(?:\.\d+)?/g);
-    if (!matches || matches.length === 0) return 0;
-    const nums = matches.map(Number).filter((n) => !Number.isNaN(n));
-    if (nums.length === 0) return 0;
-    return nums.reduce((acc, n) => acc + n, 0) / nums.length;
-  }
-
-  function buildItemModHashValues(it?: Item): Map<string, number> {
-    const map = new Map<string, number>();
-    if (!it) return map;
-
-    const lists: Array<Array<string | ItemMod> | undefined> = [
-      it.implicitMods,
-      it.explicitMods,
-      it.enchantMods,
-      it.runeMods,
-      it.scourgeMods,
-      it.bondedMods,
-      it.crucibleMods,
-      it.veiledMods,
-      it.pseudoMods,
-    ];
-
-    for (const list of lists) {
-      if (!list) continue;
-      for (const mod of list) {
-        if (typeof mod === "string" || !mod.hash) continue;
-        const normHash = normalizeModHash(mod.hash);
-        if (!normHash) continue;
-        const val = extractModNumericValue(mod);
-        map.set(normHash, (map.get(normHash) ?? 0) + val);
-      }
-    }
-
-    return map;
-  }
-
-  function computeStatGroupValue(
-    groupType: "count" | "weight" | "weight2",
-    modHashValues: Map<string, number>,
-    pl: any,
-  ): number | null {
-    const rawStats = pl?.query?.stats ?? pl?.stats;
-    if (!Array.isArray(rawStats)) return null;
-
-    const matchingGroup = rawStats.find(
-      (g: any) =>
-        g &&
-        !g.disabled &&
-        String(g.type || "").toLowerCase() === groupType &&
-        Array.isArray(g.filters) &&
-        g.filters.length > 0,
-    );
-
-    if (!matchingGroup) return null;
-
-    if (groupType === "count") {
-      let count = 0;
-      for (const f of matchingGroup.filters) {
-        if (!f || f.disabled) continue;
-        const normId = normalizeModHash(f.id);
-        if (normId && modHashValues.has(normId)) {
-          count += 1;
-        }
-      }
-      return count;
-    }
-
-    let sum = 0;
-    for (const f of matchingGroup.filters) {
-      if (!f || f.disabled) continue;
-      const normId = normalizeModHash(f.id);
-      if (normId && modHashValues.has(normId)) {
-        const rawW = f.value?.weight;
-        const weight =
-          rawW !== undefined && rawW !== null && rawW !== "" ? Number(rawW) : 1;
-        sum +=
-          (modHashValues.get(normId) ?? 0) *
-          (Number.isNaN(weight) ? 1 : weight);
-      }
-    }
-    return sum;
-  }
-
-  function computeSortValueFromPayload(
-    entry: TradeFetchResult | null,
-    pl: any,
-  ): any {
-    if (!entry) return null;
-    const sortObj = pl?.sort;
-    const field =
-      sortObj && typeof sortObj === "object"
-        ? Object.keys(sortObj)[0] || "price"
-        : "price";
-
-    if (field === "price") {
-      return entry.listing?.price?.amount ?? null;
-    }
-
-    const it = entry.item;
-    const modHashValues = buildItemModHashValues(it);
-    const normField = normalizeModHash(field);
-    const lowerField = normField.toLowerCase();
-
-    if (
-      lowerField === "weight" ||
-      lowerField === "weight2" ||
-      lowerField === "count"
-    ) {
-      const groupVal = computeStatGroupValue(
-        lowerField as "count" | "weight" | "weight2",
-        modHashValues,
-        pl,
-      );
-      if (groupVal !== null) return groupVal;
-    }
-
-    if (modHashValues.has(normField)) {
-      return modHashValues.get(normField)!;
-    }
-
-    if (it?.extended && normField in it.extended) {
-      return (it.extended as any)[normField];
-    }
-    if (field in entry) return (entry as any)[field];
-    if (it && field in it) return (it as any)[field];
-    if (entry.listing && field in entry.listing) {
-      return (entry.listing as any)[field];
-    }
-
-    if (it?.properties) {
-      for (const p of it.properties) {
-        const pHash = normalizeModHash(p.hash);
-        const pName = cleanBracketText(p.name).trim().toLowerCase();
-        if ((pHash && pHash === normField) || pName === lowerField) {
-          const valStr = cleanBracketText(p.values?.[0]?.[0] || "");
-          const matches = valStr.match(/[+-]?\d+(?:\.\d+)?/g);
-          if (matches && matches.length > 0) {
-            const nums = matches.map(Number).filter((n) => !Number.isNaN(n));
-            if (nums.length > 0) {
-              return nums.reduce((a, b) => a + b, 0) / nums.length;
-            }
-          }
-        }
-      }
-    }
-
-    return null;
-  }
-
-  $: computedSortValue = data
-    ? computeSortValueFromPayload(data, payload)
-    : sortValue;
+  $: computedSortValue = data ? extractSortValue(data, payload) : null;
 
   $: effectiveSortValue =
     computedSortValue !== null && computedSortValue !== undefined
       ? computedSortValue
       : sortValue;
 
-  $: if (data && effectiveSortValue !== lastDispatchedSortValue) {
-    lastDispatchedSortValue = effectiveSortValue;
-    dispatch("sortvalue", { id, value: effectiveSortValue });
+  // Dispatch only when the VALUE really changed (compared by content, never
+  // by identity), so a parent echoing the value back can't cause a loop.
+  function sortKey(v: any): string {
+    try {
+      return JSON.stringify(v) ?? "undefined";
+    } catch {
+      return String(v);
+    }
+  }
+
+  $: if (data) {
+    const key = sortKey(effectiveSortValue);
+    if (key !== lastDispatchedSortKey) {
+      lastDispatchedSortKey = key;
+      dispatch("sortvalue", { id, value: effectiveSortValue });
+    }
   }
 
   /* ------------------------------------------------------------------ */
@@ -308,168 +155,10 @@
   $: rarityKey = getRarityKey(item);
 
   /* ------------------------------------------------------------------ */
-  /* Category symbols (shown on both sides of the title bar)            */
+  /* Category symbols (shown on both sides of the title)                */
   /* ------------------------------------------------------------------ */
-  const SYM = (file: string) =>
-    `https://web.poecdn.com/protected/image/item/${file}`;
-
-  type Sym = {
-    key: string;
-    label: string;
-    url: string;
-    test: (it: Item) => boolean;
-  };
-
-  const flag = (it: Item, k: string) =>
-    Boolean(it.influences?.[k]) ||
-    Boolean((it as unknown as Record<string, unknown>)[k]);
-
-  const POE1_SYMBOLS: Sym[] = [
-    {
-      key: "shaper",
-      label: "Shaper",
-      url: SYM(
-        "popup/shaper-symbol.png?v=1709582916256&key=PQH0ATL4n268OngTnsQ0MQ",
-      ),
-      test: (i) => flag(i, "shaper"),
-    },
-    {
-      key: "elder",
-      label: "Elder",
-      url: SYM(
-        "popup/elder-symbol.png?v=1709582916256&key=YS6Fsnxyuc8gpqfPz_mykw",
-      ),
-      test: (i) => flag(i, "elder"),
-    },
-    {
-      key: "crusader",
-      label: "Crusader",
-      url: SYM(
-        "popup/crusader-symbol.png?v=1709582916256&key=dcLGV7cDJf-dulB8P_Q-yQ",
-      ),
-      test: (i) => flag(i, "crusader"),
-    },
-    {
-      key: "redeemer",
-      label: "Redeemer",
-      url: SYM(
-        "popup/redeemer-symbol.png?v=1709582916256&key=nEc-TPctqwszY696cmlaZQ",
-      ),
-      test: (i) => flag(i, "redeemer"),
-    },
-    {
-      key: "hunter",
-      label: "Hunter",
-      url: SYM(
-        "popup/hunter-symbol.png?v=1709582916256&key=x7-F-t4jlxzMd1eJOUSafA",
-      ),
-      test: (i) => flag(i, "hunter"),
-    },
-    {
-      key: "warlord",
-      label: "Warlord",
-      url: SYM(
-        "popup/warlord-symbol.png?v=1709582916256&key=76scs3jk3FrVGOLHdM5AuA",
-      ),
-      test: (i) => flag(i, "warlord"),
-    },
-    {
-      key: "searing",
-      label: "Searing Exarch",
-      url: SYM(
-        "popup/searing-symbol.png?v=1709582916256&key=iiOWJvWHj8-0bH0e28X7Xw",
-      ),
-      test: (i) => flag(i, "searing"),
-    },
-    {
-      key: "tangled",
-      label: "Eater of Worlds",
-      url: SYM(
-        "popup/tangled-symbol.png?v=1709582916256&key=b-SVlhPy2jy-UJSTBaV2Cw",
-      ),
-      test: (i) => flag(i, "tangled"),
-    },
-    {
-      key: "veiled",
-      label: "Veiled",
-      url: SYM(
-        "popup/veiled-symbol.png?v=1709582916256&key=FQrrJgHpP4bo1Im-sOGTcA",
-      ),
-      test: (i) => Boolean(i.veiled),
-    },
-    {
-      key: "fractured",
-      label: "Fractured",
-      url: SYM(
-        "popup/fractured-symbol.png?v=1709582916256&key=fM_bl3SW2hozdEIw5vh4GA",
-      ),
-      test: (i) => Boolean(i.fractured),
-    },
-    {
-      key: "synthetic",
-      label: "Synthesised",
-      url: SYM(
-        "popup/synthetic-symbol.png?v=1709582916256&key=CUVu3Zqxrzd1CwWcIH-6xg",
-      ),
-      test: (i) => Boolean(i.synthesised),
-    },
-    {
-      key: "replica",
-      label: "Replica",
-      url: SYM(
-        "popup/experimented-symbol.png?v=1709582916256&key=dWh87tRCnnyVEMYjjf6RbQ",
-      ),
-      test: (i) => Boolean(i.replica),
-    },
-    {
-      key: "memory",
-      label: "Memory",
-      url: SYM(
-        "popup/memory-symbol.png?v=1747803259967&key=4CDrYIxVWDUKPLGXGOhO3g",
-      ),
-      test: (i) => Boolean(i.memoryItem),
-    },
-    {
-      key: "breach",
-      label: "Mutated",
-      url: SYM(
-        "popup/breach-symbol.png?v=1759709093664&key=R8ypjmI1TuM6RE_WWWHxiw",
-      ),
-      test: (i) => Boolean(i.mutated),
-    },
-    {
-      key: "vestigial",
-      label: "Vestigial",
-      url: SYM(
-        "popup/vestigial-symbol.png?v=1783395650713&key=-YB_ZzmxB0qautKiuSQ1CQ",
-      ),
-      test: (i) => Boolean(i.vestigial),
-    },
-  ];
-
-  const POE2_SYMBOLS: Sym[] = [
-    {
-      key: "desecrated",
-      label: "Desecrated",
-      url: SYM(
-        "popup2/desecrated-symbol.png?v=1754628199421&key=hgK5C6v-SqzlKR0q0MrYDg",
-      ),
-      test: (i) => Boolean(i.desecrated),
-    },
-    {
-      key: "vaal",
-      label: "Mutated",
-      url: SYM(
-        "popup2/vaal-symbol.png?v=1764542264625&key=6qnhCPxsLIuTvtF8K_8R8A",
-      ),
-      test: (i) => Boolean(i.mutated),
-    },
-  ];
-
   $: isPoe2 = (item?.realm || realm || "").toLowerCase() === "poe2";
-  $: symbols = item
-    ? (isPoe2 ? POE2_SYMBOLS : POE1_SYMBOLS).filter((s) => s.test(item!))
-    : [];
+  $: symbols = item ? getCategorySymbols(item, isPoe2) : [];
 
   /* ------------------------------------------------------------------ */
   /* Travel / Whisper & Error Extraction                                */
@@ -536,7 +225,7 @@
     bind:clientWidth={rowWidth}
   >
     {#if resolvedStyle !== "minimal"}
-      <div class="row-title-bar skel-title-bar">
+      <div class="skel-title-bar">
         <div class="skel-line title"></div>
       </div>
     {/if}
@@ -570,54 +259,18 @@
     bind:clientWidth={rowWidth}
   >
     {#if resolvedStyle !== "minimal"}
-      <!-- Header: category symbols, name, base type (raw JSON button sits under it) -->
+      <!-- Header: category symbols + "name base type" (raw JSON button sits under it) -->
       <div class="title-wrap" bind:this={titleWrapEl}>
-        <div
-          class="row-title-bar"
-          style:padding-left="{titleInsetLeft}px"
-          style:padding-right="{titleInsetRight}px"
-        >
-          {#if symbols.length}
-            <span class="symbols left">
-              {#each symbols as s (s.key)}
-                <img
-                  class="symbol-img"
-                  src={s.url}
-                  alt={s.label}
-                  title={s.label}
-                  loading="lazy"
-                />
-              {/each}
-            </span>
-          {/if}
-
-          <div class="title-text" title={fullItemTitle}>
-            {#if item.name}
-              <span class="item-name">{item.name}</span>
-            {/if}
-            {#if item.typeLine || item.baseType}
-              <span class="item-type">{item.typeLine || item.baseType}</span>
-            {/if}
-          </div>
-
-          {#if symbols.length}
-            <span class="symbols right">
-              {#each symbols as s (s.key)}
-                <img
-                  class="symbol-img"
-                  src={s.url}
-                  alt={s.label}
-                  title={s.label}
-                  loading="lazy"
-                />
-              {/each}
-            </span>
-          {/if}
-        </div>
+        <ItemTitleBar
+          title={fullItemTitle}
+          {symbols}
+          insetLeft={titleInsetLeft}
+          insetRight={titleInsetRight}
+          {boxWidth}
+        />
         <button
           type="button"
           class="btn-top-json"
-          title="View full raw JSON received for this item"
           aria-label="View raw JSON"
           on:click|stopPropagation={() => (isJsonModalOpen = true)}
         >
@@ -642,7 +295,6 @@
     >
       <ItemStats
         {item}
-        {payload}
         {realm}
         styleMode={resolvedStyle}
         tileWidth={boxWidth}
@@ -777,77 +429,13 @@
   }
 
   /* ---------------------------------------------------------------- */
-  /* Title bar                                                        */
+  /* Title wrapper (the bar itself lives in ItemTitleBar)             */
   /* ---------------------------------------------------------------- */
   .title-wrap {
     grid-column: 1 / -1;
     position: relative;
     min-width: 0;
-  }
-  .row-title-bar {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-width: 0;
-    padding: 5px 10px;
-    background: linear-gradient(
-      90deg,
-      rgba(var(--rc-rgb), 0.24) 0%,
-      rgba(var(--rc-rgb), 0.07) 55%,
-      rgba(0, 0, 0, 0.55) 100%
-    );
-    border-bottom: 1px solid rgba(var(--rc-rgb), 0.38);
-    color: var(--rc);
-  }
-
-  .title-text {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    min-width: 0;
-    flex: 1;
-    justify-content: center;
-    overflow: hidden;
-    white-space: nowrap;
-    font-size: 22px;
-    line-height: 1.2;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
-  }
-
-  .item-name {
-    font-weight: 700;
-    letter-spacing: 0.01em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    flex-shrink: 1;
-    min-width: 0;
-  }
-
-  .item-type {
-    font-weight: 400;
-    opacity: 0.78;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    min-width: 0;
-  }
-  .item-name + .item-type {
-    flex-shrink: 2;
-  }
-
-  /* Category symbols (influence, fractured, veiled, ...) */
-  .symbols {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    align-self: center;
-    flex-shrink: 0;
-  }
-  .symbol-img {
-    height: 24px;
-    width: 24px;
-    object-fit: contain;
-    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+    contain: inline-size; /* long titles must not widen the tile */
   }
 
   /* ---------------------------------------------------------------- */
@@ -960,10 +548,12 @@
     justify-content: space-between;
   }
 
+  /* Minimal: no title bar / JSON button, so the travel button can sit
+     close to the right edge. */
   .item-row.mode-minimal {
     grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 0.55rem;
-    padding: 0.3rem 1.9rem 0.3rem 0.5rem;
+    padding: 0.3rem 0.35rem 0.3rem 0.5rem;
     align-items: center;
     min-height: 54px;
   }
@@ -975,7 +565,17 @@
     pointer-events: none;
   }
   .skel-title-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     padding: 8px 10px;
+    background: linear-gradient(
+      90deg,
+      rgba(var(--rc-rgb), 0.24) 0%,
+      rgba(var(--rc-rgb), 0.07) 55%,
+      rgba(0, 0, 0, 0.55) 100%
+    );
+    border-bottom: 1px solid rgba(var(--rc-rgb), 0.38);
   }
   .skel-icon,
   .skel-line {

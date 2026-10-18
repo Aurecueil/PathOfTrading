@@ -48,7 +48,6 @@
   class:is-unidentified={styleMode !== "minimal" && item.identified === false}
   style:width="{iconDimensions.w}px"
   style:height="{iconDimensions.h}px"
-  title={item.typeLine || item.name}
 >
   {#if item.icon}
     <CdnImage
