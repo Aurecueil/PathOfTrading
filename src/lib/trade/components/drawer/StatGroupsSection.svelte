@@ -1,6 +1,6 @@
 <!-- src/lib/trade/components/drawer/StatGroupsSection.svelte -->
 <script lang="ts">
-  import { createEventDispatcher, onMount } from "svelte";
+  import { createEventDispatcher, onMount, tick } from "svelte";
   import StatGroupUI from "$lib/trade/components/drawer/StatGroupUI.svelte";
   import type { StatGroup as StatGroupType, StatEntry } from "$lib/types/stats";
   import {
@@ -8,12 +8,15 @@
     ensureStatGroupPresets,
     type StatGroupPreset,
   } from "$lib/trade/statGroupPresets";
+  import { trimTrailingEmptyGroup } from "$lib/trade/utilis/tradePayload";
 
   export let statGroups: any[] = [];
   export let currentStatCatalog: StatGroupType[] = [];
   export let realm: "poe" | "poe2" = "poe";
   export let isAddGroupMenuOpen: boolean = false;
-  export let dropUp: boolean = true;
+  // "auto": prefer opening downwards, flip upwards if it would leave the window.
+  // true / false force the direction.
+  export let dropUp: boolean | "auto" = "auto";
   export let showPresets: boolean = true;
 
   const STAT_GROUP_OPTIONS = [
@@ -40,6 +43,90 @@
   $: visiblePresets = showPresets
     ? $statGroupPresetsStore.filter((p) => p.game === "any" || p.game === realm)
     : [];
+
+  // Menu layout: one column per 8 entries (rounded down, min 1).
+  // Official types fill column 1, custom (preset) entries follow under them
+  // and then continue into the next columns.
+  const ROWS_PER_COLUMN = 8;
+  const COLUMN_WIDTH_PX = 190;
+
+  type MenuColumn = {
+    official: { id: string; label: string }[];
+    presets: StatGroupPreset[];
+  };
+
+  $: totalMenuEntries =
+    availableStatGroupOptions.length + visiblePresets.length;
+  $: targetColumns = Math.max(
+    1,
+    Math.floor(totalMenuEntries / ROWS_PER_COLUMN),
+  );
+  $: menuColumnsData = buildMenuColumns(
+    availableStatGroupOptions,
+    visiblePresets,
+    targetColumns,
+  );
+
+  function buildMenuColumns(
+    official: { id: string; label: string }[],
+    presets: StatGroupPreset[],
+    cols: number,
+  ): MenuColumn[] {
+    const total = official.length + presets.length;
+    const rows = Math.max(Math.ceil(total / cols), official.length, 1);
+    const firstTake = Math.max(0, rows - official.length);
+    const result: MenuColumn[] = [
+      { official, presets: presets.slice(0, firstTake) },
+    ];
+    for (let i = firstTake; i < presets.length; i += rows) {
+      result.push({ official: [], presets: presets.slice(i, i + rows) });
+    }
+    return result;
+  }
+
+  // Direction handling (prefer down, flip up when it would not fit)
+  let wrapperEl: HTMLElement;
+  let menuEl: HTMLElement;
+  let placeUp = false;
+  let placed = false;
+  let menuMaxHeight = 280;
+
+  $: if (isAddGroupMenuOpen) {
+    void placeMenu();
+  } else {
+    placed = false;
+  }
+
+  async function placeMenu() {
+    placed = false;
+    await tick();
+    if (!wrapperEl || !menuEl) return;
+
+    if (dropUp !== "auto") {
+      placeUp = dropUp;
+      menuMaxHeight = 280;
+      placed = true;
+      return;
+    }
+
+    const btn = wrapperEl.getBoundingClientRect();
+    // Visible area = window, further clipped by the scrolling container (if any)
+    const scroller = wrapperEl.closest(".scroll-area");
+    const sr = scroller?.getBoundingClientRect();
+    const bottomEdge = Math.min(window.innerHeight, sr ? sr.bottom : Infinity);
+    const topEdge = Math.max(0, sr ? sr.top : 0);
+
+    const spaceBelow = bottomEdge - btn.bottom - 6;
+    const spaceAbove = btn.top - topEdge - 6;
+    const needed = Math.min(menuEl.scrollHeight + 4, 280);
+
+    placeUp = needed > spaceBelow && spaceAbove > spaceBelow;
+    menuMaxHeight = Math.max(
+      80,
+      Math.min(280, placeUp ? spaceAbove : spaceBelow),
+    );
+    placed = true;
+  }
 
   const dispatch = createEventDispatcher<{
     deleteGroup: string;
@@ -76,7 +163,9 @@
         }),
       }));
 
-    statGroups = [...statGroups, ...added];
+    if (added.length === 0) return;
+    // Drop an empty trailing group before appending the preset's groups
+    statGroups = [...trimTrailingEmptyGroup(statGroups), ...added];
   }
 
   function addStatToGroup(groupIndex: number, stat: StatEntry) {
@@ -164,7 +253,7 @@
   </div>
 
   <div class="add-group-row">
-    <div class="add-group-menu-wrapper">
+    <div class="add-group-menu-wrapper" bind:this={wrapperEl}>
       <button
         type="button"
         class="add-stat-group-btn"
@@ -173,38 +262,47 @@
         + Add Stat Group
       </button>
       {#if isAddGroupMenuOpen}
-        <ul
+        <div
+          bind:this={menuEl}
           class="dropdown add-group-dropdown"
-          class:drop-down={!dropUp}
+          class:drop-down={!placeUp}
+          class:placing={!placed}
+          style="--col-w: {COLUMN_WIDTH_PX}px; width: {menuColumnsData.length *
+            COLUMN_WIDTH_PX}px; max-height: {menuMaxHeight}px;"
           on:wheel|stopPropagation
         >
-          {#each availableStatGroupOptions as opt}
-            <li
-              on:click={() => {
-                dispatch("addGroup", opt.id);
-                isAddGroupMenuOpen = false;
-              }}
-            >
-              {opt.label}
-            </li>
-          {/each}
+          {#each menuColumnsData as col, cIndex}
+            <ul class="menu-column">
+              {#each col.official as opt}
+                <li
+                  on:click={() => {
+                    dispatch("addGroup", opt.id);
+                    isAddGroupMenuOpen = false;
+                  }}
+                >
+                  {opt.label}
+                </li>
+              {/each}
 
-          {#if visiblePresets.length > 0}
-            <li class="divider" aria-hidden="true"></li>
-            {#each visiblePresets as preset (preset.id)}
-              <li
-                class="preset-item"
-                title="Insert {preset.groups.length} stat group(s)"
-                on:click={() => {
-                  injectPreset(preset);
-                  isAddGroupMenuOpen = false;
-                }}
-              >
-                {preset.name || "Untitled"}
-              </li>
-            {/each}
-          {/if}
-        </ul>
+              {#if cIndex === 0 && col.official.length > 0 && col.presets.length > 0}
+                <li class="divider" aria-hidden="true"></li>
+              {/if}
+
+              {#each col.presets as preset (preset.id)}
+                <li
+                  class="preset-item"
+                  title="Insert {preset.groups.length} stat group(s)"
+                  on:click={() => {
+                    injectPreset(preset);
+                    isAddGroupMenuOpen = false;
+                  }}
+                >
+                  {preset.name || "Untitled"}
+                </li>
+              {/each}
+            </ul>
+          {/each}
+        </div>
       {/if}
     </div>
   </div>
@@ -264,12 +362,11 @@
     bottom: 100%;
     right: 0;
     margin-bottom: 2px;
-    width: 190px;
+    max-width: calc(100cqw - 1rem);
     max-height: 280px;
     background: #000000;
     border: 1px solid #ffffff;
     border-radius: 0px;
-    list-style: none;
     padding: 2px 0;
     z-index: 1000;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
@@ -277,12 +374,29 @@
     overscroll-behavior: contain;
     scrollbar-width: thin;
     scrollbar-color: #555555 #000000;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
   }
 
   .add-group-dropdown.drop-down {
     bottom: auto;
     top: 100%;
     margin: 2px 0 0 0;
+  }
+
+  /* Measured before showing so the direction can be decided without flicker */
+  .add-group-dropdown.placing {
+    visibility: hidden;
+  }
+
+  .menu-column {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    flex: 1 1 0;
+    min-width: 0;
   }
 
   .add-group-dropdown li {
@@ -303,9 +417,9 @@
     color: #ffffff;
   }
 
-  /* Thick divider between built-in types and saved presets */
+  /* 2px divider between official types and custom presets */
   .add-group-dropdown li.divider {
-    height: 3px;
+    height: 2px;
     margin: 3px 0;
     padding: 0 !important;
     background: #777777 !important;

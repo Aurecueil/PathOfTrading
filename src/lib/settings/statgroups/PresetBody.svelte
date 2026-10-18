@@ -8,6 +8,7 @@
     type CatalogGame,
   } from "$lib/trade/statCatalog";
   import type { PresetStatGroup } from "$lib/trade/statGroupPresets";
+  import { trimTrailingEmptyGroup } from "$lib/trade/utilis/tradePayload";
 
   // Read once on creation; later edits flow out through `onchange`
   export let initialGroups: PresetStatGroup[] = [];
@@ -85,14 +86,13 @@
     bind:isAddGroupMenuOpen
     currentStatCatalog={catalog}
     realm={uiRealm}
-    dropUp={false}
     showPresets={false}
     on:deleteGroup={(e) => {
       statGroups = statGroups.filter((g) => g.id !== e.detail);
     }}
     on:addGroup={(e) => {
       statGroups = [
-        ...statGroups,
+        ...trimTrailingEmptyGroup(statGroups),
         {
           id: `stat_group_${Date.now()}`,
           type: e.detail,

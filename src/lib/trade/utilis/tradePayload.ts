@@ -42,7 +42,23 @@ function hasValidOption(opt: any): boolean {
 function hasValidNumber(num: any): boolean {
   return num !== undefined && num !== null && num !== "" && !isNaN(Number(num));
 }
+export function isEmptyStatGroup(g: {
+  filters?: any[];
+  value?: { min?: any; max?: any };
+}): boolean {
+  const noFilters = !g.filters?.length;
+  const noValue =
+    !g.value || (!hasValidNumber(g.value.min) && !hasValidNumber(g.value.max));
+  return noFilters && noValue;
+}
 
+export function trimTrailingEmptyGroup<
+  T extends { filters?: any[]; value?: any },
+>(groups: T[]): T[] {
+  return groups.length && isEmptyStatGroup(groups[groups.length - 1])
+    ? groups.slice(0, -1)
+    : groups;
+}
 /* -------------------------------------------------------------------------- */
 /* Item reference code: "<realm>:<language>:<index>"                          */
 /*   realm    – realm the item was picked from ("poe" | "poe2")               */
@@ -420,6 +436,9 @@ export function buildRegularPayload(
   const searchStats: any[] = [];
   const fullToSearchGroupIndexMap = new Map<number, number>();
 
+  const MERGEABLE = new Set(["and", "not", "if", "crucible", "mercenary"]);
+  const mergedIndexByType = new Map<string, number>();
+
   for (let fullIdx = 0; fullIdx < rawStats.length; fullIdx++) {
     const g = rawStats[fullIdx];
     if (!g || typeof g !== "object") continue;
@@ -468,12 +487,8 @@ export function buildRegularPayload(
       });
 
     if (activeFiltersList.length > 0 || gType === "and") {
-      fullToSearchGroupIndexMap.set(fullIdx, searchStats.length);
-      const searchGrp: any = {
-        type: gType,
-        filters: activeFiltersList,
-      };
-
+      // value only applies to these types
+      let valObj: any = undefined;
       if (
         ["count", "weight", "weight2", "crucible", "mercenary"].includes(
           gType,
@@ -481,15 +496,30 @@ export function buildRegularPayload(
         g.value &&
         typeof g.value === "object"
       ) {
-        const valObj: any = {};
-        if (hasValidNumber(g.value.min)) valObj.min = Number(g.value.min);
-        if (hasValidNumber(g.value.max)) valObj.max = Number(g.value.max);
-        if (Object.keys(valObj).length > 0) {
-          searchGrp.value = valObj;
-        }
+        const v: any = {};
+        if (hasValidNumber(g.value.min)) v.min = Number(g.value.min);
+        if (hasValidNumber(g.value.max)) v.max = Number(g.value.max);
+        if (Object.keys(v).length > 0) valObj = v;
       }
 
-      searchStats.push(searchGrp);
+      const existingIdx = MERGEABLE.has(gType)
+        ? mergedIndexByType.get(gType)
+        : undefined;
+
+      if (existingIdx !== undefined) {
+        // merge into the first group of this type
+        const target = searchStats[existingIdx];
+        target.filters.push(...activeFiltersList);
+        if (valObj && !target.value) target.value = valObj;
+        fullToSearchGroupIndexMap.set(fullIdx, existingIdx);
+      } else {
+        fullToSearchGroupIndexMap.set(fullIdx, searchStats.length);
+        if (MERGEABLE.has(gType))
+          mergedIndexByType.set(gType, searchStats.length);
+        const searchGrp: any = { type: gType, filters: activeFiltersList };
+        if (valObj) searchGrp.value = valObj;
+        searchStats.push(searchGrp);
+      }
     }
   }
 

@@ -17,6 +17,7 @@
     findItemIndex,
     formatItemRef,
     type StatGroupPayloadState,
+    trimTrailingEmptyGroup,
   } from "$lib/trade/utilis/tradePayload";
 
   import {
@@ -544,7 +545,13 @@
   $: if (!itemHydrated && allItemEntries.length > 0) {
     tryHydrateItem();
   }
-
+  $: if (
+    hasHydrated &&
+    sortKey.startsWith("group:") &&
+    !statGroups.some((g) => `group:${g.id}` === sortKey)
+  ) {
+    sortKey = "filter:price";
+  }
   function handleResetForm() {
     title = "";
     isEditingTitle = false;
@@ -983,7 +990,7 @@
           }}
           on:addGroup={(e) => {
             statGroups = [
-              ...statGroups,
+              ...trimTrailingEmptyGroup(statGroups),
               {
                 id: `stat_group_${Date.now()}`,
                 type: e.detail,

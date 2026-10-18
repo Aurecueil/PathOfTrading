@@ -65,14 +65,15 @@
 
   function getTagColor(label: string): string {
     const l = (label || "").toLowerCase();
-    if (l.includes("pseudo")) return "#66b2ff";
-    if (l.includes("explicit")) return "#e066ff";
-    if (l.includes("implicit")) return "#e6c200";
-    if (l.includes("fractured")) return "#e6c200";
-    if (l.includes("enchant")) return "#66b2ff";
-    if (l.includes("scourge")) return "#ff5555";
-    if (l.includes("crucible")) return "#ff5555";
-    if (l.includes("mercenary")) return "#55ff55";
+    if (l.includes("pseudo")) return "#005DBD"; // pseudo
+    if (l.includes("crafted")) return "#D1D1D1"; // crafted
+    if (l.includes("explicit")) return "#57AFF1";
+    if (l.includes("implicit")) return "#625F15"; // impl
+    if (l.includes("fractured")) return "#A08F5F"; // frac
+    if (l.includes("enchant")) return "#89549A"; // enchant
+    if (l.includes("scourge")) return "#FF6E25"; //courage
+    if (l.includes("crucible")) return "#FF7339"; //crucible
+    if (l.includes("mercenary")) return "#8C6F3C"; //luminary
     return "#888888";
   }
 
