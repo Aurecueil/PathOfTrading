@@ -109,7 +109,13 @@ export const STAT_KEYWORD_COLORS: StatColorRule[] = [
   { keywords: ["evasion", "evasion rating", "ev"], color: "#30EB6E" },
   { keywords: ["armour", "ar"], color: "#e75e3f" },
   {
-    keywords: ["attack damage", "attacks", "attack modifiers", "attack"],
+    keywords: [
+      "attack damage",
+      "attacks",
+      "attack modifiers",
+      "attack skills",
+      "attack",
+    ],
     color: "#DA814D",
   },
   {
@@ -190,7 +196,47 @@ export const STAT_KEYWORD_COLORS: StatColorRule[] = [
     ],
     color: "#C79D93",
   },
+  {
+    keywords: [
+      "unique map boss",
+      "unique enemy",
+      "unique boss",
+      "unique enemies",
+      "unique bosses",
+      "non-unique",
+      "unique monster",
+      "unique monsters",
+      "unique modifiers",
+      "unique modifier",
+      "unique",
+      "rogue exile",
+      "rogue exiles",
+    ],
+    color: "#9a5521",
+  },
+  {
+    keywords: [
+      "rare enemy",
+      "rare enemies",
+      "rare monsters",
+      "rare monster",
+      "rare modifiers",
+      "rare modifier",
+      "rare",
+    ],
+    color: "#ffff77",
+  },
 
+  {
+    keywords: [
+      "magic enemy",
+      "magic enemies",
+      "magic monsters",
+      "magic monster",
+      "magic",
+    ],
+    color: "#8888ff",
+  },
   //atributes
   { keywords: ["strength", "str"], color: "#CF4A2D" },
   { keywords: ["dexterity", "dex"], color: "#65E465" },

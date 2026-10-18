@@ -12,6 +12,10 @@
   } from "$lib/trade/utilis/tradeDisplayName";
   import {
     buildPayloads,
+    migrateItemRef,
+    findEntryIndexByQuery,
+    findItemIndex,
+    formatItemRef,
     type StatGroupPayloadState,
   } from "$lib/trade/utilis/tradePayload";
 
@@ -24,6 +28,7 @@
     statsPoe2,
     leaguesPoe,
     leaguesPoe2,
+    currentLanguage,
     isLoading,
     initItemData,
   } from "$lib/trade/tradeStore";
@@ -42,12 +47,23 @@
   let title: string = initialTitle;
   let realm: "poe" | "poe2" = initialRealm;
   let previousRealm: "poe" | "poe2" = realm;
+  // Language the currently selected item's TEXT is in. Only advances once the
+  // item has actually been migrated to the new language's catalog.
+  let previousLanguage: string = $currentLanguage || "EN";
+  let previousLeague: string = initialLeague || initialPayload?.league || "";
   let league: string = initialLeague || initialPayload?.league || "";
+
+  // Snapshot of the item catalog at the moment a language change was first seen.
+  // When `allItemEntries` becomes a different array, the catalog was re-fetched.
+  let pendingLangCatalog: ItemEntry[] | null = null;
 
   // Sorting state
   let sortKey: string = "filter:price";
   let sortDirection: "asc" | "desc" = "asc";
   let isSortDropdownOpen: boolean = false;
+
+  // Top bar custom dropdown state ("realm" | "league" | "status" | null)
+  let openTopDropdown: "realm" | "league" | "status" | null = null;
 
   // Drawer Width & Resize state
   let drawerWidth: number = 720;
@@ -58,6 +74,7 @@
 
   // Item Search State
   let selectedItem: ItemEntry | null = null;
+  let currentItemRef: string | null = initialPayload?.item_ref ?? null;
   let searchQuery: string = "";
   let isItemDropdownOpen: boolean = false;
 
@@ -79,6 +96,11 @@
   let isReadyForAutoSave: boolean = false;
 
   let itemComboboxRef: ItemSearchCombobox;
+
+  const REALM_OPTIONS: Array<{ id: "poe" | "poe2"; text: string }> = [
+    { id: "poe", text: "PoE 1" },
+    { id: "poe2", text: "PoE 2" },
+  ];
 
   const dispatch = createEventDispatcher<{
     close: void;
@@ -107,6 +129,7 @@
     if (Array.isArray(storeVal.result)) return storeVal.result;
     return [];
   }
+
   onMount(() => {
     const isPoeEmpty =
       !$leaguesPoe?.length ||
@@ -123,6 +146,7 @@
       initItemData();
     }
   });
+
   $: currentItemCategories = extractArray<ItemCategory>(
     realm === "poe2" ? $itemsPoe2 : $itemsPoe,
   );
@@ -158,7 +182,9 @@
   $: statusFilter =
     statusGroup?.filters?.find((f) => f.id === "status") ||
     statusGroup?.filters?.[0];
-  $: statusOptions = statusFilter?.option?.options || [];
+  $: statusOptions = (statusFilter?.option?.options || []).filter(
+    (o) => o.id !== null,
+  );
 
   $: if (statusOptions.length > 0) {
     const validCurrent = statusOptions.some((o) => o.id === statusOption);
@@ -184,18 +210,104 @@
     })),
   );
 
-  $: if (realm !== previousRealm) {
-    const prev = selectedItem;
-    previousRealm = realm;
-    const match =
-      prev?.name && prev.flags?.unique
-        ? (allItemEntries.find(
-            (e) => e.flags?.unique && e.name === prev.name,
-          ) ?? null)
+  function handleUserItemSelect(item: ItemEntry | null) {
+    if (!item) {
+      selectedItem = null;
+      currentItemRef = null;
+      return;
+    }
+    selectedItem = item;
+    const idx = findItemIndex(allItemEntries, item);
+    // The picked item comes from the catalog currently loaded, whose language is
+    // `previousLanguage` (it may lag behind `$currentLanguage` during a re-fetch).
+    currentItemRef =
+      idx >= 0
+        ? formatItemRef({
+            realm,
+            language: previousLanguage,
+            index: idx,
+          })
         : null;
-    selectedItem = match;
-    searchQuery = match ? getItemDisplayName(match) : "";
-    isItemDropdownOpen = false;
+  }
+
+  // Re-resolve item via migrateItemRef when realm, language, or league/catalog changes
+  $: {
+    const lang = $currentLanguage || "EN";
+    const realmChanged = realm !== previousRealm;
+    const langChanged = lang !== previousLanguage;
+    const leagueChanged = league !== previousLeague;
+
+    if (
+      itemHydrated &&
+      allItemEntries.length > 0 &&
+      (realmChanged || langChanged || leagueChanged)
+    ) {
+      if (selectedItem || currentItemRef) {
+        // Remember which catalog array we saw when the language flipped; once the
+        // store hands us a different array, the catalog has been re-fetched.
+        if (langChanged && pendingLangCatalog === null) {
+          pendingLangCatalog = allItemEntries;
+        }
+        const catalogReady =
+          langChanged &&
+          pendingLangCatalog !== null &&
+          pendingLangCatalog !== allItemEntries;
+
+        const tempPayload: any = {
+          query: {},
+          ...(currentItemRef ? { item_ref: currentItemRef } : {}),
+        };
+        if (selectedItem) {
+          if (selectedItem.name) tempPayload.query.name = selectedItem.name;
+          if (selectedItem.disc) {
+            tempPayload.query.type = {
+              option: selectedItem.type,
+              discriminator: selectedItem.disc,
+            };
+          } else {
+            tempPayload.query.type = selectedItem.type;
+          }
+        }
+
+        const { payload: migrated, changed } = migrateItemRef(
+          tempPayload,
+          realm,
+          lang,
+          { catalogReady },
+        );
+
+        // If language changed and catalog hasn't finished re-fetching yet, wait
+        if (langChanged && !changed && currentItemRef && !catalogReady) {
+          // Keep previousLanguage untouched so this reactive block re-runs once store updates
+        } else {
+          previousRealm = realm;
+          previousLanguage = lang;
+          previousLeague = league;
+          pendingLangCatalog = null;
+
+          const idx = findEntryIndexByQuery(allItemEntries, migrated?.query);
+          if (idx >= 0) {
+            selectedItem = allItemEntries[idx];
+            currentItemRef =
+              migrated.item_ref ??
+              formatItemRef({ realm, language: lang, index: idx });
+            searchQuery = getItemDisplayName(selectedItem);
+          } else {
+            selectedItem = null;
+            currentItemRef = null;
+            searchQuery = "";
+          }
+          isItemDropdownOpen = false;
+        }
+      } else {
+        previousRealm = realm;
+        previousLanguage = lang;
+        previousLeague = league;
+        pendingLangCatalog = null;
+        searchQuery = "";
+        isItemDropdownOpen = false;
+      }
+    }
   }
 
   $: if (currentStatCatalog.length > 0) {
@@ -304,29 +416,41 @@
 
   function tryHydrateItem() {
     if (itemHydrated) return;
-    if (!initialPayload?.query) {
+    if (!initialPayload?.query && !initialPayload?.item_ref) {
       itemHydrated = true;
       return;
     }
-    const { name, type } = initialPayload.query;
-    if (!name && !type) {
+    const hasQueryItem = Boolean(
+      initialPayload.query?.name || initialPayload.query?.type,
+    );
+    if (!hasQueryItem && !initialPayload.item_ref) {
       itemHydrated = true;
       return;
     }
     if (!allItemEntries || allItemEntries.length === 0) return;
 
-    const targetType = typeof type === "object" ? type?.option : type;
-    const targetDisc =
-      typeof type === "object" ? type?.discriminator : undefined;
-    const matched = allItemEntries.find((entry) => {
-      const matchName = name ? entry.name === name : !entry.name;
-      const matchType = entry.type === targetType;
-      const matchDisc = targetDisc ? entry.disc === targetDisc : !entry.disc;
-      return matchName && matchType && matchDisc;
-    });
-    if (matched) {
-      selectedItem = matched;
-      searchQuery = getItemDisplayName(matched);
+    const { payload: migrated } = migrateItemRef(
+      initialPayload,
+      realm,
+      $currentLanguage || "EN",
+    );
+    initialPayload = migrated;
+
+    const matchedIdx = findEntryIndexByQuery(allItemEntries, migrated?.query);
+    if (matchedIdx >= 0) {
+      selectedItem = allItemEntries[matchedIdx];
+      currentItemRef =
+        migrated.item_ref ??
+        formatItemRef({
+          realm,
+          language: $currentLanguage || "EN",
+          index: matchedIdx,
+        });
+      searchQuery = getItemDisplayName(selectedItem);
+    } else {
+      selectedItem = null;
+      currentItemRef = null;
+      searchQuery = "";
     }
     itemHydrated = true;
   }
@@ -342,6 +466,7 @@
 
     if (initialPayload.league && !league) {
       league = initialPayload.league;
+      previousLeague = league;
     }
 
     if (initialPayload.query?.status?.option) {
@@ -420,6 +545,49 @@
     tryHydrateItem();
   }
 
+  function handleResetForm() {
+    title = "";
+    isEditingTitle = false;
+    initialDisplayName = "";
+    initialPayload = null;
+
+    selectedItem = null;
+    currentItemRef = null;
+    searchQuery = "";
+    isItemDropdownOpen = false;
+    openTopDropdown = null;
+
+    const defaultOpt =
+      statusOptions.find((o) => o.id === "securable") || statusOptions[0];
+    statusOption = defaultOpt?.id ?? "";
+
+    sortKey = "filter:price";
+    sortDirection = "asc";
+    isSortDropdownOpen = false;
+    isAddGroupMenuOpen = false;
+
+    const resetFV: Record<string, Record<string, any>> = {};
+    const resetGC: Record<string, boolean> = {};
+    for (const group of currentFilterGroups) {
+      if (group.id === "status_filters") continue;
+      resetFV[group.id] = {};
+      resetGC[group.id] = Boolean(group.hidden);
+      if (Array.isArray(group.filters)) {
+        for (const f of group.filters) {
+          resetFV[group.id][f.id] = {};
+        }
+      }
+    }
+    filterValues = resetFV;
+    groupCollapsed = resetGC;
+
+    statGroups = [
+      { id: "stat_group_default", type: "and", collapsed: false, filters: [] },
+    ];
+
+    autoSave();
+  }
+
   function startResize(e: PointerEvent) {
     isResizing = true;
     e.preventDefault();
@@ -467,6 +635,9 @@
       allKnownFilterGroups,
       sortKey,
       sortDirection,
+      // language of the item's text (lags `$currentLanguage` during catalog re-fetch)
+      itemLanguage: previousLanguage,
+      itemRef: currentItemRef,
     });
 
     if (payloads.payload && league) {
@@ -475,6 +646,10 @@
     if (payloads.full_payload && league) {
       payloads.full_payload.league = league;
     }
+
+    // Never drop the ref while an item is selected (autosave must not clobber it).
+    currentItemRef =
+      payloads.full_payload?.item_ref ?? (selectedItem ? currentItemRef : null);
 
     return payloads;
   }
@@ -491,6 +666,7 @@
     (title !== undefined ||
       realm !== undefined ||
       league !== undefined ||
+      $currentLanguage !== undefined ||
       statusOption !== undefined ||
       sortKey !== undefined ||
       sortDirection !== undefined ||
@@ -558,6 +734,7 @@
     if (!target.closest(".autocomplete-wrapper")) isItemDropdownOpen = false;
     if (!target.closest(".add-group-menu-wrapper")) isAddGroupMenuOpen = false;
     if (!target.closest(".sort-combobox-wrapper")) isSortDropdownOpen = false;
+    if (!target.closest(".top-custom-dropdown")) openTopDropdown = null;
   }
 
   function handleWindowKeyDown(e: KeyboardEvent) {
@@ -568,6 +745,11 @@
     if (e.key === "Escape") {
       if (isEditingTitle) {
         isEditingTitle = false;
+        e.preventDefault();
+        return;
+      }
+      if (openTopDropdown) {
+        openTopDropdown = null;
         e.preventDefault();
         return;
       }
@@ -597,7 +779,7 @@
         e.preventDefault();
         return;
       }
-      if (isItemDropdownOpen || isSortDropdownOpen) {
+      if (isItemDropdownOpen || isSortDropdownOpen || openTopDropdown) {
         return;
       }
       e.preventDefault();
@@ -605,6 +787,17 @@
       else handleSearchOnly();
     }
   }
+
+  $: activeRealmLabel =
+    REALM_OPTIONS.find((r) => r.id === realm)?.text || "PoE 1";
+  $: activeLeagueLabel =
+    availableLeagues.find((l) => l.id.toString() === league)?.text ||
+    league ||
+    "League";
+  $: activeStatusLabel =
+    statusOptions.find((o) => o.id === statusOption)?.text ||
+    statusOption ||
+    "Status";
 </script>
 
 <svelte:window on:click={handleWindowClick} on:keydown={handleWindowKeyDown} />
@@ -620,6 +813,7 @@
     bind:title
     bind:isEditingTitle
     {computedDisplayName}
+    on:reset={handleResetForm}
     on:close={handleCloseWithoutSearch}
   />
   {#if $isLoading}
@@ -638,49 +832,107 @@
             bind:selectedItem
             bind:searchQuery
             bind:isOpen={isItemDropdownOpen}
+            on:select={(e) => handleUserItemSelect(e.detail)}
+            on:clear={() => handleUserItemSelect(null)}
           />
         </div>
 
         <div class="top-row-2">
-          <div class="top-field flex-realm">
-            <select
+          <!-- Realm Custom Dropdown -->
+          <div class="top-field flex-realm top-custom-dropdown">
+            <button
+              type="button"
               id="tile-realm"
-              name="tile_realm"
+              class="custom-dropdown-trigger"
               aria-label="Realm"
-              bind:value={realm}
+              aria-expanded={openTopDropdown === "realm"}
+              on:click={() =>
+                (openTopDropdown =
+                  openTopDropdown === "realm" ? null : "realm")}
             >
-              <option value="poe">PoE 1</option>
-              <option value="poe2">PoE 2</option>
-            </select>
-          </div>
-
-          <div class="top-field flex-league">
-            <select
-              id="tile-league"
-              name="tile_league"
-              aria-label="League"
-              bind:value={league}
-            >
-              {#each availableLeagues as l}
-                <option value={l.id}>{l.text}</option>
-              {/each}
-            </select>
-          </div>
-
-          {#if statusOptions.length > 0}
-            <div class="top-field flex-status">
-              <select
-                id="tile-status"
-                name="tile_status"
-                aria-label="Status"
-                bind:value={statusOption}
-              >
-                {#each statusOptions as opt}
-                  {#if opt.id !== null}
-                    <option value={opt.id}>{opt.text}</option>
-                  {/if}
+              <span class="trigger-label">{activeRealmLabel}</span>
+              <span class="trigger-arrow">▾</span>
+            </button>
+            {#if openTopDropdown === "realm"}
+              <ul class="dropdown" on:wheel|stopPropagation>
+                {#each REALM_OPTIONS as rOpt}
+                  <li
+                    class:selected={rOpt.id === realm}
+                    on:mousedown|preventDefault={() => {
+                      realm = rOpt.id;
+                      openTopDropdown = null;
+                    }}
+                  >
+                    {rOpt.text}
+                  </li>
                 {/each}
-              </select>
+              </ul>
+            {/if}
+          </div>
+
+          <!-- League Custom Dropdown -->
+          <div class="top-field flex-league top-custom-dropdown">
+            <button
+              type="button"
+              id="tile-league"
+              class="custom-dropdown-trigger"
+              aria-label="League"
+              aria-expanded={openTopDropdown === "league"}
+              on:click={() =>
+                (openTopDropdown =
+                  openTopDropdown === "league" ? null : "league")}
+            >
+              <span class="trigger-label">{activeLeagueLabel}</span>
+              <span class="trigger-arrow">▾</span>
+            </button>
+            {#if openTopDropdown === "league" && availableLeagues.length > 0}
+              <ul class="dropdown" on:wheel|stopPropagation>
+                {#each availableLeagues as l}
+                  <li
+                    class:selected={l.id.toString() === league}
+                    on:mousedown|preventDefault={() => {
+                      league = l.id.toString();
+                      openTopDropdown = null;
+                    }}
+                  >
+                    {l.text}
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </div>
+
+          <!-- Status Custom Dropdown -->
+          {#if statusOptions.length > 0}
+            <div class="top-field flex-status top-custom-dropdown">
+              <button
+                type="button"
+                id="tile-status"
+                class="custom-dropdown-trigger"
+                aria-label="Status"
+                aria-expanded={openTopDropdown === "status"}
+                on:click={() =>
+                  (openTopDropdown =
+                    openTopDropdown === "status" ? null : "status")}
+              >
+                <span class="trigger-label">{activeStatusLabel}</span>
+                <span class="trigger-arrow">▾</span>
+              </button>
+              {#if openTopDropdown === "status"}
+                <ul class="dropdown" on:wheel|stopPropagation>
+                  {#each statusOptions as opt}
+                    <li
+                      class:selected={opt.id === statusOption}
+                      on:mousedown|preventDefault={() => {
+                        statusOption = opt.id ?? "";
+                        openTopDropdown = null;
+                      }}
+                    >
+                      {opt.text}
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
             </div>
           {/if}
 
@@ -782,7 +1034,7 @@
     display: flex;
     flex-direction: column;
     color: #d3d3d3;
-    font-family: monospace, sans-serif;
+    font-family: "Fontin", monospace, sans-serif;
     font-size: 12px;
     line-height: 1.15;
     box-sizing: border-box;
@@ -839,7 +1091,7 @@
   }
 
   /* --------------------------------------------------------------------------
-     Top Controls Container (Layout Only — No backgrounds, frames, or borders)
+     Top Controls Container
      -------------------------------------------------------------------------- */
   .top-bar {
     display: flex;
@@ -852,9 +1104,7 @@
     width: 100%;
     box-sizing: border-box;
   }
-  .top-bar select {
-    color: #ffffff !important;
-  }
+
   .top-row-1 {
     width: 100%;
   }
@@ -870,6 +1120,7 @@
   .top-field {
     display: flex;
     min-width: 0;
+    position: relative;
   }
 
   .flex-realm {
@@ -892,8 +1143,9 @@
     min-width: 110px;
   }
 
-  select {
-    font-family: monospace, sans-serif !important;
+  /* Unified Top Dropdown Trigger matching SortCombobox & Text Dropdowns */
+  .custom-dropdown-trigger {
+    font-family: "Fontin", monospace, sans-serif !important;
     font-size: 12px !important;
     height: 26px !important;
     line-height: 1.15 !important;
@@ -901,41 +1153,59 @@
     border: 1px solid #7f7f7f !important;
     border-radius: 0px !important;
     color: #ffffff !important;
-    padding: 0 4px !important;
+    padding: 0 6px !important;
     outline: none;
     min-width: 0;
     width: 100%;
     box-sizing: border-box;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.25rem;
     cursor: pointer;
+    text-align: left;
   }
 
-  select:hover,
-  select:focus {
+  .custom-dropdown-trigger:hover,
+  .custom-dropdown-trigger:focus,
+  .custom-dropdown-trigger[aria-expanded="true"] {
     border-color: #ffffff !important;
   }
 
-  select option {
-    background-color: #000000 !important;
-    color: #9a9a9a !important;
-    font-family: monospace, sans-serif !important;
-    font-size: 12px !important;
-    padding: 1px 3px !important;
+  .trigger-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
-  select option:checked,
-  select option[selected] {
-    background-color: #000000 !important;
-    color: #ffffff !important;
+  .trigger-arrow {
+    color: #888888;
+    font-size: 10px;
+    flex-shrink: 0;
   }
 
-  select option:hover {
-    background-color: #545454 !important;
-    color: #ffffff !important;
+  .custom-dropdown-trigger:hover .trigger-arrow {
+    color: #ffffff;
   }
 
-  /* Main Grid Columns (Layout Only) */
+  .top-custom-dropdown .dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    min-width: 100%;
+    max-height: 260px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    margin: 2px 0 0 0;
+    list-style: none;
+    scrollbar-width: thin;
+    scrollbar-color: #555555 #000000;
+  }
+
+  /* Main Grid Columns */
   .main-columns {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -966,15 +1236,14 @@
     padding: 0 !important;
     box-sizing: border-box;
   }
-  .filter-groups :global(select) {
-    color: #9a9a9a !important;
-  }
-  .filter-groups :global(select.is-modified),
-  .filter-groups :global(select[data-modified="true"]),
-  .filter-groups
-    :global(select:has(option:checked:not([value=""]):not([value="null"]))) {
+
+  /* Non-default filter category fields: white text and white border */
+  .filter-groups :global(.is-modified),
+  .filter-groups :global([data-modified="true"]) {
     color: #ffffff !important;
+    border-color: #ffffff !important;
   }
+
   /* --------------------------------------------------------------------------
      Expanded Child Popover / Dropdown Menu Styles (1px White Border)
      -------------------------------------------------------------------------- */
@@ -1087,7 +1356,6 @@
     border-color: #7f7f7f;
   }
 
-  /* Pitch White Primary Search Button */
   .actions button.primary {
     background-color: #000000 !important;
     border: 1px solid #ffffff !important;
@@ -1100,6 +1368,7 @@
     border-color: #ffffff !important;
     color: #ffffff !important;
   }
+
   .loading-banner {
     display: flex;
     align-items: center;
@@ -1108,7 +1377,7 @@
     background-color: #111111;
     border-bottom: 1px solid #777777;
     color: #ffffff;
-    font-family: monospace, sans-serif;
+    font-family: "Fontin", monospace, sans-serif;
     font-size: 12px;
     flex-shrink: 0;
   }

@@ -87,6 +87,33 @@
         .slice(0, 50)
     : allOptions.slice(0, 50);
 
+  /* ------------------------------------------------------------------------ */
+  /* Non-default tracking. Each value control is "modified" on its own; the   */
+  /* name is modified when at least one of its values is. The row/group box   */
+  /* border is never touched.                                                 */
+  /* ------------------------------------------------------------------------ */
+  function has(v: any): boolean {
+    return v !== undefined && v !== null && v !== "" && v !== "any";
+  }
+
+  $: optionModified = has(value?.option);
+  $: inputModified = has(value?.input);
+  $: minModified = has(value?.min);
+  $: maxModified = has(value?.max);
+  $: rModified = has(value?.r);
+  $: gModified = has(value?.g);
+  $: bModified = has(value?.b);
+  $: wModified = has(value?.w);
+  $: nameModified =
+    optionModified ||
+    inputModified ||
+    minModified ||
+    maxModified ||
+    rModified ||
+    gModified ||
+    bModified ||
+    wModified;
+
   function selectOption(opt: FilterOptionEntry) {
     updateField("option", opt.id);
     isComboboxOpen = false;
@@ -156,7 +183,11 @@
   )}
   class:socket-row={Boolean(filter.sockets)}
 >
-  <div class="filter-label" title={filter.text || filter.id}>
+  <div
+    class="filter-label"
+    class:is-modified={nameModified}
+    title={filter.text || filter.id}
+  >
     <span>{filter.text || filter.id}</span>
     {#if filter.tip}
       <span class="tooltip-icon" title={filter.tip}>?</span>
@@ -170,6 +201,7 @@
         <select
           id={`filter-${filter.id}-opt`}
           name={`filter_${filter.id}_opt`}
+          class:is-modified={optionModified}
           value={value?.option ?? ""}
           on:change={(e) =>
             updateField("option", e.currentTarget.value || null)}
@@ -185,6 +217,7 @@
             name={`filter_${filter.id}_opt_search`}
             type="text"
             autocomplete="off"
+            class:is-modified={optionModified}
             placeholder={nullOpt?.text || "Any"}
             value={isComboboxOpen
               ? comboboxQuery
@@ -240,6 +273,7 @@
         id={`filter-${filter.id}-input`}
         name={`filter_${filter.id}_input`}
         type="text"
+        class:is-modified={inputModified}
         placeholder={filter.input.placeholder || "Value..."}
         value={value?.input ?? ""}
         on:input={(e) => updateField("input", e.currentTarget.value)}
@@ -253,6 +287,7 @@
           id={`filter-${filter.id}-min`}
           name={`filter_${filter.id}_min`}
           type="number"
+          class:is-modified={minModified}
           placeholder="Min"
           value={value?.min ?? ""}
           on:input={(e) => updateField("min", e.currentTarget.value)}
@@ -261,6 +296,7 @@
           id={`filter-${filter.id}-max`}
           name={`filter_${filter.id}_max`}
           type="number"
+          class:is-modified={maxModified}
           placeholder="Max"
           value={value?.max ?? ""}
           on:input={(e) => updateField("max", e.currentTarget.value)}
@@ -271,7 +307,7 @@
     <!-- Sockets Controls -->
     {#if filter.sockets}
       <div class="sockets-grid">
-        <div class="socket-input sock-r">
+        <div class="socket-input sock-r" class:is-modified={rModified}>
           <span>R</span>
           <input
             id={`filter-${filter.id}-sock-r`}
@@ -283,7 +319,7 @@
             on:input={(e) => updateField("r", e.currentTarget.value)}
           />
         </div>
-        <div class="socket-input sock-g">
+        <div class="socket-input sock-g" class:is-modified={gModified}>
           <span>G</span>
           <input
             id={`filter-${filter.id}-sock-g`}
@@ -295,7 +331,7 @@
             on:input={(e) => updateField("g", e.currentTarget.value)}
           />
         </div>
-        <div class="socket-input sock-b">
+        <div class="socket-input sock-b" class:is-modified={bModified}>
           <span>B</span>
           <input
             id={`filter-${filter.id}-sock-b`}
@@ -307,7 +343,7 @@
             on:input={(e) => updateField("b", e.currentTarget.value)}
           />
         </div>
-        <div class="socket-input sock-w">
+        <div class="socket-input sock-w" class:is-modified={wModified}>
           <span>W</span>
           <input
             id={`filter-${filter.id}-sock-w`}
@@ -353,10 +389,15 @@
     gap: 0.2rem;
     font-family: "Fontin", monospace, sans-serif;
     font-size: 11px;
-    color: #d3d3d3;
+    color: #9a9a9a;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* Non-default: name text white */
+  .filter-label.is-modified {
+    color: #ffffff;
   }
 
   .filter-controls {
@@ -412,7 +453,7 @@
     min-width: 0;
   }
 
-  /* Retro Controls Input & Select Styling */
+  /* Retro Controls Input & Select Styling (default = grey) */
   input,
   select {
     font-family: "Fontin", monospace, sans-serif;
@@ -422,7 +463,7 @@
     background: #000000;
     border: 1px solid #777777;
     border-radius: 0px;
-    color: #ffffff;
+    color: #9a9a9a;
     padding: 1px 4px;
     outline: none;
     min-width: 0;
@@ -433,6 +474,13 @@
   input:focus,
   select:hover,
   select:focus {
+    border-color: #ffffff;
+  }
+
+  /* Non-default value: white text + white border on that control only */
+  input.is-modified,
+  select.is-modified {
+    color: #ffffff;
     border-color: #ffffff;
   }
 
@@ -611,5 +659,21 @@
     text-align: center;
     height: 100%;
     border-radius: 0px;
+  }
+
+  /* Non-default socket: whole socket frame + its value go white */
+  .socket-input.is-modified {
+    border-color: #ffffff;
+  }
+
+  .socket-input.is-modified input {
+    color: #ffffff;
+    border-left-color: #ffffff;
+  }
+
+  /* inner socket input has no own frame, so keep it from drawing one on hover */
+  .socket-input input:hover,
+  .socket-input input:focus {
+    border-color: inherit;
   }
 </style>

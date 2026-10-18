@@ -22,9 +22,16 @@
   let newProjectRealm = $state<"poe" | "poe2">("poe");
   let newProjectLeague = $state("");
 
+  let openHeaderDropdown = $state<"realm" | "league" | null>(null);
+
   let editingId = $state<string | null>(null);
   let editingName = $state("");
   let confirmingDeleteEntry = $state<ProjectIndexEntry | null>(null);
+
+  const REALM_OPTIONS: Array<{ id: "poe" | "poe2"; text: string }> = [
+    { id: "poe", text: "PoE 1" },
+    { id: "poe2", text: "PoE 2" },
+  ];
 
   // Filter PoE 1 leagues to only ones with realm/realms === "pc"
   const poe1PcLeagues = $derived(
@@ -40,6 +47,20 @@
     newProjectRealm === "poe2" ? poe2Leagues : poe1PcLeagues,
   );
 
+  const activeRealmLabel = $derived(
+    REALM_OPTIONS.find((r) => r.id === newProjectRealm)?.text || "PoE 1",
+  );
+
+  const activeLeagueLabel = $derived.by(() => {
+    if (availableLeagues.length === 0) return newProjectLeague || "Standard";
+    const found = availableLeagues.find(
+      (l: any) => String(l.id) === newProjectLeague,
+    );
+    return found
+      ? found.text || String(found.id)
+      : newProjectLeague || "Standard";
+  });
+
   // Ensure selected league defaults to first available option when switching realm
   $effect(() => {
     if (
@@ -47,6 +68,8 @@
       !availableLeagues.some((l: any) => String(l.id) === newProjectLeague)
     ) {
       newProjectLeague = String(availableLeagues[0].id);
+    } else if (availableLeagues.length === 0 && !newProjectLeague) {
+      newProjectLeague = "Standard";
     }
   });
 
@@ -139,7 +162,23 @@
     confirmingDeleteEntry = null;
     await deleteProjectFromBackend(targetId);
   }
+
+  function handleWindowClick(e: MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (!target.closest(".custom-dropdown-wrapper")) {
+      openHeaderDropdown = null;
+    }
+  }
+
+  function handleWindowKeyDown(e: KeyboardEvent) {
+    if (e.key === "Escape" && openHeaderDropdown) {
+      openHeaderDropdown = null;
+      e.preventDefault();
+    }
+  }
 </script>
+
+<svelte:window onclick={handleWindowClick} onkeydown={handleWindowKeyDown} />
 
 <div class="hub-wrapper">
   <div class="hub-container">
@@ -151,28 +190,87 @@
       </div>
 
       <div class="header-right">
-        <select
-          class="select-input"
-          bind:value={newProjectRealm}
-          title="Default Project Realm"
-        >
-          <option value="poe">PoE 1</option>
-          <option value="poe2">PoE 2</option>
-        </select>
-
-        <select
-          class="select-input league-select"
-          bind:value={newProjectLeague}
-          title="Default Project League"
-        >
-          {#if availableLeagues.length === 0}
-            <option value="Standard">Standard</option>
-          {:else}
-            {#each availableLeagues as l (l.id)}
-              <option value={String(l.id)}>{l.text || l.id}</option>
-            {/each}
+        <!-- Realm Custom Combobox Dropdown -->
+        <div class="custom-dropdown-wrapper realm-dropdown">
+          <button
+            type="button"
+            class="custom-dropdown-trigger"
+            title="Default Project Realm"
+            aria-label="Default Project Realm"
+            aria-expanded={openHeaderDropdown === "realm"}
+            onclick={() =>
+              (openHeaderDropdown =
+                openHeaderDropdown === "realm" ? null : "realm")}
+          >
+            <span class="trigger-label">{activeRealmLabel}</span>
+            <span class="trigger-arrow">▾</span>
+          </button>
+          {#if openHeaderDropdown === "realm"}
+            <ul class="dropdown" onwheel={(e) => e.stopPropagation()}>
+              {#each REALM_OPTIONS as rOpt (rOpt.id)}
+                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                <li
+                  class:selected={rOpt.id === newProjectRealm}
+                  onmousedown={(e) => {
+                    e.preventDefault();
+                    newProjectRealm = rOpt.id;
+                    openHeaderDropdown = null;
+                  }}
+                >
+                  {rOpt.text}
+                </li>
+              {/each}
+            </ul>
           {/if}
-        </select>
+        </div>
+
+        <!-- League Custom Combobox Dropdown -->
+        <div class="custom-dropdown-wrapper league-dropdown">
+          <button
+            type="button"
+            class="custom-dropdown-trigger"
+            title="Default Project League"
+            aria-label="Default Project League"
+            aria-expanded={openHeaderDropdown === "league"}
+            onclick={() =>
+              (openHeaderDropdown =
+                openHeaderDropdown === "league" ? null : "league")}
+          >
+            <span class="trigger-label">{activeLeagueLabel}</span>
+            <span class="trigger-arrow">▾</span>
+          </button>
+          {#if openHeaderDropdown === "league"}
+            <ul class="dropdown" onwheel={(e) => e.stopPropagation()}>
+              {#if availableLeagues.length === 0}
+                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                <li
+                  class:selected={newProjectLeague === "Standard"}
+                  onmousedown={(e) => {
+                    e.preventDefault();
+                    newProjectLeague = "Standard";
+                    openHeaderDropdown = null;
+                  }}
+                >
+                  Standard
+                </li>
+              {:else}
+                {#each availableLeagues as l (l.id)}
+                  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                  <li
+                    class:selected={String(l.id) === newProjectLeague}
+                    onmousedown={(e) => {
+                      e.preventDefault();
+                      newProjectLeague = String(l.id);
+                      openHeaderDropdown = null;
+                    }}
+                  >
+                    {l.text || l.id}
+                  </li>
+                {/each}
+              {/if}
+            </ul>
+          {/if}
+        </div>
 
         <button
           type="button"
@@ -184,13 +282,31 @@
       </div>
     </header>
 
-    <!-- Standalone Filter Box -->
-    <input
-      type="search"
-      class="text-input standalone-filter"
-      bind:value={searchQuery}
-      placeholder="Filter projects..."
-    />
+    <!-- Standalone Filter Box matching Combobox Input Styling -->
+    <div class="filter-input-wrapper">
+      <input
+        type="text"
+        class="text-input standalone-filter"
+        class:is-modified={searchQuery.trim().length > 0}
+        bind:value={searchQuery}
+        placeholder="Filter projects..."
+        autocomplete="off"
+      />
+      {#if searchQuery.length > 0}
+        <button
+          type="button"
+          class="clear-filter-btn"
+          onmousedown={(e) => {
+            e.preventDefault();
+            searchQuery = "";
+          }}
+          title="Clear"
+          aria-label="Clear filter"
+        >
+          ✕
+        </button>
+      {/if}
+    </div>
 
     <!-- Flexible Static/Scrollable Projects Box -->
     <section class="pob-groupbox all-projects-box">
@@ -346,7 +462,7 @@
 
 <style>
   :global(*) {
-    font-family: "Fontin", sans-serif !important;
+    font-family: "Fontin", monospace, sans-serif !important;
     box-sizing: border-box;
     scrollbar-width: thin;
     scrollbar-color: #555555 #000000;
@@ -354,8 +470,8 @@
 
   /* Custom WebKit / Chromium Scrollbar Theme */
   :global(*::-webkit-scrollbar) {
-    width: 12px;
-    height: 12px;
+    width: 6px;
+    height: 6px;
   }
 
   :global(*::-webkit-scrollbar-track) {
@@ -378,25 +494,28 @@
   }
 
   /* --------------------------------------------------------------------------
-     Child Popover / Dropdown Menu Overrides (Only expanded popover panels get WHITE BORDER)
+     Child Popover / Dropdown Menu Overrides (1px White Border matching Drawer)
      -------------------------------------------------------------------------- */
   :global(.combobox-dropdown),
   :global(.autocomplete-dropdown),
   :global(.dropdown-menu),
   :global(.popover-menu),
-  :global(.select-dropdown) {
+  :global(.select-dropdown),
+  :global(.dropdown) {
     background: #000000 !important;
-    border: 3px solid #ffffff !important;
+    border: 1px solid #ffffff !important;
     border-radius: 0px !important;
-    padding: 2px 0 !important;
+    padding: 1px 0 !important;
     z-index: 1000 !important;
     box-sizing: border-box !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85) !important;
   }
 
   :global(.combobox-option),
   :global(.autocomplete-option),
   :global(.dropdown-item),
-  :global(.option-row) {
+  :global(.option-row),
+  :global(.dropdown li) {
     font-family: "Fontin", monospace, sans-serif !important;
     font-size: 12px !important;
     color: #9a9a9a !important;
@@ -405,12 +524,16 @@
     line-height: 1.15 !important;
     cursor: pointer !important;
     border-radius: 0px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
   }
 
   :global(.combobox-option.selected),
   :global(.combobox-option[aria-selected="true"]),
   :global(.autocomplete-option.selected),
-  :global(.dropdown-item.selected) {
+  :global(.dropdown-item.selected),
+  :global(.dropdown li.selected) {
     background: #000000 !important;
     color: #ffffff !important;
   }
@@ -421,7 +544,9 @@
   :global(.autocomplete-option:focus),
   :global(.dropdown-item:hover),
   :global(.dropdown-item:focus),
-  :global(.option-row:hover) {
+  :global(.option-row:hover),
+  :global(.dropdown li:hover),
+  :global(.dropdown li.highlighted) {
     background: #545454 !important;
     color: #ffffff !important;
   }
@@ -433,7 +558,7 @@
     background-color: #040608;
     padding: 1rem;
     color: #d3d3d3;
-    font-family: "Fontin", sans-serif;
+    font-family: "Fontin", monospace, sans-serif;
     font-size: 13px;
     line-height: 1.2;
   }
@@ -493,71 +618,176 @@
     flex-wrap: wrap;
   }
 
-  /* Standalone Filter */
-  .standalone-filter {
+  /* Unified Combobox Dropdown Triggers */
+  .custom-dropdown-wrapper {
+    position: relative;
+    display: flex;
+    min-width: 0;
+  }
+
+  .realm-dropdown {
+    width: 80px;
+  }
+
+  .league-dropdown {
+    min-width: 140px;
+  }
+
+  .custom-dropdown-trigger {
+    font-family: "Fontin", monospace, sans-serif !important;
+    font-size: 12px !important;
+    height: 26px !important;
+    line-height: 1.15 !important;
+    background-color: #000000 !important;
+    border: 1px solid #7f7f7f !important;
+    border-radius: 0px !important;
+    color: #ffffff !important;
+    padding: 0 6px !important;
+    outline: none;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.35rem;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .custom-dropdown-trigger:hover,
+  .custom-dropdown-trigger:focus,
+  .custom-dropdown-trigger[aria-expanded="true"] {
+    border-color: #ffffff !important;
+  }
+
+  .trigger-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .trigger-arrow {
+    color: #888888;
+    font-size: 10px;
+    flex-shrink: 0;
+  }
+
+  .custom-dropdown-trigger:hover .trigger-arrow {
+    color: #ffffff;
+  }
+
+  .custom-dropdown-wrapper .dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    min-width: 100%;
+    max-height: 260px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    margin: 2px 0 0 0;
+    list-style: none;
+    scrollbar-width: thin;
+    scrollbar-color: #555555 #000000;
+  }
+
+  /* Standalone Filter Input Wrapper */
+  .filter-input-wrapper {
+    position: relative;
     width: 100%;
     flex-shrink: 0;
   }
 
+  .standalone-filter {
+    width: 100%;
+    padding-right: 1.5rem !important;
+  }
+
+  .clear-filter-btn {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    color: #888888;
+    cursor: pointer;
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 11px;
+    line-height: 1;
+    padding: 2px 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .clear-filter-btn:hover {
+    color: #ffffff;
+  }
+
   /* Inputs & Controls */
-  .text-input,
-  .select-input {
-    font-family: "Fontin", sans-serif;
+  .text-input {
+    font-family: "Fontin", monospace, sans-serif;
     background: #000000;
-    border: 1px solid #777777;
+    border: 1px solid #7f7f7f;
     border-radius: 0px;
     color: #ffffff;
-    padding: 3px 6px;
+    height: 26px;
+    line-height: 1.15;
+    padding: 0 6px;
     font-size: 12px;
     outline: none;
   }
 
+  .text-input:hover,
   .text-input:focus,
-  .select-input:focus {
-    border-color: #aaaaaa;
-  }
-
-  .select-input option {
-    background-color: #000000 !important;
-    color: #ffffff !important;
-  }
-
-  .league-select {
-    min-width: 130px;
+  .text-input.is-modified {
+    border-color: #ffffff;
   }
 
   /* Buttons */
   .pob-button {
-    font-family: "Fontin", sans-serif;
-    background: #111111;
-    border: 1px solid #777777;
+    font-family: "Fontin", monospace, sans-serif;
+    background: #000000;
+    border: 1px solid #7f7f7f;
     border-radius: 0px;
-    color: #d3d3d3;
-    padding: 3px 10px;
+    color: #ffffff;
+    height: 26px;
+    line-height: 1;
+    padding: 0 10px;
     font-size: 12px;
     cursor: pointer;
     white-space: nowrap;
     text-align: center;
     font-weight: normal;
+    transition:
+      background 0.1s ease,
+      border-color 0.1s ease;
   }
 
-  .pob-button:hover {
-    background: #2a2a2a;
-    border-color: #aaaaaa;
+  .pob-button:hover,
+  .pob-button:focus {
+    background: #111111;
+    border-color: #ffffff;
     color: #ffffff;
+    outline: none;
   }
 
-  /* Primary "+ New Project" Button: Black background (#000000), normal font weight, gray border (#777777) */
+  /* Primary "+ New Project" Button */
   .btn-primary {
     background: #000000;
-    border: 1px solid #777777;
+    border: 1px solid #7f7f7f;
     color: #ffffff;
     font-weight: normal;
   }
 
-  .btn-primary:hover {
-    background: #2a2a2a;
-    border-color: #aaaaaa;
+  .btn-primary:hover,
+  .btn-primary:focus {
+    background: #111111;
+    border-color: #ffffff;
     color: #ffffff;
   }
 
@@ -592,7 +822,7 @@
 
   .project-card:hover {
     background: #111111;
-    border-color: #aaaaaa;
+    border-color: #ffffff;
   }
 
   .card-main {
@@ -630,11 +860,13 @@
 
   .rename-input {
     background: #000000;
-    border: 1px solid #aaaaaa;
+    border: 1px solid #ffffff;
     color: #ffffff;
     font-size: 12px;
-    padding: 1px 4px;
+    height: 22px;
+    padding: 0 4px;
     border-radius: 0px;
+    outline: none;
   }
 
   .card-actions {
@@ -646,7 +878,8 @@
 
   .card-btn {
     background: #000000;
-    padding: 2px 6px;
+    height: 22px;
+    padding: 0 6px;
     font-size: 11px;
     font-weight: normal;
   }
@@ -687,7 +920,7 @@
   }
 
   .promo-banner-btn:hover {
-    border-color: #aaaaaa;
+    border-color: #ffffff;
   }
 
   .promo-banner-img {

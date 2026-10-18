@@ -21,6 +21,8 @@ export interface StatGroupPayloadState {
   value?: { min?: any; max?: any };
   filters: Array<{
     id: string;
+    statEntry?: any;
+    groupLabel?: string;
     value?: any;
     disabled?: boolean;
   }>;
@@ -44,7 +46,7 @@ function hasValidNumber(num: any): boolean {
 /* -------------------------------------------------------------------------- */
 /* Item reference code: "<realm>:<language>:<index>"                          */
 /*   realm    – realm the item was picked from ("poe" | "poe2")               */
-/*   language – value of the `currentLanguage` store at that time             */
+/*   language – language of the catalog the item TEXT belongs to              */
 /*   index    – relative position in that realm's flattened item array        */
 /*              (same flatten order the filter drawer uses)                   */
 /* Stored on full_payload.item_ref (top level, never sent to the trade API).  */
@@ -61,6 +63,21 @@ export function formatItemRef(ref: ItemRef): string {
 }
 
 export function parseItemRef(code: unknown): ItemRef | null {
+  if (!code) return null;
+  if (typeof code === "object") {
+    const obj = code as Record<string, any>;
+    const realm = normalizeRealm(obj.realm);
+    const language = String(obj.language ?? "");
+    const index = Number(obj.index);
+    if (
+      (obj.realm === "poe" || obj.realm === "poe2") &&
+      Number.isInteger(index) &&
+      index >= 0
+    ) {
+      return { realm, language, index };
+    }
+    return null;
+  }
   if (typeof code !== "string") return null;
   const first = code.indexOf(":");
   const last = code.lastIndexOf(":");
@@ -101,7 +118,10 @@ export function findItemIndex(entries: ItemEntry[], item: ItemEntry): number {
   );
 }
 
-function findEntryIndexByQuery(entries: ItemEntry[], query: any): number {
+export function findEntryIndexByQuery(
+  entries: ItemEntry[],
+  query: any,
+): number {
   const name = query?.name;
   const type = query?.type;
   const targetType = typeof type === "object" ? type?.option : type;
@@ -157,19 +177,26 @@ export function isItemRefStale(
 /**
  * Re-resolves the item stored in a full_payload for a target realm + language.
  *
- *  - same realm, same language            -> untouched
- *  - same realm, different language       -> refetch entry by relative position
- *  - different realm, same language       -> match unique item by name, else clear
- *                                            (no name -> clear)
- *  - different realm, different language  -> clear the item
- *  - legacy payload without item_ref      -> just attach a ref when it can be matched
+ *  - same realm, same language           -> ensure it exists in current catalog, else clear
+ *  - same realm, different language      -> refetch entry by relative position (ref.index)
+ *  - different realm, same language      -> match unique item by name, else clear
+ *  - different realm, different language -> find item at ref.index in ref.realm's array;
+ *                                           if unique, get its name and match by name in
+ *                                           targetRealm's array, else clear
+ *  - legacy payload without item_ref     -> attach a ref if found in current catalog, else clear
  *
- * Does nothing while the target realm's item catalog is not loaded yet.
+ * Does nothing while required item catalogs are not loaded yet.
+ *
+ * `opts.catalogReady`: the caller knows the catalogs have been re-fetched for
+ * `language`, so "entry text still equals the old text" no longer means
+ * "catalog is stale" (it can simply be an item whose name is identical in
+ * both languages). Skips the wait-for-catalog checks.
  */
 export function migrateItemRef(
   fullPayload: any,
   realm: string,
   language: string = getCurrentLanguage(),
+  opts: { catalogReady?: boolean } = {},
 ): { payload: any; changed: boolean } {
   const unchanged = { payload: fullPayload, changed: false };
   if (!fullPayload || typeof fullPayload !== "object") return unchanged;
@@ -185,42 +212,121 @@ export function migrateItemRef(
   const next = JSON.parse(JSON.stringify(fullPayload));
   next.query = next.query || {};
 
-  // Legacy payload (saved before item_ref existed): attach a ref if possible.
+  // Legacy payload (saved before item_ref existed): verify in current catalog and attach ref, else clear.
   if (!ref) {
     const idx = findEntryIndexByQuery(entries, next.query);
-    if (idx < 0) return unchanged;
-    next.item_ref = formatItemRef({ realm: targetRealm, language, index: idx });
+    if (idx >= 0) {
+      applyEntryToQuery(next.query, entries[idx]);
+      next.item_ref = formatItemRef({
+        realm: targetRealm,
+        language,
+        index: idx,
+      });
+    } else {
+      clearItemFromQuery(next.query);
+      delete next.item_ref;
+    }
     return { payload: next, changed: true };
   }
 
-  // Same realm + same language: nothing to do.
+  // 1. Same realm + same language: ensure item exists in current catalog, else clear.
   if (ref.realm === targetRealm && ref.language === language) {
-    return unchanged;
+    let idx = findEntryIndexByQuery(entries, next.query);
+
+    // The ref says "current language" but the stored text isn't in the catalog.
+    // That happens when the ref was stamped with a language before the catalog
+    // (or the project) was actually switched, e.g. the language setting is applied
+    // late after a reload. The index is still valid across languages, so adopt the
+    // entry at that position if it is the same kind of item (named/unnamed, disc).
+    if (idx < 0 && ref.index >= 0 && ref.index < entries.length) {
+      const cand = entries[ref.index];
+      const q = next.query;
+      const qDisc =
+        typeof q?.type === "object" ? q.type?.discriminator : undefined;
+      if (
+        cand &&
+        Boolean(cand.name) === Boolean(q?.name) &&
+        Boolean(cand.disc) === Boolean(qDisc)
+      ) {
+        idx = ref.index;
+      }
+    }
+
+    if (idx >= 0) {
+      const before = JSON.stringify([next.query?.name, next.query?.type]);
+      applyEntryToQuery(next.query, entries[idx]);
+      const after = JSON.stringify([next.query?.name, next.query?.type]);
+      const expectedRef = formatItemRef({
+        realm: targetRealm,
+        language,
+        index: idx,
+      });
+      if (next.item_ref !== expectedRef || before !== after) {
+        next.item_ref = expectedRef;
+        return { payload: next, changed: true };
+      }
+      return unchanged;
+    }
+
+    // Does not exist in current catalog -> clear
+    clearItemFromQuery(next.query);
+    delete next.item_ref;
+    return { payload: next, changed: true };
   }
 
   let entry: ItemEntry | null = null;
   let index = -1;
 
-  if (ref.realm === targetRealm) {
-    // Language changed: refetch by relative position.
+  if (ref.realm === targetRealm && ref.language !== language) {
+    // 2. Same realm, different language: take item with same index in array.
     index = ref.index;
-    entry = entries[index] ?? null;
+    entry = index >= 0 && index < entries.length ? entries[index] : null;
 
     // `currentLanguage` flips BEFORE the item catalog is re-fetched. If the entry
     // at this position still has the old text, the catalog is still the old
     // language: do nothing now and retry once the new catalog is in the store.
-    if (entry && entryMatchesQueryText(entry, next.query)) return unchanged;
-  } else if (ref.language === language) {
-    // Realm changed: only named unique items can follow.
+    if (
+      !opts.catalogReady &&
+      entry &&
+      entryMatchesQueryText(entry, next.query)
+    ) {
+      return unchanged;
+    }
+  } else if (ref.realm !== targetRealm && ref.language === language) {
+    // 3. Different realm, same language: match by finding item with same name (uniques only), else clear.
     const name = next.query.name;
     if (name) {
-      index = entries.findIndex((e) => e.flags?.unique && e.name === name);
+      index = entries.findIndex(
+        (e) => Boolean(e.flags?.unique) && e.name === name,
+      );
+      entry = index >= 0 ? entries[index] : null;
+    }
+  } else {
+    // 4. Both language and realm are different:
+    // Find in array matching ref.realm item index; if not unique clear field,
+    // if unique, get name and in current realm try to match by that name, if can't, clear.
+    const sourceEntries = getRealmItemEntries(ref.realm);
+    if (sourceEntries.length === 0) return unchanged;
+
+    const sourceItem =
+      ref.index >= 0 && ref.index < sourceEntries.length
+        ? sourceEntries[ref.index]
+        : null;
+
+    if (sourceItem && sourceItem.flags?.unique && sourceItem.name) {
+      // If source catalog hasn't updated to the new language yet and matches old query text, wait
+      if (!opts.catalogReady && entryMatchesQueryText(sourceItem, next.query)) {
+        return unchanged;
+      }
+
+      index = entries.findIndex(
+        (e) => Boolean(e.flags?.unique) && e.name === sourceItem.name,
+      );
       entry = index >= 0 ? entries[index] : null;
     }
   }
-  // Realm AND language changed -> entry stays null -> cleared.
 
-  if (entry) {
+  if (entry && index >= 0) {
     applyEntryToQuery(next.query, entry);
     next.item_ref = formatItemRef({ realm: targetRealm, language, index });
   } else {
@@ -260,7 +366,7 @@ function buildFilterDefinitionsMap(
 /**
  * Converts a saved `full_payload` and `realm` into an executable regular search `payload`.
  * Strips any disabled groups, disabled filters/stats, or entries not belonging to `realm`.
- * The item (name/type) is re-resolved for `realm` and dropped if its name does not
+ * The item (name/type) is re-resolved for `realm` and dropped if it does not
  * exist in that realm's item catalog.
  */
 export function buildRegularPayload(
@@ -280,12 +386,12 @@ export function buildRegularPayload(
     baseQuery.status = { option: "securable" };
   }
 
-  // Item name must exist for this realm, otherwise drop name + type.
-  if (baseQuery.name) {
+  // Ensure the item (name/type) exists in the current realm's catalog, otherwise clear it.
+  if (baseQuery.name || baseQuery.type) {
     const realmItems = getRealmItemEntries(normalizedRealm);
     if (
       realmItems.length > 0 &&
-      !realmItems.some((e) => e.name === baseQuery.name)
+      findEntryIndexByQuery(realmItems, baseQuery) < 0
     ) {
       clearItemFromQuery(baseQuery);
     }
@@ -484,6 +590,10 @@ export function buildRegularPayload(
 /**
  * Builds both `full_payload` (retaining ALL values across realms, marking collapsed or
  * out-of-realm items as `disabled: true`) and `payload` (stripped for the active search).
+ *
+ * `itemLanguage` is the language the selected item's TEXT is in (the language of the
+ * catalog it was picked from). It can lag behind `currentLanguage` while the item
+ * catalog is being re-fetched; stamping `currentLanguage` there would mislabel old text.
  */
 export function buildPayloads(params: {
   initialPayload: any;
@@ -497,6 +607,9 @@ export function buildPayloads(params: {
   allKnownFilterGroups: FilterGroup[];
   sortKey: string;
   sortDirection: "asc" | "desc";
+  itemLanguage?: string;
+  /** Ref currently held by the form; kept when the item can't be resolved in the loaded catalog. */
+  itemRef?: string | null;
 }): { payload: any; full_payload: any } {
   const {
     initialPayload,
@@ -510,6 +623,8 @@ export function buildPayloads(params: {
     allKnownFilterGroups,
     sortKey,
     sortDirection,
+    itemLanguage,
+    itemRef,
   } = params;
 
   const base = initialPayload ? JSON.parse(JSON.stringify(initialPayload)) : {};
@@ -584,34 +699,30 @@ export function buildPayloads(params: {
   const baseQuery: any = { ...(base.query || {}) };
   if (statusOption) baseQuery.status = { option: statusOption };
 
-  if (selectedItem) {
-    if (selectedItem.name) baseQuery.name = selectedItem.name;
-    else delete baseQuery.name;
-
-    if (selectedItem.disc) {
-      baseQuery.type = {
-        option: selectedItem.type,
-        discriminator: selectedItem.disc,
-      };
-    } else {
-      baseQuery.type = selectedItem.type;
-    }
-  } else {
-    delete baseQuery.name;
-    delete baseQuery.type;
-  }
-
   // Unique item code: realm + language + relative position in the realm's item array
   let itemRefCode: string | null = null;
+  const realmEntries = getRealmItemEntries(realm);
   if (selectedItem) {
-    const idx = findItemIndex(getRealmItemEntries(realm), selectedItem);
+    const idx = findItemIndex(realmEntries, selectedItem);
     if (idx >= 0) {
+      const matchedEntry = realmEntries[idx];
+      applyEntryToQuery(baseQuery, matchedEntry);
       itemRefCode = formatItemRef({
         realm,
-        language: getCurrentLanguage(),
+        language: itemLanguage ?? getCurrentLanguage(),
         index: idx,
       });
+    } else {
+      // Not resolvable in the loaded catalog (catalog empty, still the old language,
+      // or already the new language while selectedItem is the old-language object).
+      // Do NOT clear: keep the text and the existing ref so migrateItemRef can
+      // re-resolve it by index once the catalog/language settle.
+      applyEntryToQuery(baseQuery, selectedItem);
+      const keep = itemRef ?? base.item_ref;
+      if (keep) itemRefCode = keep;
     }
+  } else {
+    clearItemFromQuery(baseQuery);
   }
 
   // 2. Build fullFilters (merge PoE1 + PoE2 filter definitions properly)

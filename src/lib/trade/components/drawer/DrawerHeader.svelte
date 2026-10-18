@@ -1,3 +1,4 @@
+<!-- src/lib/trade/components/drawer/DrawerHeader.svelte -->
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
 
@@ -7,6 +8,7 @@
 
   const dispatch = createEventDispatcher<{
     close: void;
+    reset: void;
   }>();
 </script>
 
@@ -32,9 +34,25 @@
       </h3>
     {/if}
   </div>
-  <button type="button" class="close-btn" on:click={() => dispatch("close")}
-    >✕</button
-  >
+
+  <div class="header-actions">
+    <button
+      type="button"
+      class="reset-btn"
+      on:click={() => dispatch("reset")}
+      title="Clear form"
+    >
+      Clear
+    </button>
+    <button
+      type="button"
+      class="close-btn"
+      on:click={() => dispatch("close")}
+      title="Close"
+    >
+      ✕
+    </button>
+  </div>
 </div>
 
 <style>
@@ -90,7 +108,37 @@
     border-color: #ffffff;
   }
 
-  /* Borderless ✕ close button */
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-shrink: 0;
+  }
+
+  .reset-btn {
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 11px;
+    height: 22px;
+    line-height: 1;
+    background: #000000;
+    border: 1px solid #777777;
+    border-radius: 0px;
+    color: #d3d3d3;
+    cursor: pointer;
+    padding: 0 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .reset-btn:hover,
+  .reset-btn:focus {
+    color: #ffffff;
+    border-color: #ffffff;
+    outline: none;
+  }
+
+  /* Borderless close button */
   .close-btn {
     font-family: "Fontin", monospace, sans-serif;
     background: transparent;

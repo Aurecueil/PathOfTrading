@@ -1,17 +1,56 @@
+<!-- src/lib/trade/components/drawer/StatRow.svelte -->
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
+  import { createEventDispatcher, tick } from "svelte";
   import type { StatEntry } from "$lib/types/stats";
   import StatColorText from "$lib/trade/components/drawer/StatColorText.svelte";
 
   export let stat: StatEntry;
+  export let allowedStats: Array<StatEntry & { groupLabel?: string }> = [];
   export let groupLabel: string = "";
   export let value: { min?: any; max?: any; option?: any; weight?: any } = {};
   export let isWeighted: boolean = false;
 
   const dispatch = createEventDispatcher<{
     change: { min?: any; max?: any; option?: any; weight?: any };
+    changeStat: StatEntry;
     remove: void;
   }>();
+
+  // Inline stat editing state
+  let isEditingStat: boolean = false;
+  let editQuery: string = "";
+  let highlightedIndex: number = -1;
+  let dropdownEl: HTMLUListElement | undefined;
+
+  async function scrollHighlightedIntoView() {
+    await tick();
+    dropdownEl
+      ?.querySelector<HTMLElement>("li.highlighted")
+      ?.scrollIntoView({ block: "nearest" });
+  }
+
+  // Move highlight by one; grow the lazily rendered slice when reaching its end.
+  function moveHighlight(dir: 1 | -1) {
+    const shown = displayedEditStats.length;
+    if (shown === 0) return;
+    if (dir === 1) {
+      if (highlightedIndex + 1 >= shown && shown < matchingEditStats.length) {
+        visibleStatCount += 50;
+        highlightedIndex = highlightedIndex + 1;
+      } else {
+        highlightedIndex = (highlightedIndex + 1) % shown;
+      }
+    } else {
+      highlightedIndex = (highlightedIndex - 1 + shown) % shown;
+    }
+    scrollHighlightedIntoView();
+  }
+  let visibleStatCount: number = 50;
+  let editInputEl: HTMLInputElement;
+  let rowWrapperEl: HTMLDivElement;
+
+  // Custom option dropdown state
+  let isOptionMenuOpen: boolean = false;
 
   function updateField(field: "min" | "max" | "option" | "weight", val: any) {
     const updated = { ...value };
@@ -37,17 +76,171 @@
   }
 
   $: tagColor = getTagColor(groupLabel || stat.type);
+
+  $: matchingEditStats = editQuery.trim()
+    ? allowedStats.filter((item) => {
+        const tokens = editQuery.toLowerCase().trim().split(/\s+/);
+        const targetText = (item.text || "").toLowerCase();
+        const targetLabel = (item.groupLabel || "").toLowerCase();
+        const targetType = (item.type || "").toLowerCase();
+        return tokens.every(
+          (token) =>
+            targetText.includes(token) ||
+            targetLabel.includes(token) ||
+            targetType.includes(token),
+        );
+      })
+    : allowedStats;
+
+  $: displayedEditStats = matchingEditStats.slice(0, visibleStatCount);
+
+  async function startEditingStat() {
+    isEditingStat = true;
+    // Pre-fill only with stat text (without types/group tags)
+    editQuery = stat.text || "";
+    highlightedIndex = 0;
+    visibleStatCount = 50;
+    await tick();
+    editInputEl?.focus();
+  }
+
+  function selectEditedStat(nextStat: StatEntry) {
+    isEditingStat = false;
+    highlightedIndex = -1;
+    dispatch("changeStat", nextStat);
+  }
+
+  function handleEditKeyDown(e: KeyboardEvent) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (displayedEditStats.length > 0) {
+        moveHighlight(1);
+      }
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (displayedEditStats.length > 0) {
+        moveHighlight(-1);
+      }
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (
+        highlightedIndex >= 0 &&
+        highlightedIndex < displayedEditStats.length
+      ) {
+        selectEditedStat(displayedEditStats[highlightedIndex]);
+      } else if (displayedEditStats.length > 0) {
+        selectEditedStat(displayedEditStats[0]);
+      } else {
+        isEditingStat = false;
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      isEditingStat = false;
+      highlightedIndex = -1;
+    }
+  }
+
+  function handleDropdownScroll(e: UIEvent) {
+    const target = e.currentTarget as HTMLElement;
+    if (target.scrollTop + target.clientHeight >= target.scrollHeight - 60) {
+      if (visibleStatCount < matchingEditStats.length) {
+        visibleStatCount += 50;
+      }
+    }
+  }
+
+  function handleWindowClick(e: MouseEvent) {
+    if (!rowWrapperEl) return;
+    if (!e.composedPath().includes(rowWrapperEl)) {
+      isEditingStat = false;
+      isOptionMenuOpen = false;
+    }
+  }
+
+  $: selectedOptionLabel = (() => {
+    const opts = stat.option?.options || [];
+    if (
+      value?.option === undefined ||
+      value?.option === null ||
+      value?.option === ""
+    ) {
+      return "Any";
+    }
+    const found = opts.find((o) => String(o.id) === String(value.option));
+    return found ? found.text : "Any";
+  })();
 </script>
 
-<div class="stat-row">
-  <div class="stat-info">
-    <span class="stat-tag" style="border-color: {tagColor}; color: {tagColor};">
-      {groupLabel || stat.type}
-    </span>
-    <span class="stat-text" title={stat.text}>
-      <StatColorText text={stat.text} />
-    </span>
-  </div>
+<svelte:window on:click={handleWindowClick} />
+
+<div class="stat-row" class:is-editing={isEditingStat} bind:this={rowWrapperEl}>
+  {#if isEditingStat}
+    <div class="stat-edit-container">
+      <input
+        bind:this={editInputEl}
+        type="text"
+        class="stat-edit-input"
+        bind:value={editQuery}
+        on:input={() => {
+          highlightedIndex = 0;
+          visibleStatCount = 50;
+        }}
+        on:keydown={handleEditKeyDown}
+        placeholder="Search stat..."
+        autocomplete="off"
+      />
+
+      {#if displayedEditStats.length > 0}
+        <ul
+          class="stat-dropdown"
+          bind:this={dropdownEl}
+          on:scroll={handleDropdownScroll}
+          on:wheel|stopPropagation
+        >
+          {#each displayedEditStats as statItem, idx}
+            {@const itemTagCol = getTagColor(
+              statItem.groupLabel || statItem.type,
+            )}
+            <li
+              class:highlighted={highlightedIndex === idx}
+              class:selected={statItem.id === stat.id}
+              on:mousedown|preventDefault={() => selectEditedStat(statItem)}
+            >
+              <span
+                class="stat-tag"
+                style="border-color: {itemTagCol}; color: {itemTagCol};"
+              >
+                {statItem.groupLabel || statItem.type}
+              </span>
+              <StatColorText className="dropdown-text" text={statItem.text} />
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
+  {:else}
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <div
+      class="stat-info editable"
+      on:click={startEditingStat}
+      title="Click to edit stat ({stat.text})"
+    >
+      <span
+        class="stat-tag"
+        style="border-color: {tagColor}; color: {tagColor};"
+      >
+        {groupLabel || stat.type}
+      </span>
+      <span class="stat-text">
+        <StatColorText text={stat.text} />
+      </span>
+    </div>
+  {/if}
 
   <div class="stat-controls">
     <!-- Weight field matching Min/Max box style -->
@@ -63,19 +256,46 @@
 
     <!-- Stat Option or Min/Max -->
     {#if stat.option?.options && stat.option.options.length > 0}
-      <select
-        value={value?.option ?? ""}
-        on:change={(e) =>
-          updateField(
-            "option",
-            e.currentTarget.value ? Number(e.currentTarget.value) : null,
-          )}
-      >
-        <option value="">Any</option>
-        {#each stat.option.options as opt}
-          <option value={opt.id}>{opt.text}</option>
-        {/each}
-      </select>
+      <div class="stat-opt-dropdown-wrapper">
+        <button
+          type="button"
+          class="stat-opt-trigger"
+          on:click={() => (isOptionMenuOpen = !isOptionMenuOpen)}
+        >
+          <span class="opt-label">{selectedOptionLabel}</span>
+          <span class="opt-chevron">▾</span>
+        </button>
+        {#if isOptionMenuOpen}
+          <ul class="dropdown stat-opt-dropdown" on:wheel|stopPropagation>
+            <li
+              class:selected={value?.option === undefined ||
+                value?.option === null ||
+                value?.option === ""}
+              on:mousedown|preventDefault={() => {
+                updateField("option", null);
+                isOptionMenuOpen = false;
+              }}
+            >
+              Any
+            </li>
+            {#each stat.option.options as opt}
+              <li
+                class:selected={String(value?.option) === String(opt.id)}
+                on:mousedown|preventDefault={() => {
+                  const parsed =
+                    typeof opt.id === "number" || !Number.isNaN(Number(opt.id))
+                      ? Number(opt.id)
+                      : opt.id;
+                  updateField("option", parsed);
+                  isOptionMenuOpen = false;
+                }}
+              >
+                {opt.text}
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
     {:else}
       <div class="min-max-controls">
         <input
@@ -116,6 +336,12 @@
     border-radius: 0px;
     min-height: 24px;
     box-sizing: border-box;
+    position: relative;
+  }
+
+  .stat-row.is-editing {
+    z-index: 60;
+    border-color: #ffffff;
   }
 
   .stat-info {
@@ -125,6 +351,90 @@
     flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
+  }
+
+  .stat-info.editable {
+    cursor: pointer;
+  }
+
+  .stat-info.editable:hover .stat-text {
+    color: #ffffff;
+  }
+
+  .stat-edit-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .stat-edit-input {
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 11px;
+    line-height: 1.15;
+    width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    color: #ffffff;
+    padding: 0;
+    margin: 0;
+    outline: none;
+    box-sizing: border-box;
+  }
+
+  .stat-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: -5px;
+    right: 0;
+    min-width: 260px;
+    max-height: 240px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: #000000;
+    border: 1px solid #ffffff;
+    border-radius: 0px;
+    list-style: none;
+    padding: 2px 0;
+    margin: 0;
+    z-index: 1000;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
+    scrollbar-width: thin;
+    scrollbar-color: #555555 #000000;
+  }
+
+  .stat-dropdown li {
+    font-family: "Fontin", monospace, sans-serif;
+    font-size: 11px;
+    line-height: 1.15;
+    padding: 1px 4px;
+    cursor: pointer;
+    color: #9a9a9a;
+    background: #000000;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .stat-dropdown li:hover,
+  .stat-dropdown li.highlighted {
+    background: #545454;
+    color: #ffffff;
+  }
+
+  .stat-dropdown li.selected {
+    color: #ffffff;
+  }
+
+  .dropdown-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .stat-tag {
@@ -176,7 +486,11 @@
     border-color: #ffffff;
   }
 
-  select {
+  .stat-opt-dropdown-wrapper {
+    position: relative;
+  }
+
+  .stat-opt-trigger {
     font-family: "Fontin", monospace, sans-serif;
     font-size: 11px;
     line-height: 1.15;
@@ -189,16 +503,36 @@
     outline: none;
     max-width: 140px;
     cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
   }
 
-  select:hover,
-  select:focus {
+  .stat-opt-trigger:hover,
+  .stat-opt-trigger:focus {
     border-color: #ffffff;
   }
 
-  select option {
-    background-color: #000000;
-    color: #ffffff;
+  .opt-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .opt-chevron {
+    color: #888888;
+    font-size: 9px;
+  }
+
+  .stat-opt-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    min-width: 140px;
+    max-height: 220px;
+    overflow-y: auto;
+    margin: 2px 0 0 0;
+    list-style: none;
   }
 
   .min-max-controls {
@@ -231,13 +565,12 @@
     -webkit-appearance: none;
     margin: 0;
   }
-
   input[type="number"] {
     -moz-appearance: textfield;
     appearance: textfield;
   }
 
-  /* Borderless ✕ remove button */
+  /* Borderless remove button */
   .remove-btn {
     font-family: "Fontin", monospace, sans-serif;
     background: transparent;

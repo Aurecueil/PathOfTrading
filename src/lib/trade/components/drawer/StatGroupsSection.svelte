@@ -1,3 +1,4 @@
+<!-- src/lib/trade/components/drawer/StatGroupsSection.svelte -->
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import StatGroupUI from "$lib/trade/components/drawer/StatGroupUI.svelte";
@@ -54,6 +55,27 @@
     statGroups = [...statGroups];
   }
 
+  function updateStatEntryInGroup(
+    groupIndex: number,
+    statIndex: number,
+    newStat: StatEntry,
+  ) {
+    const prev = statGroups[groupIndex].filters[statIndex];
+    const prevHasOptions = Boolean(prev?.statEntry?.option?.options?.length);
+    const nextHasOptions = Boolean(newStat?.option?.options?.length);
+
+    statGroups[groupIndex].filters[statIndex] = {
+      ...prev,
+      id: newStat.id,
+      statEntry: newStat,
+      groupLabel: (newStat as any).groupLabel || newStat.type,
+      value:
+        prevHasOptions !== nextHasOptions ? {} : { ...(prev?.value || {}) },
+      disabled: false,
+    };
+    statGroups = [...statGroups];
+  }
+
   function removeStatFromGroup(groupIndex: number, statIndex: number) {
     statGroups[groupIndex].filters = statGroups[groupIndex].filters.filter(
       (_: any, i: number) => i !== statIndex,
@@ -85,6 +107,8 @@
           on:addStat={(e) => addStatToGroup(gIndex, e.detail)}
           on:updateStatValue={(e) =>
             updateStatValueInGroup(gIndex, e.detail.index, e.detail.value)}
+          on:updateStatEntry={(e) =>
+            updateStatEntryInGroup(gIndex, e.detail.index, e.detail.stat)}
           on:removeStat={(e) => removeStatFromGroup(gIndex, e.detail)}
           on:deleteGroup={() => dispatch("deleteGroup", group.id)}
         />
@@ -99,11 +123,10 @@
         class="add-stat-group-btn"
         on:click={() => (isAddGroupMenuOpen = !isAddGroupMenuOpen)}
       >
-        + Add Stat Group ▾
+        + Add Stat Group
       </button>
-
       {#if isAddGroupMenuOpen}
-        <ul class="add-group-dropdown" on:wheel|stopPropagation>
+        <ul class="dropdown add-group-dropdown" on:wheel|stopPropagation>
           {#each availableStatGroupOptions as opt}
             <li
               on:click={() => {
@@ -201,7 +224,7 @@
   }
 
   .add-group-dropdown li:hover {
-    background: #262626;
+    background: #545454;
     color: #ffffff;
   }
 </style>
