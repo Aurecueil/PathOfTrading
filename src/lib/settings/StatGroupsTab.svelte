@@ -10,7 +10,8 @@
   } from "$lib/trade/statGroupPresets";
   import PresetCard from "./statgroups/PresetCard.svelte";
 
-  let open = $state<Record<string, boolean>>({});
+  // Accordion: only one preset can be expanded at a time
+  let openId = $state<string | null>(null);
   let freshId = $state<string | null>(null);
 
   onMount(() => {
@@ -23,8 +24,23 @@
   function add() {
     const p = createPreset();
     updatePresets((d) => d.push(p));
-    open[p.id] = true;
+    openId = p.id;
     freshId = p.id;
+  }
+
+  function toggle(id: string) {
+    freshId = null;
+    openId = openId === id ? null : id;
+  }
+
+  function move(id: string, delta: -1 | 1) {
+    updatePresets((d) => {
+      const i = d.findIndex((x) => x.id === id);
+      const j = i + delta;
+      if (i < 0 || j < 0 || j >= d.length) return;
+      const [item] = d.splice(i, 1);
+      d.splice(j, 0, item);
+    });
   }
 </script>
 
@@ -33,15 +49,15 @@
     <div class="st-error">{$statGroupPresetsError}</div>
   {/if}
 
-  {#each $statGroupPresetsStore as preset (preset.id)}
+  {#each $statGroupPresetsStore as preset, i (preset.id)}
     <PresetCard
       {preset}
-      open={Boolean(open[preset.id])}
+      open={openId === preset.id}
       fresh={freshId === preset.id}
-      ontoggle={() => {
-        freshId = null;
-        open[preset.id] = !open[preset.id];
-      }}
+      canMoveUp={i > 0}
+      canMoveDown={i < $statGroupPresetsStore.length - 1}
+      ontoggle={() => toggle(preset.id)}
+      onmove={(delta) => move(preset.id, delta)}
     />
   {/each}
 

@@ -103,8 +103,6 @@ export async function initItemData(): Promise<void> {
   }
 }
 
-export const displayTiers = writable<boolean>(false);
-export const displayRune = writable<boolean>(true);
 export const currentLanguage = writable<string>("EN");
 
 export async function initUserSettings(): Promise<void> {
@@ -125,4 +123,60 @@ export async function initUserSettings(): Promise<void> {
   if (lang.status === "fulfilled" && lang.value) {
     currentLanguage.set(lang.value);
   }
+}
+// ---------------------------------------------------------------------------
+// UI-only settings, persisted to disk via webview storage (not stored in Rust)
+// ---------------------------------------------------------------------------
+const UI_SETTINGS_KEY = "pot.uiSettings";
+
+type UiSettings = { displayTiers?: boolean; displayRune?: boolean };
+
+function readUiSettings(): UiSettings {
+  try {
+    const raw = localStorage.getItem(UI_SETTINGS_KEY);
+    return raw ? (JSON.parse(raw) as UiSettings) : {};
+  } catch {
+    return {};
+  }
+}
+
+const initialUi = readUiSettings();
+
+// Always display modifier tiers (if on, displayTiers is true)
+export const displayTiers = writable<boolean>(
+  typeof initialUi.displayTiers === "boolean" ? initialUi.displayTiers : false,
+);
+
+// Hide socketable modifiers (if hidden, displayRune is false)
+export const displayRune = writable<boolean>(
+  typeof initialUi.displayRune === "boolean" ? initialUi.displayRune : true,
+);
+
+function persistUiSettings() {
+  try {
+    localStorage.setItem(
+      UI_SETTINGS_KEY,
+      JSON.stringify({
+        displayTiers: get(displayTiers),
+        displayRune: get(displayRune),
+      }),
+    );
+  } catch {
+    /* storage unavailable, ignore */
+  }
+}
+
+displayTiers.subscribe(persistUiSettings);
+displayRune.subscribe(persistUiSettings);
+
+// Keep other app windows in sync (the "storage" event only fires in other windows)
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e.key !== UI_SETTINGS_KEY) return;
+    const next = readUiSettings();
+    if (typeof next.displayTiers === "boolean")
+      displayTiers.set(next.displayTiers);
+    if (typeof next.displayRune === "boolean")
+      displayRune.set(next.displayRune);
+  });
 }

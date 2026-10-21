@@ -1,21 +1,35 @@
 use super::env;
+use super::login::expire_session;
 use std::fs;
 use std::time::Duration;
 use tauri::{Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use url::Url;
 
+const WINDOW_LABEL: &str = "poe_refresh_hidden";
+
+/// Error returned by a background refresh that ran into a Cloudflare challenge.
+pub const CF_BLOCKED_ERR: &str = "CLOUDFLARE_CHALLENGE";
+
+/// Reports Cloudflare challenge state through a cookie (`__POE_CF_ACTIVE`), because
+/// `WebviewWindow::title()` returns the NATIVE window title, not `document.title`.
+/// Rust reads this cookie the same way it reads POETOKEN / cf_clearance.
 const CF_DETECTOR_SCRIPT: &str = r#"
 (function() {
     if (window.__cfDetectorInstalled) return;
     window.__cfDetectorInstalled = true;
-    setInterval(() => {
-        const isCf = document.title.includes("Just a moment") ||
-                     document.title.includes("Attention Required") ||
-                     !!document.querySelector('#challenge-running, #challenge-stage, .cf-turnstile, iframe[src*="challenges.cloudflare.com"]');
-        if (isCf && !document.title.startsWith("__CF_CHALLENGE__")) {
-            document.title = "__CF_CHALLENGE__:" + document.title;
-        }
-    }, 200);
+    const mark = (on) => {
+        try {
+            document.cookie = "__POE_CF_ACTIVE=" + (on ? "1" : "0") + "; path=/; max-age=30; SameSite=Lax";
+        } catch (_) {}
+    };
+    const check = () => {
+        const t = document.title || "";
+        const isCf = t.includes("Just a moment") || t.includes("Attention Required") ||
+            !!document.querySelector('#challenge-running, #challenge-stage, .cf-turnstile, iframe[src*="challenges.cloudflare.com"]');
+        mark(isCf);
+    };
+    check();
+    setInterval(check, 200);
 })();
 "#;
 
@@ -36,6 +50,7 @@ async fn clear_cloudflare_webview_data(window: &WebviewWindow) {
                 if name.starts_with("cf_")
                     || name.starts_with("__cf")
                     || name.starts_with("_cf")
+                    || name.starts_with("__POE_CF")
                     || name.contains("cloudflare")
                 {
                     let _ = window.delete_cookie(c);
@@ -71,7 +86,7 @@ pub async fn run_poe_refresh_or_challenge(
     profile_dir.push("poe_webview_profile");
     fs::create_dir_all(&profile_dir).map_err(|e| e.to_string())?;
 
-    if let Some(existing) = app.get_webview_window("poe_refresh_hidden") {
+    if let Some(existing) = app.get_webview_window(WINDOW_LABEL) {
         let _ = existing.close();
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
@@ -80,28 +95,22 @@ pub async fn run_poe_refresh_or_challenge(
         .parse()
         .map_err(|e: url::ParseError| e.to_string())?;
 
-    // Always spawn hidden first so we can clear stale CF data before showing the popup
-    let window = WebviewWindowBuilder::new(
-        &app,
-        "poe_refresh_hidden",
-        WebviewUrl::External(trade_url.clone()),
-    )
-    .title(if force_show {
-        "Cloudflare Verification - Path of Exile"
-    } else {
-        "PoE Token Refresh"
-    })
-    .inner_size(650.0, 750.0)
-    .visible(false)
-    .focused(false)
-    .initialization_script(CF_DETECTOR_SCRIPT)
-    .data_directory(profile_dir)
-    .build()
-    .map_err(|e| e.to_string())?;
+    // Always spawn hidden first so stale CF data can be cleared before showing the popup.
+    // The native title is cosmetic only: never match on it.
+    let window =
+        WebviewWindowBuilder::new(&app, WINDOW_LABEL, WebviewUrl::External(trade_url.clone()))
+            .title("Path of Exile - Verification")
+            .inner_size(650.0, 750.0)
+            .visible(false)
+            .focused(false)
+            .initialization_script(CF_DETECTOR_SCRIPT)
+            .data_directory(profile_dir)
+            .build()
+            .map_err(|e| e.to_string())?;
 
     let mut is_shown = false;
 
-    // If explicitly triggered by a Cloudflare block on trade fetches, clear CF data immediately before showing
+    // Explicitly triggered by a Cloudflare block: clear CF data, reload, show immediately
     if force_show {
         tokio::time::sleep(Duration::from_millis(200)).await;
         clear_cloudflare_webview_data(&window).await;
@@ -117,44 +126,37 @@ pub async fn run_poe_refresh_or_challenge(
         "https://pathofexile.com".parse::<Url>().unwrap(),
     ];
 
-    let mut attempts = 0;
-    let mut max_attempts: usize = if force_show { 480 } else { 30 }; // 120s interactive, 7.5s hidden
+    let mut attempts: usize = 0;
+    let max_attempts: usize = if force_show { 480 } else { 30 }; // 120s interactive, 7.5s hidden
+    let mut clear_polls: usize = 0; // consecutive polls without an active challenge
 
-    let mut token_result = None;
-    let mut cf_clearance_result = None;
+    let mut token_result: Option<String> = None;
+    let mut cf_clearance_result: Option<String> = None;
 
     while attempts < max_attempts {
         tokio::time::sleep(Duration::from_millis(250)).await;
         attempts += 1;
 
-        if app.get_webview_window("poe_refresh_hidden").is_none() {
+        if app.get_webview_window(WINDOW_LABEL).is_none() {
             return Err("Verification window was closed by user.".into());
         }
 
         let _ = window.eval(CF_DETECTOR_SCRIPT);
 
         let mut is_cf_challenged = false;
-        if let Ok(title) = window.title() {
-            let lower = title.to_lowercase();
-            if title.starts_with("__CF_CHALLENGE__:")
-                || lower.contains("just a moment")
-                || lower.contains("attention required")
-                || lower.contains("cloudflare")
-                || lower.contains("security check")
-            {
-                is_cf_challenged = true;
-            }
-        }
-
-        let mut current_token = None;
-        let mut current_cf = None;
+        let mut current_token: Option<String> = None;
+        let mut current_cf: Option<String> = None;
         let mut has_cf_chl_cookie = false;
 
         for domain in &domains {
             if let Ok(cookies) = window.cookies_for_url(domain.clone()) {
                 for c in &cookies {
                     let name = c.name();
-                    if name == "POETOKEN" && !c.value().is_empty() {
+                    if name == "__POE_CF_ACTIVE" {
+                        if c.value() == "1" {
+                            is_cf_challenged = true;
+                        }
+                    } else if name == "POETOKEN" && !c.value().is_empty() {
                         current_token = Some(c.value().to_string());
                     } else if name == "cf_clearance" && !c.value().is_empty() {
                         current_cf = Some(c.value().to_string());
@@ -165,65 +167,66 @@ pub async fn run_poe_refresh_or_challenge(
             }
         }
 
-        // If background refresh hits a Cloudflare challenge or stalls without POETOKEN,
-        // clear stale Cloudflare browser data first, reload, and reveal the window
-        if !is_shown
-            && (is_cf_challenged
-                || (has_cf_chl_cookie && current_token.is_none())
-                || (attempts == 14 && current_token.is_none()))
-        {
-            is_shown = true;
-            max_attempts = attempts + 480; // Extend timeout to 2 minutes for user interaction
-
-            clear_cloudflare_webview_data(&window).await;
-            let _ = window.navigate(trade_url.clone());
-
-            let _ = window.set_title("Cloudflare Verification - Path of Exile");
-            let _ = window.center();
-            let _ = window.show();
-            let _ = window.set_focus();
-            continue;
+        // Background refresh ran into Cloudflare: show nothing here. The caller ends the
+        // session (same as a UI logout) and the UI asks the user to log in again.
+        if !is_shown && (is_cf_challenged || (has_cf_chl_cookie && current_token.is_none())) {
+            let _ = window.close();
+            return Err(CF_BLOCKED_ERR.to_string());
         }
 
-        // Wait until any active challenge finishes and valid cookies are present
-        if !is_cf_challenged {
-            if is_shown {
-                // Since we wiped cf_clearance before showing, any non-empty current_cf is freshly issued
-                if current_cf.is_some() && current_token.is_some() {
-                    token_result = current_token;
-                    cf_clearance_result = current_cf;
-                    break;
-                } else if attempts >= 16 && (current_cf.is_some() || current_token.is_some()) {
-                    token_result = current_token;
-                    cf_clearance_result = current_cf;
-                    break;
-                }
-            } else if current_token.is_some() {
+        // Challenge still on screen: keep waiting
+        if is_cf_challenged {
+            clear_polls = 0;
+            continue;
+        }
+        clear_polls += 1;
+
+        if is_shown {
+            // cf_clearance was wiped before showing, so any value here is freshly issued
+            if current_cf.is_some() && current_token.is_some() {
                 token_result = current_token;
                 cf_clearance_result = current_cf;
                 break;
             }
+            // Challenge passed but no POETOKEN (e.g. logged out): keep fresh cf_clearance
+            if clear_polls >= 8 && current_cf.is_some() {
+                token_result = current_token;
+                cf_clearance_result = current_cf;
+                break;
+            }
+        } else if current_token.is_some() {
+            token_result = current_token;
+            cf_clearance_result = current_cf;
+            break;
         }
     }
 
     let _ = window.close();
 
-    if let Some(ref cf) = cf_clearance_result {
-        let _ = env::save_secret("cf_clearance", cf);
+    // Save BOTH. Previously the token was dropped whenever cf_clearance existed.
+    if let Some(ref t) = token_result {
+        env::save_secret("poetoken", t)?;
     }
-    if let Some(cf) = cf_clearance_result {
-        Ok(cf)
-    } else if let Some(token) = token_result {
-        env::save_secret("poetoken", &token)?;
-        Ok(token)
-    } else {
-        Err("Failed to refresh POETOKEN or pass Cloudflare challenge.".into())
+    if let Some(ref cf) = cf_clearance_result {
+        env::save_secret("cf_clearance", cf)?;
+    }
+
+    match (token_result, cf_clearance_result) {
+        (Some(t), _) => Ok(t),
+        (None, Some(cf)) => Ok(cf),
+        _ => Err("Failed to refresh POETOKEN or pass Cloudflare challenge.".into()),
     }
 }
 
 #[tauri::command]
 pub async fn refresh_poetoken_background(app: tauri::AppHandle) -> Result<String, String> {
-    run_poe_refresh_or_challenge(app, false).await
+    match run_poe_refresh_or_challenge(app.clone(), false).await {
+        Err(e) if e == CF_BLOCKED_ERR => {
+            expire_session(&app).await;
+            Err(e)
+        }
+        other => other,
+    }
 }
 
 // --- Check Session Status on Boot ---

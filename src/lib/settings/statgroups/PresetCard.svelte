@@ -17,7 +17,6 @@
     canMoveDown,
     ontoggle,
     onmove,
-    onduplicate,
   }: {
     preset: StatGroupPreset;
     open: boolean;
@@ -26,7 +25,6 @@
     canMoveDown: boolean;
     ontoggle: () => void;
     onmove: (delta: -1 | 1) => void;
-    onduplicate: () => void;
   } = $props();
 
   const GAMES: { id: PresetGame; label: string }[] = [
@@ -103,10 +101,6 @@
   function move(e: MouseEvent, delta: -1 | 1) {
     e.stopPropagation();
     onmove(delta);
-  }
-  function duplicate(e: MouseEvent) {
-    e.stopPropagation();
-    onduplicate();
   }
   function headKey(e: KeyboardEvent) {
     if (e.target !== e.currentTarget) return;
@@ -194,13 +188,6 @@
         aria-label="Move preset down"
         disabled={!canMoveDown}
         onclick={(e) => move(e, 1)}>▼</button
-      >
-      <button
-        type="button"
-        class="sp-icon"
-        title="Duplicate preset"
-        aria-label="Duplicate preset"
-        onclick={duplicate}>⧉</button
       >
       <button
         type="button"

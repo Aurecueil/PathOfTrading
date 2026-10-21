@@ -8,7 +8,6 @@
     openTabs,
     workspaceState,
     openProject,
-    openSettingsTab,
     closeProject,
     navigateToProjectsHome,
     createNewProject,
@@ -20,6 +19,10 @@
     openExternalUrl,
   } from "$lib/project/projects.svelte";
   import { leaguesPoe, leaguesPoe2 } from "$lib/trade/tradeStore";
+  import SettingsOverlay from "$lib/settings/SettingsOverlay.svelte";
+  import { openSettings } from "$lib/settings/settingsState.svelte";
+
+  const LOGIN_NOTICE_DELAY_SECS = 5;
 
   let fileMenuOpen = $state(false);
   let realmLeagueExpanded = $state(false);
@@ -31,13 +34,12 @@
   let isLoggedIn = $state(false);
   let accountName = $state<string | null>(null);
   let loginModalOpen = $state(false);
+  let proceedCountdown = $state(0);
+  let sessionExpiredOpen = $state(false);
 
   const currentPathname = $derived($page.url.pathname);
   const isInsideProject = $derived(
     Boolean(currentPathname.startsWith("/projects/")),
-  );
-  const isInsideSettings = $derived(
-    Boolean(currentPathname.startsWith("/settings")),
   );
 
   // Filter PoE 1 leagues to PC realm
@@ -53,6 +55,17 @@
   const availableProjectLeagues = $derived(
     workspaceState.activeProjectRealm === "poe2" ? poe2Leagues : poe1PcLeagues,
   );
+
+  // "Proceed & Login" is locked for a few seconds each time the notice opens
+  $effect(() => {
+    if (!loginModalOpen) return;
+    proceedCountdown = LOGIN_NOTICE_DELAY_SECS;
+    const id = setInterval(() => {
+      proceedCountdown = Math.max(0, proceedCountdown - 1);
+      if (proceedCountdown === 0) clearInterval(id);
+    }, 1000);
+    return () => clearInterval(id);
+  });
 
   async function refreshAuthStatus() {
     try {
@@ -82,11 +95,31 @@
     }
   }
 
+  // The backend ends the session when Cloudflare blocks it (refresh or fetch) and sets a
+  // flag, so the popup also appears if the event fired before this component mounted.
+  async function checkSessionExpired() {
+    try {
+      const expired = await invoke<boolean>("consume_session_expired");
+      if (expired) {
+        isLoggedIn = false;
+        accountName = null;
+        closeFileMenu();
+        closeAccountMenu();
+        loginModalOpen = false;
+        sessionExpiredOpen = true;
+      }
+    } catch (err) {
+      console.error("Failed to check session expiry:", err);
+    }
+  }
+
   onMount(() => {
     refreshAuthStatus();
+    checkSessionExpired();
 
     const unlistenSuccess = listen("poe_auth_success", () => {
       refreshAuthStatus();
+      sessionExpiredOpen = false;
       showToast("Logged in to Path of Exile");
     });
 
@@ -96,9 +129,14 @@
       accountMenuOpen = false;
     });
 
+    const unlistenExpired = listen("poe_session_expired", () => {
+      checkSessionExpired();
+    });
+
     return () => {
       unlistenSuccess.then((fn) => fn());
       unlistenLogout.then((fn) => fn());
+      unlistenExpired.then((fn) => fn());
     };
   });
 
@@ -130,6 +168,7 @@
       if (fileMenuOpen) closeFileMenu();
       if (accountMenuOpen) closeAccountMenu();
       if (loginModalOpen) loginModalOpen = false;
+      if (sessionExpiredOpen) sessionExpiredOpen = false;
     }
   }
 
@@ -137,14 +176,26 @@
     loginModalOpen = true;
   }
 
-  async function confirmLogin() {
-    loginModalOpen = false;
+  async function startLogin() {
     try {
       await invoke("open_poe_login");
     } catch (err) {
       console.error("Failed to open PoE login window:", err);
       showToast("Failed to open login window");
     }
+  }
+
+  // Regular login: only after the notice timer has run out
+  async function confirmLogin() {
+    if (proceedCountdown > 0) return;
+    loginModalOpen = false;
+    await startLogin();
+  }
+
+  // Login from the "session ended" popup: skips the regular notice
+  async function reloginFromExpired() {
+    sessionExpiredOpen = false;
+    await startLogin();
   }
 
   async function handleLogoutClick() {
@@ -200,7 +251,7 @@
 
   function handleOpenSettingsMenu() {
     closeFileMenu();
-    openSettingsTab();
+    openSettings();
   }
 
   async function handleSaveMenu() {
@@ -242,14 +293,9 @@
 
   function handleTabClick(
     e: MouseEvent,
-    tab: { id: string; name: string; realm?: string; isSettings?: boolean },
+    tab: { id: string; name: string; realm?: string },
   ) {
     e.preventDefault();
-    if (tab.isSettings) {
-      if (isInsideSettings) return;
-      openSettingsTab();
-      return;
-    }
     if (workspaceState.activeProjectId === tab.id && isInsideProject) return;
     openProject(tab);
   }
@@ -405,29 +451,21 @@
   </div>
 
   <nav class="tabs">
-    {#each openTabs as tab (tab.id)}
+    <!-- .filter is a safety net in case an old settings tab is restored from a saved session -->
+    {#each openTabs.filter((t) => !t.isSettings) as tab (tab.id)}
       <div
         class="tab"
-        class:active-tab={(tab.isSettings && isInsideSettings) ||
-          (!tab.isSettings &&
-            isInsideProject &&
-            workspaceState.activeProjectId === tab.id)}
+        class:active-tab={isInsideProject &&
+          workspaceState.activeProjectId === tab.id}
       >
-        <a
-          href={tab.isSettings ? "/settings" : `/projects/${tab.id}`}
-          onclick={(e) => handleTabClick(e, tab)}
-        >
-          {#if !tab.isSettings}
-            <img
-              src={tab.realm?.toLowerCase() === "poe2"
-                ? "/poe2.png"
-                : "/poe.png"}
-              alt={tab.realm || "poe"}
-              class="tab-realm-icon"
-            />
-          {/if}
+        <a href={`/projects/${tab.id}`} onclick={(e) => handleTabClick(e, tab)}>
+          <img
+            src={tab.realm?.toLowerCase() === "poe2" ? "/poe2.png" : "/poe.png"}
+            alt={tab.realm || "poe"}
+            class="tab-realm-icon"
+          />
           <span>{tab.name?.trim() || "New Project"}</span>
-          {#if tab.dirty && !tab.isSettings}
+          {#if tab.dirty}
             <span class="dirty-dot" title="Unsaved changes">●</span>
           {/if}
         </a>
@@ -486,6 +524,9 @@
     {/if}
   </div>
 </div>
+
+<!-- Settings overlay (opened via File > Settings) -->
+<SettingsOverlay />
 
 <!-- Notice Modal for Login -->
 {#if loginModalOpen}
@@ -556,8 +597,63 @@
         >
           Cancel
         </button>
-        <button type="button" class="btn-primary" onclick={confirmLogin}>
-          Proceed & Login
+        <button
+          type="button"
+          class="btn-primary"
+          disabled={proceedCountdown > 0}
+          onclick={confirmLogin}
+        >
+          {proceedCountdown > 0
+            ? `Proceed & Login (${proceedCountdown})`
+            : "Proceed & Login"}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Session ended (Cloudflare blocked the session and it was logged out) -->
+{#if sessionExpiredOpen}
+  <div
+    class="modal-backdrop"
+    role="presentation"
+    onclick={() => (sessionExpiredOpen = false)}
+  >
+    <div
+      class="modal-card"
+      role="dialog"
+      aria-label="Session ended"
+      onclick={(e) => e.stopPropagation()}
+    >
+      <div class="modal-header">
+        <h3 class="modal-title">Session ended</h3>
+        <button
+          type="button"
+          class="modal-close-btn"
+          onclick={() => (sessionExpiredOpen = false)}
+          title="Close"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div class="modal-content">
+        <p>Your session has ended, you need to relogin.</p>
+        <p class="small-text">
+          Until then, searches keep working without an account.
+        </p>
+      </div>
+
+      <div class="modal-actions">
+        <button
+          type="button"
+          class="btn-secondary"
+          onclick={() => (sessionExpiredOpen = false)}
+        >
+          Close
+        </button>
+        <button type="button" class="btn-primary" onclick={reloginFromExpired}>
+          Log In
         </button>
       </div>
     </div>
@@ -960,12 +1056,18 @@
     border-color: #ffffff;
   }
 
-  .btn-primary:hover,
-  .btn-primary:focus {
+  .btn-primary:hover:not(:disabled),
+  .btn-primary:focus:not(:disabled) {
     background: #111111;
     border-color: #ffffff;
     color: #ffffff;
     outline: none;
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.4;
+    border-color: #7f7f7f;
+    cursor: not-allowed;
   }
 
   .btn-secondary:hover,

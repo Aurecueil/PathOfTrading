@@ -154,6 +154,9 @@ pub async fn open_poe_login(app: tauri::AppHandle) -> Result<(), String> {
                         let mut captured_cf_clearance = None;
                         let mut captured_username = None;
 
+                        // NOTE: window.title() is the native title and may not reflect
+                        // document.title on every platform. The POE_USERNAME cookie below
+                        // is the reliable fallback.
                         if let Ok(title) = w.title() {
                             if let Some(name) = title.strip_prefix("__POE_USER__:") {
                                 let clean = name.trim();
@@ -256,98 +259,117 @@ fn percent_decode(input: &str) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
-#[tauri::command]
-pub async fn logout_poe(app: tauri::AppHandle) -> Result<(), String> {
+/// Full logout.
+///
+/// wipe_cloudflare = true  -> also removes cf_* cookies, all browsing data and the whole
+///                            webview profile (used when Cloudflare blocks API requests,
+///                            so the user gets a completely fresh login + challenge)
+/// wipe_cloudflare = false -> regular logout, keeps Cloudflare cookies
+pub async fn perform_logout(app: &tauri::AppHandle, wipe_cloudflare: bool) -> Result<(), String> {
     // 1. Wipe locally saved secrets immediately
-    let _ = env::save_secret("poesessid", "");
-    let _ = env::save_secret("poetoken", "");
-    let _ = env::save_secret("cf_clearance", "");
-    let _ = env::save_secret("poe_username", "");
-
-    // 2. Close any open webview windows using the profile
-    if let Some(w) = app.get_webview_window("poe_login") {
-        let _ = w.close();
-    }
-    if let Some(w) = app.get_webview_window("poe_logout_hidden") {
-        let _ = w.close();
+    for key in ["poesessid", "poetoken", "cf_clearance", "poe_username"] {
+        let _ = env::save_secret(key, "");
     }
 
+    // 2. Close any open webview windows that use the profile
+    for label in ["poe_login", "poe_refresh_hidden", "poe_logout_hidden"] {
+        if let Some(w) = app.get_webview_window(label) {
+            let _ = w.close();
+        }
+    }
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let mut profile_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     profile_dir.push("poe_webview_profile");
 
     if profile_dir.exists() {
-        if let Ok(window) = WebviewWindowBuilder::new(
-            &app,
-            "poe_logout_hidden",
-            WebviewUrl::External("https://www.pathofexile.com".parse().unwrap()),
-        )
-        .visible(false)
-        .data_directory(profile_dir.clone())
-        .build()
+        // On a full wipe start from about:blank so the site can't re-issue cookies
+        // while we are clearing them.
+        let start_url: Url = if wipe_cloudflare {
+            "about:blank".parse().unwrap()
+        } else {
+            "https://www.pathofexile.com".parse().unwrap()
+        };
+
+        if let Ok(window) =
+            WebviewWindowBuilder::new(app, "poe_logout_hidden", WebviewUrl::External(start_url))
+                .visible(false)
+                .data_directory(profile_dir.clone())
+                .build()
         {
             let domains = [
                 "https://www.pathofexile.com".parse::<Url>().unwrap(),
                 "https://pathofexile.com".parse::<Url>().unwrap(),
+                "https://challenges.cloudflare.com".parse::<Url>().unwrap(),
             ];
-            for poe_domain in &domains {
-                if let Ok(cookies) = window.cookies_for_url(poe_domain.clone()) {
+            for d in &domains {
+                if let Ok(cookies) = window.cookies_for_url(d.clone()) {
                     for c in cookies {
-                        let name = c.name();
-                        if !name.starts_with("cf_")
-                            && !name.starts_with("__cf")
-                            && !name.starts_with("_cf")
-                        {
+                        let n = c.name();
+                        let is_cf =
+                            n.starts_with("cf_") || n.starts_with("__cf") || n.starts_with("_cf");
+                        if wipe_cloudflare || !is_cf {
                             let _ = window.delete_cookie(c);
                         }
                     }
                 }
             }
 
-            let _ = window.eval(
-                r#"
-                try {
-                    localStorage.clear();
-                    sessionStorage.clear();
-                } catch (_) {}
-                "#,
-            );
+            if wipe_cloudflare {
+                let _ = window.clear_all_browsing_data();
+            } else {
+                let _ = window.eval(
+                    r#"
+                    try {
+                        localStorage.clear();
+                        sessionStorage.clear();
+                    } catch (_) {}
+                    "#,
+                );
+            }
 
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            tokio::time::sleep(Duration::from_millis(300)).await;
             let _ = window.close();
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            tokio::time::sleep(Duration::from_millis(300)).await;
         }
 
-        let storage_paths = [
-            profile_dir.join("Default").join("Cookies"),
-            profile_dir.join("Default").join("Network").join("Cookies"),
-            profile_dir.join("Default").join("Local Storage"),
-            profile_dir.join("Default").join("Session Storage"),
-            profile_dir
-                .join("EBWebView")
-                .join("Default")
-                .join("Cookies"),
-            profile_dir
-                .join("EBWebView")
-                .join("Default")
-                .join("Network")
-                .join("Cookies"),
-            profile_dir
-                .join("EBWebView")
-                .join("Default")
-                .join("Local Storage"),
-            profile_dir
-                .join("EBWebView")
-                .join("Default")
-                .join("Session Storage"),
-        ];
+        // 3. Disk cleanup. On a full wipe try to remove the entire profile first;
+        //    if that fails (e.g. WebView2 still holds file locks on Windows),
+        //    fall back to the targeted per-path cleanup.
+        let nuked = wipe_cloudflare && fs::remove_dir_all(&profile_dir).is_ok();
+        if nuked {
+            let _ = fs::create_dir_all(&profile_dir);
+        } else {
+            let storage_paths = [
+                profile_dir.join("Default").join("Cookies"),
+                profile_dir.join("Default").join("Network").join("Cookies"),
+                profile_dir.join("Default").join("Local Storage"),
+                profile_dir.join("Default").join("Session Storage"),
+                profile_dir
+                    .join("EBWebView")
+                    .join("Default")
+                    .join("Cookies"),
+                profile_dir
+                    .join("EBWebView")
+                    .join("Default")
+                    .join("Network")
+                    .join("Cookies"),
+                profile_dir
+                    .join("EBWebView")
+                    .join("Default")
+                    .join("Local Storage"),
+                profile_dir
+                    .join("EBWebView")
+                    .join("Default")
+                    .join("Session Storage"),
+            ];
 
-        for path in storage_paths {
-            if path.is_file() {
-                let _ = fs::remove_file(path);
-            } else if path.is_dir() {
-                let _ = fs::remove_dir_all(path);
+            for path in storage_paths {
+                if path.is_file() {
+                    let _ = fs::remove_file(path);
+                } else if path.is_dir() {
+                    let _ = fs::remove_dir_all(path);
+                }
             }
         }
     }
@@ -361,6 +383,35 @@ pub async fn logout_poe(app: tauri::AppHandle) -> Result<(), String> {
     );
 
     Ok(())
+}
+
+/// Cloudflare blocked an authenticated session: behave exactly like a UI logout
+/// (secrets + webview profile wiped, `poe_auth_logout` emitted), then tell the UI
+/// to show the "session ended" popup. The flag is persisted so the popup is still
+/// shown if the event fires before the frontend has mounted (e.g. startup refresh).
+pub async fn expire_session(app: &tauri::AppHandle) {
+    if let Err(e) = perform_logout(app, true).await {
+        eprintln!("Session expiry logout failed: {e}");
+    }
+    let _ = env::save_secret("session_expired", "1");
+    let _ = app.emit("poe_session_expired", ());
+}
+
+/// Returns true (once) if the session was ended by Cloudflare since the UI last asked.
+#[tauri::command]
+pub async fn consume_session_expired() -> Result<bool, String> {
+    let flagged = env::load_secret("session_expired")?
+        .filter(|s| !s.trim().is_empty())
+        .is_some();
+    if flagged {
+        let _ = env::save_secret("session_expired", "");
+    }
+    Ok(flagged)
+}
+
+#[tauri::command]
+pub async fn logout_poe(app: tauri::AppHandle) -> Result<(), String> {
+    perform_logout(&app, false).await
 }
 
 #[tauri::command]

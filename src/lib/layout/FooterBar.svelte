@@ -4,118 +4,128 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
+  interface RuleTelemetry {
+    id: string; // "account" | "ip1" | "ip2" ...
+    kind: "account" | "ip";
+    max: number;
+    window_secs: number;
+    used: number;
+    reserved_free: number;
+    available: number;
+    penalty_ms: number;
+    next_slot_ms: number;
+  }
+
   interface OperationTelemetry {
-    max_requests: number;
-    available_requests: number;
-    reserved_requests: Record<string, number>;
+    rules: RuleTelemetry[];
+    reserved_requests: Record<string, number[]>;
     is_rate_limited: boolean;
     retry_after_ms: number;
+    next_available_ms: number;
   }
 
   interface FullTelemetryState {
     search: OperationTelemetry;
     fetch: OperationTelemetry;
     queue_status: Record<string, Record<string, number>>;
+    cf_paused: boolean;
   }
+
+  const emptyOp = (): OperationTelemetry => ({
+    rules: [],
+    reserved_requests: {},
+    is_rate_limited: false,
+    retry_after_ms: 0,
+    next_available_ms: 0,
+  });
 
   let rateLimiterOpen = $state(false);
   let containerEl: HTMLDivElement | null = null;
 
   let rateState = $state<FullTelemetryState>({
-    search: {
-      max_requests: 12,
-      available_requests: 12,
-      reserved_requests: { outside: 1 },
-      is_rate_limited: false,
-      retry_after_ms: 0,
-    },
-    fetch: {
-      max_requests: 12,
-      available_requests: 12,
-      reserved_requests: { outside: 1 },
-      is_rate_limited: false,
-      retry_after_ms: 0,
-    },
-    queue_status: {
-      search: {},
-      fetch: {},
-    },
+    search: emptyOp(),
+    fetch: emptyOp(),
+    queue_status: { search: {}, fetch: {} },
+    cf_paused: false,
   });
 
-  let searchRemainingMs = $state(0);
-  let fetchRemainingMs = $state(0);
-  let searchDeadline = 0;
-  let fetchDeadline = 0;
+  // Countdowns: the backend sends relative ms; we interpolate locally from the
+  // moment the payload arrived.
+  let receivedAt = $state(Date.now());
+  let nowTick = $state(Date.now());
 
-  let countdownInterval: ReturnType<typeof setInterval> | undefined;
   let unlisten: UnlistenFn | undefined;
 
-  function syncPenaltyDeadlines(payload: FullTelemetryState) {
-    const now = Date.now();
-
-    if (payload.search.retry_after_ms <= 0) {
-      searchDeadline = 0;
-      searchRemainingMs = 0;
-    } else {
-      const currentExpected = Math.max(0, searchDeadline - now);
-      if (
-        searchDeadline === 0 ||
-        Math.abs(currentExpected - payload.search.retry_after_ms) > 250
-      ) {
-        searchDeadline = now + payload.search.retry_after_ms;
-        searchRemainingMs = payload.search.retry_after_ms;
-      }
-    }
-
-    if (payload.fetch.retry_after_ms <= 0) {
-      fetchDeadline = 0;
-      fetchRemainingMs = 0;
-    } else {
-      const currentExpected = Math.max(0, fetchDeadline - now);
-      if (
-        fetchDeadline === 0 ||
-        Math.abs(currentExpected - payload.fetch.retry_after_ms) > 250
-      ) {
-        fetchDeadline = now + payload.fetch.retry_after_ms;
-        fetchRemainingMs = payload.fetch.retry_after_ms;
-      }
-    }
+  function applyState(p: FullTelemetryState) {
+    rateState = { ...p };
+    receivedAt = Date.now();
+    nowTick = receivedAt;
   }
 
-  function sumReserved(reservedMap: Record<string, number> = {}): number {
-    return Object.values(reservedMap).reduce((acc, curr) => acc + curr, 0);
+  function remaining(ms: number): number {
+    if (ms <= 0) return 0;
+    return Math.max(0, ms - (nowTick - receivedAt));
   }
 
-  function getBarSlots(op: OperationTelemetry) {
-    const total = op.max_requests || 12;
-    const reserved = Math.min(sumReserved(op.reserved_requests), total);
-    const unreservedCap = Math.max(0, total - reserved);
+  const anyCountdown = $derived(
+    [rateState.search, rateState.fetch].some(
+      (op) =>
+        op.next_available_ms > 0 ||
+        op.retry_after_ms > 0 ||
+        op.rules.some((r) => r.penalty_ms > 0 || r.next_slot_ms > 0),
+    ),
+  );
 
-    const hits = Math.max(0, total - op.available_requests);
-    const available = Math.max(0, unreservedCap - hits);
-    const used = Math.min(hits, unreservedCap);
+  // Only tick while something is actually counting down
+  $effect(() => {
+    if (!anyCountdown) return;
+    const id = setInterval(() => {
+      nowTick = Date.now();
+    }, 100);
+    return () => clearInterval(id);
+  });
 
+  function formatMs(ms: number): string {
+    if (ms <= 0) return "0s";
+    if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
+    const s = Math.ceil(ms / 1000);
+    if (s < 120) return `${s}s`;
+    if (s < 7200) return `${Math.ceil(s / 60)}m`;
+    return `${Math.ceil(s / 3600)}h`;
+  }
+
+  function windowLabel(secs: number): string {
+    if (secs >= 3600 && secs % 3600 === 0) return `${secs / 3600}h`;
+    if (secs >= 60 && secs % 60 === 0) return `${secs / 60}m`;
+    return `${secs}s`;
+  }
+
+  function ruleLabel(r: RuleTelemetry): string {
+    return `${r.kind === "account" ? "Acc" : "IP"} ${windowLabel(r.window_secs)}`;
+  }
+
+  function pct(r: RuleTelemetry) {
+    const m = Math.max(1, r.max);
     return {
-      total,
-      unreservedCap,
-      available,
-      used,
-      reserved,
-      availablePct: (available / total) * 100,
-      usedPct: (used / total) * 100,
-      reservedPct: (reserved / total) * 100,
+      avail: (r.available / m) * 100,
+      used: (r.used / m) * 100,
+      reserved: (r.reserved_free / m) * 100,
     };
+  }
+
+  // The limit that is closest to being full (penalised rules count as full)
+  function fill(r: RuleTelemetry): number {
+    if (r.penalty_ms > 0) return 2;
+    return 1 - r.available / Math.max(1, r.max);
+  }
+
+  function criticalRule(op: OperationTelemetry): RuleTelemetry | null {
+    if (!op.rules || op.rules.length === 0) return null;
+    return op.rules.reduce((a, b) => (fill(b) > fill(a) ? b : a));
   }
 
   function sumQueueCounts(realmCounts: Record<string, number> = {}): number {
     return Object.values(realmCounts).reduce((acc, curr) => acc + curr, 0);
-  }
-
-  function formatMs(ms: number): string {
-    if (ms <= 0) return "0s";
-    return ms < 10000
-      ? `${(ms / 1000).toFixed(1)}s`
-      : `${Math.ceil(ms / 1000)}s`;
   }
 
   const searchQueueCount = $derived(
@@ -124,8 +134,46 @@
   const fetchQueueCount = $derived(
     sumQueueCounts(rateState.queue_status?.fetch),
   );
-  const searchBar = $derived(getBarSlots(rateState.search));
-  const fetchBar = $derived(getBarSlots(rateState.fetch));
+
+  const searchCrit = $derived(criticalRule(rateState.search));
+  const fetchCrit = $derived(criticalRule(rateState.fetch));
+
+  const miniBars = $derived([
+    {
+      key: "search",
+      name: "Search",
+      op: rateState.search,
+      crit: searchCrit,
+    },
+    {
+      key: "fetch",
+      name: "Fetch",
+      op: rateState.fetch,
+      crit: fetchCrit,
+    },
+  ]);
+
+  const columns = $derived([
+    {
+      key: "search",
+      title: "Search API",
+      op: rateState.search,
+      queue: rateState.queue_status?.search ?? {},
+      queued: searchQueueCount,
+    },
+    {
+      key: "fetch",
+      title: "Fetch API",
+      op: rateState.fetch,
+      queue: rateState.queue_status?.fetch ?? {},
+      queued: fetchQueueCount,
+    },
+  ]);
+
+  const hasPenalty = $derived(
+    remaining(rateState.search.retry_after_ms) > 0 ||
+      remaining(rateState.fetch.retry_after_ms) > 0,
+  );
 
   function handleWindowClick(e: MouseEvent) {
     if (
@@ -146,43 +194,33 @@
   onMount(async () => {
     try {
       const initial = await invoke<FullTelemetryState>("get_limiter_state");
-      if (initial) {
-        rateState = { ...initial };
-        syncPenaltyDeadlines(initial);
-      }
+      if (initial) applyState(initial);
     } catch {
       // Dev mode fallback
     }
 
     try {
       unlisten = await listen<FullTelemetryState>("limiter-update", (event) => {
-        rateState = { ...event.payload };
-        syncPenaltyDeadlines(event.payload);
+        applyState(event.payload);
       });
     } catch {
       // Dev mode fallback
     }
-
-    countdownInterval = setInterval(() => {
-      const now = Date.now();
-      if (searchDeadline > 0) {
-        searchRemainingMs = Math.max(0, searchDeadline - now);
-        if (searchRemainingMs === 0) searchDeadline = 0;
-      }
-      if (fetchDeadline > 0) {
-        fetchRemainingMs = Math.max(0, fetchDeadline - now);
-        if (fetchRemainingMs === 0) fetchDeadline = 0;
-      }
-    }, 100);
   });
 
   onDestroy(() => {
     if (unlisten) unlisten();
-    if (countdownInterval) clearInterval(countdownInterval);
   });
 </script>
 
 <svelte:window onclick={handleWindowClick} onkeydown={handleWindowKeydown} />
+
+{#snippet segs(r: RuleTelemetry)}
+  {@const p = pct(r)}
+  <div class="seg seg-available" style="width: {p.avail}%;"></div>
+  <div class="seg seg-unavailable" style="width: {p.used}%;"></div>
+  <div class="seg seg-reserved" style="width: {p.reserved}%;"></div>
+{/snippet}
 
 <footer>
   <div class="footer">
@@ -201,115 +239,74 @@
           >
             <header class="popover-header">
               <span class="popover-title">Rate Limiter Telemetry</span>
-              {#if searchRemainingMs > 0 || fetchRemainingMs > 0}
-                <span class="popover-pill is-penalized">Rate Limited</span>
-              {/if}
+              <span class="popover-pills">
+                {#if rateState.cf_paused}
+                  <span class="popover-pill is-cf">Cloudflare check</span>
+                {/if}
+                {#if hasPenalty}
+                  <span class="popover-pill is-penalized">Penalty</span>
+                {/if}
+              </span>
             </header>
 
-            <div class="telemetry-grid">
-              <div class="op-card" class:penalized={searchRemainingMs > 0}>
-                <div class="op-header">
-                  <span class="op-name">Search API</span>
-                  {#if searchRemainingMs > 0}
-                    <span class="penalty-tag"
-                      >cooldown: {formatMs(searchRemainingMs)}</span
-                    >
-                  {:else}
-                    <span class="op-counts"
-                      >{searchBar.available} / {searchBar.unreservedCap}</span
-                    >
-                  {/if}
-                </div>
+            <div class="columns">
+              {#each columns as col (col.key)}
+                {@const next = remaining(col.op.next_available_ms)}
+                {@const pen = remaining(col.op.retry_after_ms)}
+                <div class="op-card" class:penalized={pen > 0}>
+                  <div class="op-header">
+                    <span class="op-name">{col.title}</span>
+                    {#if next > 0}
+                      <span class="next-badge wait">next in {formatMs(next)}</span>
+                    {:else}
+                      <span class="next-badge ready">ready</span>
+                    {/if}
+                  </div>
 
-                <div class="bar-pip-track">
-                  <div
-                    class="seg seg-available"
-                    style="width: {searchBar.availablePct}%;"
-                  ></div>
-                  <div
-                    class="seg seg-unavailable"
-                    style="width: {searchBar.usedPct}%;"
-                  ></div>
-                  <div
-                    class="seg seg-reserved"
-                    style="width: {searchBar.reservedPct}%;"
-                  ></div>
-                </div>
+                  <div class="rule-list">
+                    {#each col.op.rules as r (r.id)}
+                      {@const rPen = remaining(r.penalty_ms)}
+                      {@const rNext = remaining(r.next_slot_ms)}
+                      <div
+                        class="rule-row"
+                        class:penalized={rPen > 0}
+                        class:blocked={rNext > 0}
+                        title="{ruleLabel(r)}: used {r.used}/{r.max}, reserved free {r.reserved_free}, available {r.available}"
+                      >
+                        <span class="rule-label">{ruleLabel(r)}</span>
+                        <div class="bar-pip-track">
+                          {@render segs(r)}
+                        </div>
+                        <span class="rule-count">
+                          {#if rPen > 0}
+                            <span class="penalty-tag">ban {formatMs(rPen)}</span>
+                          {:else if rNext > 0}
+                            <span class="next-tag">+{formatMs(rNext)}</span>
+                          {:else}
+                            {r.available}/{r.max}
+                          {/if}
+                        </span>
+                      </div>
+                    {:else}
+                      <span class="queue-empty">no data yet</span>
+                    {/each}
+                  </div>
 
-                <div class="op-subtext">
-                  <span>Used: {searchBar.used}</span>
-                  <span>Reserved: {searchBar.reserved}</span>
-                  <span>Queued: {searchQueueCount}</span>
+                  <div class="queue-row">
+                    <span class="queue-label">Queued ({col.queued}):</span>
+                    <div class="queue-badges">
+                      {#each Object.entries(col.queue) as [realm, count]}
+                        <span class="realm-badge"
+                          >{realm}
+                          <strong class="badge-num">{count}</strong></span
+                        >
+                      {:else}
+                        <span class="queue-empty">idle</span>
+                      {/each}
+                    </div>
+                  </div>
                 </div>
-              </div>
-
-              <div class="op-card" class:penalized={fetchRemainingMs > 0}>
-                <div class="op-header">
-                  <span class="op-name">Fetch API</span>
-                  {#if fetchRemainingMs > 0}
-                    <span class="penalty-tag"
-                      >cooldown: {formatMs(fetchRemainingMs)}</span
-                    >
-                  {:else}
-                    <span class="op-counts"
-                      >{fetchBar.available} / {fetchBar.unreservedCap}</span
-                    >
-                  {/if}
-                </div>
-
-                <div class="bar-pip-track">
-                  <div
-                    class="seg seg-available"
-                    style="width: {fetchBar.availablePct}%;"
-                  ></div>
-                  <div
-                    class="seg seg-unavailable"
-                    style="width: {fetchBar.usedPct}%;"
-                  ></div>
-                  <div
-                    class="seg seg-reserved"
-                    style="width: {fetchBar.reservedPct}%;"
-                  ></div>
-                </div>
-
-                <div class="op-subtext">
-                  <span>Used: {fetchBar.used}</span>
-                  <span>Reserved: {fetchBar.reserved}</span>
-                  <span>Queued: {fetchQueueCount}</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="queue-section">
-              <div class="queue-header">Active Queues</div>
-
-              <div class="queue-row">
-                <span class="queue-label">Search ({searchQueueCount}):</span>
-                <div class="queue-badges">
-                  {#each Object.entries(rateState.queue_status?.search || {}) as [realm, count]}
-                    <span class="realm-badge"
-                      >{realm}
-                      <strong class="badge-num">{count}</strong></span
-                    >
-                  {:else}
-                    <span class="queue-empty">idle</span>
-                  {/each}
-                </div>
-              </div>
-
-              <div class="queue-row">
-                <span class="queue-label">Fetch ({fetchQueueCount}):</span>
-                <div class="queue-badges">
-                  {#each Object.entries(rateState.queue_status?.fetch || {}) as [realm, count]}
-                    <span class="realm-badge"
-                      >{realm}
-                      <strong class="badge-num">{count}</strong></span
-                    >
-                  {:else}
-                    <span class="queue-empty">idle</span>
-                  {/each}
-                </div>
-              </div>
+              {/each}
             </div>
 
             <div class="legend-row">
@@ -324,74 +321,40 @@
           type="button"
           class="ratelimiter-btn"
           class:active={rateLimiterOpen}
-          class:has-penalty={searchRemainingMs > 0 || fetchRemainingMs > 0}
+          class:has-penalty={hasPenalty || rateState.cf_paused}
           aria-expanded={rateLimiterOpen}
           aria-haspopup="dialog"
           onclick={() => (rateLimiterOpen = !rateLimiterOpen)}
         >
-          <div
-            class="bar-unit"
-            title="Search: {searchBar.available} / {searchBar.unreservedCap} (Max: {searchBar.total}, Reserved: {searchBar.reserved})"
-          >
-            <div class="segment-track">
-              <div
-                class="seg seg-available"
-                style="width: {searchBar.availablePct}%;"
-              ></div>
-              <div
-                class="seg seg-unavailable"
-                style="width: {searchBar.usedPct}%;"
-              ></div>
-              <div
-                class="seg seg-reserved"
-                style="width: {searchBar.reservedPct}%;"
-              ></div>
-            </div>
+          {#each miniBars as b (b.key)}
+            {@const next = remaining(b.op.next_available_ms)}
+            <div
+              class="bar-unit"
+              title="{b.name}{b.crit
+                ? ` · ${ruleLabel(b.crit)}: ${b.crit.available}/${b.crit.max}`
+                : ''} · {next > 0
+                ? `next request in ${formatMs(next)}`
+                : 'ready'}"
+            >
+              <div class="segment-track">
+                {#if b.crit}
+                  {@render segs(b.crit)}
+                {/if}
+              </div>
 
-            <div class="bar-overlay">
-              {#if searchRemainingMs > 0}
-                <span class="penalty-overlay-text"
-                  >{formatMs(searchRemainingMs)}</span
-                >
-              {:else}
-                <span class="count-overlay-text"
-                  >{searchBar.available}/{searchBar.unreservedCap}</span
-                >
-              {/if}
+              <div class="bar-overlay">
+                {#if next > 0}
+                  <span class="penalty-overlay-text">{formatMs(next)}</span>
+                {:else if b.crit}
+                  <span class="count-overlay-text"
+                    >{b.crit.available}/{b.crit.max}</span
+                  >
+                {:else}
+                  <span class="count-overlay-text">–</span>
+                {/if}
+              </div>
             </div>
-          </div>
-
-          <div
-            class="bar-unit"
-            title="Fetch: {fetchBar.available} / {fetchBar.unreservedCap} (Max: {fetchBar.total}, Reserved: {fetchBar.reserved})"
-          >
-            <div class="segment-track">
-              <div
-                class="seg seg-available"
-                style="width: {fetchBar.availablePct}%;"
-              ></div>
-              <div
-                class="seg seg-unavailable"
-                style="width: {fetchBar.usedPct}%;"
-              ></div>
-              <div
-                class="seg seg-reserved"
-                style="width: {fetchBar.reservedPct}%;"
-              ></div>
-            </div>
-
-            <div class="bar-overlay">
-              {#if fetchRemainingMs > 0}
-                <span class="penalty-overlay-text"
-                  >{formatMs(fetchRemainingMs)}</span
-                >
-              {:else}
-                <span class="count-overlay-text"
-                  >{fetchBar.available}/{fetchBar.unreservedCap}</span
-                >
-              {/if}
-            </div>
-          </div>
+          {/each}
         </button>
       </div>
     </div>
@@ -543,7 +506,7 @@
     bottom: 100%;
     right: 0;
     margin-bottom: 2px;
-    width: 275px;
+    width: 460px;
     background: #050505;
     border: 1px solid #ffffff;
     border-radius: 0px;
@@ -570,6 +533,11 @@
     color: #888888;
   }
 
+  .popover-pills {
+    display: flex;
+    gap: 4px;
+  }
+
   .popover-pill {
     font-size: 9px;
     text-transform: uppercase;
@@ -584,9 +552,15 @@
     border: 1px solid #c62828;
   }
 
-  .telemetry-grid {
-    display: flex;
-    flex-direction: column;
+  .popover-pill.is-cf {
+    background: #2e2308;
+    color: #ffb300;
+    border: 1px solid #b27d00;
+  }
+
+  .columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 6px;
   }
 
@@ -597,7 +571,8 @@
     padding: 4px 6px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
+    min-width: 0;
   }
 
   .op-card.penalized {
@@ -617,15 +592,59 @@
     color: #ffffff;
   }
 
-  .op-counts {
+  .next-badge {
+    font-size: 10px;
+    font-weight: bold;
+    font-family: "Fontin", monospace, sans-serif;
+  }
+  .next-badge.ready {
+    color: #66bb6a;
+  }
+  .next-badge.wait {
+    color: #ffb300;
+  }
+
+  .rule-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .rule-row {
+    display: grid;
+    grid-template-columns: 44px 1fr 56px;
+    align-items: center;
+    gap: 5px;
+    font-size: 10px;
+  }
+
+  .rule-label {
+    color: #aaaaaa;
+    white-space: nowrap;
+  }
+
+  .rule-count {
+    text-align: right;
     color: #888888;
     font-family: "Fontin", monospace, sans-serif;
+    white-space: nowrap;
+  }
+
+  .rule-row.blocked .rule-label {
+    color: #ffb300;
+  }
+  .rule-row.penalized .rule-label {
+    color: #ff5252;
   }
 
   .penalty-tag {
     color: #ff5252;
     font-weight: bold;
-    font-family: "Fontin", monospace, sans-serif;
+  }
+
+  .next-tag {
+    color: #ffb300;
+    font-weight: bold;
   }
 
   .bar-pip-track {
@@ -637,43 +656,26 @@
     overflow: hidden;
   }
 
-  .op-subtext {
-    display: flex;
-    justify-content: space-between;
-    font-size: 9px;
-    color: #888888;
-  }
-
-  .queue-section {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    border-top: 1px solid #333333;
-    padding-top: 6px;
-  }
-
-  .queue-header {
-    font-size: 10px;
-    text-transform: uppercase;
-    font-weight: bold;
-    color: #888888;
-  }
-
   .queue-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 11px;
+    gap: 4px;
+    font-size: 10px;
+    border-top: 1px solid #333333;
+    padding-top: 4px;
   }
 
   .queue-label {
     color: #aaaaaa;
+    white-space: nowrap;
   }
 
   .queue-badges {
     display: flex;
     gap: 4px;
     flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   .realm-badge {

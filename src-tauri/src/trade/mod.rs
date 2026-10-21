@@ -3,6 +3,7 @@ pub mod fetch;
 pub mod filters;
 pub mod items;
 pub mod league;
+pub mod limiter;
 pub mod live;
 pub mod search;
 pub mod settings;
@@ -19,8 +20,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Listener, State};
 use tokio::sync::{oneshot, Mutex, Notify};
+
+use crate::auth::login::{expire_session, get_poe_auth_status};
+pub use limiter::{OperationTelemetry, RuleTelemetry, SharedRateLimiter};
 
 pub static ENDPOINT: RwLock<&'static str> = RwLock::new("https://www.pathofexile.com");
 
@@ -61,6 +65,17 @@ pub fn is_cloudflare_response(status: StatusCode, headers: &HeaderMap, body: &st
     false
 }
 
+/// True when a session cookie / token is stored (=> requests go to the authenticated endpoint
+/// and the account rate limit applies).
+fn has_saved_credentials() -> bool {
+    ["poesessid", "poetoken"].iter().any(|k| {
+        crate::auth::env::load_secret(k)
+            .ok()
+            .flatten()
+            .map_or(false, |s| !s.trim().is_empty())
+    })
+}
+
 // ===========================================================================
 // 1. Data Structures & Telemetry Models
 // ===========================================================================
@@ -84,19 +99,11 @@ pub struct FetchJob {
 }
 
 #[derive(Clone, Serialize, PartialEq, Eq, Debug)]
-pub struct OperationTelemetry {
-    pub max_requests: usize,
-    pub available_requests: usize,
-    pub reserved_requests: HashMap<String, usize>,
-    pub is_rate_limited: bool,
-    pub retry_after_ms: u64,
-}
-
-#[derive(Clone, Serialize, PartialEq, Eq, Debug)]
 pub struct FullTelemetryState {
     pub search: OperationTelemetry,
     pub fetch: OperationTelemetry,
     pub queue_status: HashMap<String, HashMap<String, usize>>,
+    pub cf_paused: bool,
 }
 
 // ===========================================================================
@@ -140,346 +147,8 @@ impl SessionCache {
 }
 
 // ===========================================================================
-// 3. Rate Limiter Core
-// ===========================================================================
-
-#[derive(Debug, Clone)]
-struct ServerRule {
-    max: usize,
-    window: Duration,
-}
-
-struct RateLimiterCore {
-    rules: Vec<ServerRule>,
-    history: VecDeque<Instant>,
-    penalty_until: Option<Instant>,
-    configured_reservations: HashMap<String, usize>,
-    used_reservations: HashMap<String, usize>,
-    last_reported_server_hits: usize,
-}
-
-impl Default for RateLimiterCore {
-    fn default() -> Self {
-        let mut configured_reservations = HashMap::new();
-        configured_reservations.insert("outside".to_string(), 1);
-        Self {
-            rules: vec![
-                ServerRule {
-                    max: 12,
-                    window: Duration::from_secs(4),
-                },
-                ServerRule {
-                    max: 16,
-                    window: Duration::from_secs(12),
-                },
-            ],
-            history: VecDeque::new(),
-            penalty_until: None,
-            configured_reservations,
-            used_reservations: HashMap::new(),
-            last_reported_server_hits: 0,
-        }
-    }
-}
-
-impl RateLimiterCore {
-    fn primary_rule(&self) -> Option<&ServerRule> {
-        self.rules.iter().min_by_key(|r| r.window)
-    }
-
-    fn purge_expired(&mut self, now: Instant) {
-        let max_window = self
-            .rules
-            .iter()
-            .map(|r| r.window)
-            .max()
-            .unwrap_or(Duration::from_secs(60));
-
-        while let Some(&first) = self.history.front() {
-            if now.duration_since(first) > max_window {
-                self.history.pop_front();
-            } else {
-                break;
-            }
-        }
-        if self.history.is_empty() {
-            self.used_reservations.clear();
-        }
-    }
-
-    fn check_delay(&mut self, now: Instant, reservation: Option<&str>) -> Option<Duration> {
-        self.purge_expired(now);
-
-        if let Some(until) = self.penalty_until {
-            if now < until {
-                return Some(until - now);
-            }
-            self.penalty_until = None;
-        }
-
-        for rule in &self.rules {
-            let hits = self
-                .history
-                .iter()
-                .filter(|&&t| now.duration_since(t) < rule.window)
-                .count();
-            if hits >= rule.max {
-                if let Some(&oldest) = self
-                    .history
-                    .iter()
-                    .find(|&&t| now.duration_since(t) < rule.window)
-                {
-                    let next_slot = oldest + rule.window;
-                    if next_slot > now {
-                        return Some(next_slot - now);
-                    }
-                }
-            }
-        }
-
-        if let Some(rule) = self.primary_rule() {
-            let primary_window_hits = self
-                .history
-                .iter()
-                .filter(|&&t| now.duration_since(t) < rule.window)
-                .count();
-            let total_reserved: usize = self.configured_reservations.values().sum();
-            let general_pool_capacity = rule.max.saturating_sub(total_reserved);
-            let res_key = reservation.unwrap_or("general");
-
-            if res_key != "general" {
-                let max_res = self
-                    .configured_reservations
-                    .get(res_key)
-                    .copied()
-                    .unwrap_or(0);
-                let used_res = self.used_reservations.get(res_key).copied().unwrap_or(0);
-                if used_res >= max_res {
-                    let used_general = primary_window_hits
-                        .saturating_sub(self.used_reservations.values().sum::<usize>());
-                    if used_general >= general_pool_capacity {
-                        return Some(Duration::from_millis(50));
-                    }
-                }
-            } else {
-                let used_general = primary_window_hits
-                    .saturating_sub(self.used_reservations.values().sum::<usize>());
-                if used_general >= general_pool_capacity {
-                    return Some(Duration::from_millis(50));
-                }
-            }
-        }
-        None
-    }
-
-    fn record_dispatch(&mut self, now: Instant, reservation: Option<&str>) {
-        self.history.push_back(now);
-        if let Some(res) = reservation {
-            let max_res = self.configured_reservations.get(res).copied().unwrap_or(0);
-            let used = self.used_reservations.entry(res.to_string()).or_insert(0);
-            if *used < max_res {
-                *used += 1;
-            }
-        }
-    }
-
-    fn reconcile_headers(&mut self, headers: &HeaderMap) {
-        let rule_hdr = headers
-            .get("x-rate-limit-account")
-            .or_else(|| headers.get("x-rate-limit-ip"))
-            .and_then(|v| v.to_str().ok());
-        let state_hdr = headers
-            .get("x-rate-limit-account-state")
-            .or_else(|| headers.get("x-rate-limit-ip-state"))
-            .and_then(|v| v.to_str().ok());
-
-        if let (Some(r_raw), Some(s_raw)) = (rule_hdr, state_hdr) {
-            let parsed_rules: Vec<ServerRule> = r_raw
-                .split(',')
-                .filter_map(|segment| {
-                    let parts: Vec<&str> = segment.split(':').collect();
-                    if parts.len() >= 2 {
-                        let max = parts[0].trim().parse::<usize>().ok()?;
-                        let win = parts[1].trim().parse::<u64>().ok()?;
-                        Some(ServerRule {
-                            max,
-                            window: Duration::from_secs(win),
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            if !parsed_rules.is_empty() {
-                self.rules = parsed_rules;
-            }
-
-            let mut server_primary_hits: Option<usize> = None;
-            for segment in s_raw.split(',') {
-                let parts: Vec<&str> = segment.split(':').collect();
-                if parts.len() == 3 {
-                    let hits = parts[0].trim().parse::<usize>().unwrap_or(0);
-                    let penalty_secs = parts[2].trim().parse::<u64>().unwrap_or(0);
-                    if server_primary_hits.is_none() {
-                        server_primary_hits = Some(hits);
-                    }
-                    if penalty_secs > 0 {
-                        let penalty =
-                            Duration::from_secs(penalty_secs) + Duration::from_millis(500);
-                        let until = Instant::now() + penalty;
-                        self.penalty_until =
-                            Some(self.penalty_until.map_or(until, |c| c.max(until)));
-                    }
-                }
-            }
-
-            if let Some(srv_hits) = server_primary_hits {
-                let now = Instant::now();
-                let local_count = if let Some(rule) = self.primary_rule() {
-                    self.history
-                        .iter()
-                        .filter(|&&t| now.duration_since(t) < rule.window)
-                        .count()
-                } else {
-                    self.history.len()
-                };
-
-                if srv_hits > local_count {
-                    let diff = srv_hits - local_count;
-                    for _ in 0..diff {
-                        self.history.push_back(now);
-                    }
-                } else if srv_hits < local_count {
-                    let mut diff = local_count - srv_hits;
-                    while diff > 0 && !self.history.is_empty() {
-                        self.history.pop_front();
-                        diff -= 1;
-                    }
-                }
-                self.last_reported_server_hits = srv_hits;
-            }
-        }
-    }
-
-    fn telemetry(&self, now: Instant) -> OperationTelemetry {
-        let (max, window) = self
-            .primary_rule()
-            .map(|r| (r.max, r.window))
-            .unwrap_or((12, Duration::from_secs(4)));
-        let active_hits = if window.as_secs() > 0 {
-            self.history
-                .iter()
-                .filter(|&&t| now.duration_since(t) < window)
-                .count()
-        } else {
-            0
-        };
-        let available = max.saturating_sub(active_hits);
-        let retry_after_ms = self
-            .penalty_until
-            .and_then(|u| u.checked_duration_since(now))
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-
-        OperationTelemetry {
-            max_requests: max,
-            available_requests: available,
-            reserved_requests: self.configured_reservations.clone(),
-            is_rate_limited: retry_after_ms > 0 || (max > 0 && available == 0),
-            retry_after_ms,
-        }
-    }
-}
-
-// ===========================================================================
-// 4. Shared Rate Limiter Wrapper
-// ===========================================================================
-
-pub struct SharedRateLimiter {
-    core: Mutex<RateLimiterCore>,
-    update_notify: Arc<Notify>,
-}
-
-impl SharedRateLimiter {
-    pub fn new(update_notify: Arc<Notify>) -> Self {
-        Self {
-            core: Mutex::new(RateLimiterCore::default()),
-            update_notify,
-        }
-    }
-
-    pub async fn time_until_next_change(&self) -> Option<Duration> {
-        let mut core = self.core.lock().await;
-        let now = Instant::now();
-        core.purge_expired(now);
-
-        let mut next_change: Option<Instant> = None;
-        if let Some(until) = core.penalty_until {
-            if until > now {
-                next_change = Some(until);
-            }
-        }
-
-        for rule in &core.rules {
-            for &t in core.history.iter() {
-                let expires_at = t + rule.window;
-                if expires_at > now {
-                    next_change = Some(next_change.map_or(expires_at, |cur| cur.min(expires_at)));
-                    break;
-                }
-            }
-        }
-        next_change.map(|t| t.saturating_duration_since(now))
-    }
-
-    pub async fn wait_for_slot(&self, reservation: Option<&str>) {
-        loop {
-            let delay = {
-                let mut core = self.core.lock().await;
-                core.check_delay(Instant::now(), reservation)
-            };
-            match delay {
-                Some(d) => tokio::time::sleep(d).await,
-                None => break,
-            }
-        }
-    }
-
-    pub async fn record(&self, reservation: Option<&str>) {
-        {
-            let mut core = self.core.lock().await;
-            core.record_dispatch(Instant::now(), reservation);
-        }
-        self.update_notify.notify_one();
-    }
-
-    pub async fn reconcile(&self, headers: &HeaderMap) {
-        {
-            let mut core = self.core.lock().await;
-            core.reconcile_headers(headers);
-        }
-        self.update_notify.notify_one();
-    }
-
-    pub async fn set_penalty(&self, duration: Duration) {
-        {
-            let mut core = self.core.lock().await;
-            let until = Instant::now() + duration;
-            core.penalty_until = Some(core.penalty_until.map_or(until, |c| c.max(until)));
-        }
-        self.update_notify.notify_one();
-    }
-
-    pub async fn get_telemetry(&self) -> OperationTelemetry {
-        let mut core = self.core.lock().await;
-        core.purge_expired(Instant::now());
-        core.telemetry(Instant::now())
-    }
-}
-
-// ===========================================================================
-// 5. Unified Service with Diff Emission & Cloudflare Gate
+// 3. Unified Service with Diff Emission & Cloudflare Gate
+//    (rate limiter core lives in limiter.rs)
 // ===========================================================================
 
 struct PendingFetch {
@@ -510,14 +179,22 @@ pub struct ApiRateLimiter {
     last_emitted_state: Arc<Mutex<Option<FullTelemetryState>>>,
     cf_paused: Arc<AtomicBool>,
     cf_notify: Arc<Notify>,
+    cf_last_done: Arc<Mutex<Option<Instant>>>,
 }
 
 impl ApiRateLimiter {
     pub fn new() -> Self {
         let telemetry_notify = Arc::new(Notify::new());
+        let with_account = has_saved_credentials();
         Self {
-            search_limiter: Arc::new(SharedRateLimiter::new(telemetry_notify.clone())),
-            fetch_limiter: Arc::new(SharedRateLimiter::new(telemetry_notify.clone())),
+            search_limiter: Arc::new(SharedRateLimiter::new(
+                telemetry_notify.clone(),
+                with_account,
+            )),
+            fetch_limiter: Arc::new(SharedRateLimiter::new(
+                telemetry_notify.clone(),
+                with_account,
+            )),
             cache: Arc::new(SessionCache::new()),
             search_tasks: Arc::new(Mutex::new(VecDeque::new())),
             fetch_queues: Arc::new(Mutex::new(HashMap::new())),
@@ -527,35 +204,105 @@ impl ApiRateLimiter {
             last_emitted_state: Arc::new(Mutex::new(None)),
             cf_paused: Arc::new(AtomicBool::new(false)),
             cf_notify: Arc::new(Notify::new()),
+            cf_last_done: Arc::new(Mutex::new(None)),
         }
     }
 
     pub async fn wait_if_cf_paused(&self) {
-        while self.cf_paused.load(Ordering::SeqCst) {
-            self.cf_notify.notified().await;
+        loop {
+            let notified = self.cf_notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable(); // register BEFORE checking the flag
+            if !self.cf_paused.load(Ordering::SeqCst) {
+                return;
+            }
+            notified.await;
         }
     }
 
+    /// Cloudflare blocked a request.
+    ///
+    /// logged in                    -> end the session like a UI logout (wipe credentials and
+    ///                                 webview profile), the UI shows "session ended"
+    /// not logged in, first block   -> interactive Cloudflare challenge window
+    /// not logged in, blocked again -> back off 15s, then retry
+    ///
+    /// Jobs are never failed here: the callers requeue them before calling this, and they
+    /// keep running on the public endpoint.
     pub async fn trigger_cloudflare_challenge(&self) {
+        // Another worker is already handling it: wait, then retry
         if self.cf_paused.swap(true, Ordering::SeqCst) {
-            // Another worker already triggered the challenge; wait for it to finish
             self.wait_if_cf_paused().await;
             return;
         }
         self.telemetry_notify.notify_one();
 
+        let blocked_again = self
+            .cf_last_done
+            .lock()
+            .await
+            .map_or(false, |t| t.elapsed() < Duration::from_secs(30));
+        let logged_in = get_poe_auth_status()
+            .await
+            .map(|s| s.logged_in)
+            .unwrap_or(false);
         let app_opt = self.app_handle.lock().await.clone();
+
         if let Some(app) = app_opt {
-            let _ = crate::auth::refresh::run_poe_refresh_or_challenge(app, true).await;
+            if logged_in {
+                expire_session(&app).await;
+                self.set_account_rule_enabled(false).await;
+            } else if !blocked_again {
+                let _ = app.emit("poe_cloudflare_blocked", "challenge");
+                let _ = crate::auth::refresh::run_poe_refresh_or_challenge(app.clone(), true).await;
+            } else {
+                self.search_limiter
+                    .set_penalty(Duration::from_secs(15))
+                    .await;
+                self.fetch_limiter
+                    .set_penalty(Duration::from_secs(15))
+                    .await;
+            }
         }
 
+        *self.cf_last_done.lock().await = Some(Instant::now());
         self.cf_paused.store(false, Ordering::SeqCst);
         self.cf_notify.notify_waiters();
         self.queue_notify.notify_waiters();
         self.telemetry_notify.notify_one();
     }
 
+    /// Login state changed: add / remove the account rate limit on both limiters.
+    pub async fn set_account_rule_enabled(&self, enabled: bool) {
+        self.search_limiter.set_account_rule_enabled(enabled).await;
+        self.fetch_limiter.set_account_rule_enabled(enabled).await;
+    }
+
+    /// slots = [account, ip1, ip2, ip3, ip4, ...]
+    pub async fn set_reservation(&self, name: String, slots: Vec<usize>) {
+        self.search_limiter
+            .set_reservation(name.clone(), slots.clone())
+            .await;
+        self.fetch_limiter.set_reservation(name, slots).await;
+    }
+
     pub fn start_workers(&self, app: AppHandle) {
+        // Keep the account limit in sync with login / logout
+        let this = self.clone();
+        app.listen("poe_auth_success", move |_| {
+            let this = this.clone();
+            tauri::async_runtime::spawn(async move {
+                this.set_account_rule_enabled(true).await;
+            });
+        });
+        let this = self.clone();
+        app.listen("poe_auth_logout", move |_| {
+            let this = this.clone();
+            tauri::async_runtime::spawn(async move {
+                this.set_account_rule_enabled(false).await;
+            });
+        });
+
         let handle_ref = self.app_handle.clone();
         tauri::async_runtime::spawn(async move {
             *handle_ref.lock().await = Some(app);
@@ -621,7 +368,8 @@ impl ApiRateLimiter {
         let mut search_telemetry = self.search_limiter.get_telemetry().await;
         let mut fetch_telemetry = self.fetch_limiter.get_telemetry().await;
 
-        if self.cf_paused.load(Ordering::SeqCst) {
+        let cf_paused = self.cf_paused.load(Ordering::SeqCst);
+        if cf_paused {
             search_telemetry.is_rate_limited = true;
             fetch_telemetry.is_rate_limited = true;
         }
@@ -648,6 +396,7 @@ impl ApiRateLimiter {
             search: search_telemetry,
             fetch: fetch_telemetry,
             queue_status,
+            cf_paused,
         }
     }
 
@@ -932,7 +681,7 @@ impl ApiRateLimiter {
                         let is_429 = status.as_u16() == 429;
                         let text = resp.text().await.unwrap_or_default();
 
-                        // Stop all fetching via rate limiter & display Cloudflare window on challenge
+                        // Stop all fetching via rate limiter & handle Cloudflare on challenge
                         if is_cloudflare_response(status, &headers, &text) {
                             if !pending.tx.is_closed() {
                                 let mut queues = self.fetch_queues.lock().await;
@@ -1165,7 +914,7 @@ impl ApiRateLimiter {
                     let is_429 = status.as_u16() == 429;
                     let text = resp.text().await.unwrap_or_default();
 
-                    // Stop all fetching via rate limiter & display Cloudflare window on challenge
+                    // Stop all fetching via rate limiter & handle Cloudflare on challenge
                     if is_cloudflare_response(status, &headers, &text) {
                         {
                             let mut queues = self.fetch_queues.lock().await;
@@ -1319,7 +1068,7 @@ impl ApiRateLimiter {
 }
 
 // ===========================================================================
-// 6. Tauri Command Handlers
+// 4. Tauri Command Handlers
 // ===========================================================================
 
 #[tauri::command]
@@ -1357,4 +1106,15 @@ pub async fn get_limiter_state(
     limiter: State<'_, ApiRateLimiter>,
 ) -> Result<FullTelemetryState, String> {
     Ok(limiter.get_telemetry_state().await)
+}
+
+/// slots = [account, ip1, ip2, ip3, ip4, ...]; default for "outside" is [1, 1, 2, 4, 8, 12]
+#[tauri::command]
+pub async fn set_limiter_reservation(
+    limiter: State<'_, ApiRateLimiter>,
+    name: String,
+    slots: Vec<usize>,
+) -> Result<(), String> {
+    limiter.set_reservation(name, slots).await;
+    Ok(())
 }

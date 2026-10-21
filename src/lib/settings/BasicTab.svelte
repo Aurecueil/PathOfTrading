@@ -1,7 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { initItemData, isLoading } from "$lib/trade/tradeStore";
+  import {
+    initItemData,
+    isLoading,
+    displayTiers,
+    displayRune,
+  } from "$lib/trade/tradeStore";
 
   let { onStatus }: { onStatus: (m: string) => void } = $props();
 
@@ -49,29 +54,41 @@
   }
 </script>
 
-<section class="st-card">
-  <div class="st-card-head">Language &amp; Region</div>
-  <div class="st-card-body">
-    <label class="st-muted" for="language-select">Trade API language</label>
-    <div class="st-row">
-      <select
-        id="language-select"
-        class="st-select"
-        bind:value={selected}
-        disabled={saving || $isLoading}
-      >
-        {#each languages as lang}
-          <option value={lang.code}>{lang.label}</option>
-        {/each}
-      </select>
-      <button
-        type="button"
-        class="st-btn primary"
-        onclick={confirm}
-        disabled={saving || $isLoading || selected === saved}
-      >
-        {saving || $isLoading ? "Updating…" : "Confirm"}
-      </button>
-    </div>
-  </div>
-</section>
+<div class="st-row">
+  <label class="pb-check-text" for="language-select">Language</label>
+  <select
+    id="language-select"
+    class="st-select"
+    bind:value={selected}
+    disabled={saving || $isLoading}
+  >
+    {#each languages as lang}
+      <option value={lang.code}>{lang.label}</option>
+    {/each}
+  </select>
+  <button
+    type="button"
+    class="st-btn primary"
+    onclick={confirm}
+    disabled={saving || $isLoading || selected === saved}
+  >
+    {saving || $isLoading ? "Updating…" : "Confirm"}
+  </button>
+</div>
+
+<label class="pb-check">
+  <input type="checkbox" bind:checked={$displayTiers} />
+  <span class="pb-box"></span>
+  <span class="pb-check-text">Always display modifier tiers</span>
+</label>
+
+<!-- Inverted: checked = hide socketable modifiers = displayRune false -->
+<label class="pb-check">
+  <input
+    type="checkbox"
+    checked={!$displayRune}
+    onchange={(e) => displayRune.set(!e.currentTarget.checked)}
+  />
+  <span class="pb-box"></span>
+  <span class="pb-check-text">Hide socketable modifiers</span>
+</label>

@@ -19,6 +19,8 @@
     showToast,
   } from "$lib/project/projects.svelte";
 
+  import SettingsOverlay from "$lib/settings/SettingsOverlay.svelte";
+
   import TitleBar from "$lib/layout/TitleBar.svelte";
   import MenuTabBar from "$lib/layout/MenuTabBar.svelte";
   import WorkspaceModals from "$lib/layout/WorkspaceModals.svelte";
@@ -123,6 +125,7 @@
     <MenuTabBar />
   </header>
 
+  <SettingsOverlay />
   <main class="content">
     {@render children()}
   </main>
