@@ -21,6 +21,7 @@
   import { leaguesPoe, leaguesPoe2 } from "$lib/trade/tradeStore";
   import SettingsOverlay from "$lib/settings/SettingsOverlay.svelte";
   import { openSettings } from "$lib/settings/settingsState.svelte";
+  import { authState } from "$lib/trade/tradeStore";
 
   const LOGIN_NOTICE_DELAY_SECS = 5;
 
@@ -76,6 +77,8 @@
       isLoggedIn = status.logged_in;
       accountName = status.username;
 
+      authState.set(status.logged_in);
+
       if (isLoggedIn && !accountName) {
         invoke<string>("refresh_poetoken_background")
           .then(() => {
@@ -127,6 +130,7 @@
       isLoggedIn = false;
       accountName = null;
       accountMenuOpen = false;
+      authState.set(false);
     });
 
     const unlistenExpired = listen("poe_session_expired", () => {
@@ -205,6 +209,7 @@
       isLoggedIn = false;
       accountName = null;
       showToast("Logged out of Path of Exile");
+      authState.set(false);
     } catch (err) {
       console.error("Failed to log out:", err);
       showToast("Failed to log out");

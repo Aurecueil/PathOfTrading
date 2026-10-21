@@ -86,6 +86,7 @@ pub fn run() {
             project::colorCodingSettings::get_stat_color_configs,
             project::statgroup::get_stat_group_presets,
             project::statgroup::save_stat_group_presets,
+            trade::openWebsite::open_trade_website,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

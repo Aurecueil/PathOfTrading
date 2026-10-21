@@ -9,6 +9,7 @@
   import ItemListing from "$lib/trade/components/item/ItemListing.svelte";
   import ItemJsonModal from "$lib/trade/components/item/ItemJsonModal.svelte";
   import ItemTitleBar from "$lib/trade/components/item/ItemTitleBar.svelte";
+  import MercenarySkills from "$lib/trade/components/item/MercenarySkills.svelte";
   import { getCategorySymbols } from "$lib/trade/components/item/categorySymbols";
   import { extractSortValue } from "$lib/trade/components/item/sortValue";
 
@@ -105,10 +106,30 @@
 
   $: item = data?.item as Item | undefined;
   $: listing = data?.listing;
-  $: fullItemTitle = item
-    ? [item.name, item.typeLine || item.baseType].filter(Boolean).join(" ")
+  $: isMercenaryWarrant =
+    item?.baseType === "Mercenary Warrant" ||
+    item?.typeLine === "Mercenary Warrant";
+
+  $: mercenaryName = isMercenaryWarrant
+    ? (item?.properties?.[0]?.values?.[0]?.[0] ?? "")
     : "";
 
+  $: fullItemTitle = item
+    ? isMercenaryWarrant && mercenaryName
+      ? mercenaryName
+      : [item.name, item.typeLine || item.baseType].filter(Boolean).join(" ")
+    : "";
+
+  // Also strip the first property from the item passed to <ItemStats> if you don't want
+  // "Draxia, the Misanthrope" duplicated inside the properties list:
+  $: displayItem =
+    item && isMercenaryWarrant && mercenaryName && item.properties?.length
+      ? {
+          ...item,
+          name: mercenaryName,
+          properties: item.properties.slice(1),
+        }
+      : item;
   /* ------------------------------------------------------------------ */
   /* Sort value: the whole field the payload sorts by, passed to the parent */
   /* ------------------------------------------------------------------ */
@@ -358,6 +379,9 @@
         styleMode={resolvedStyle}
         tileWidth={boxWidth}
       />
+      {#if item.mercenarySkills && item.mercenarySkills.length > 0 && resolvedStyle !== "minimal"}
+        <MercenarySkills skills={item.mercenarySkills} />
+      {/if}
     </div>
 
     <!-- Right / bottom: listing & trade actions -->
@@ -380,8 +404,7 @@
   <ItemJsonModal
     isOpen={isJsonModalOpen}
     rawData={data}
-    title="{item.name ? `${item.name} ` : ''}{item.typeLine ||
-      item.baseType} ({id.slice(0, 8)})"
+    title="{fullItemTitle} ({id.slice(0, 8)})"
     onClose={() => (isJsonModalOpen = false)}
   />
 {/if}

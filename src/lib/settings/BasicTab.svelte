@@ -7,6 +7,11 @@
     displayTiers,
     displayRune,
   } from "$lib/trade/tradeStore";
+  // Adjust this import path to wherever your fetchCdnImage file is located:
+  import {
+    getCacheStats,
+    clearAllCaches,
+  } from "$lib/trade/utilis/imageService";
 
   let { onStatus }: { onStatus: (m: string) => void } = $props();
 
@@ -25,7 +30,43 @@
   let saved = $state("EN");
   let saving = $state(false);
 
+  // Cache state
+  let cacheCount = $state(0);
+  let cacheSize = $state("0 B");
+  let loadingCache = $state(true);
+  let clearingCache = $state(false);
+
+  async function refreshCacheStats() {
+    loadingCache = true;
+    try {
+      const stats = await getCacheStats();
+      cacheCount = stats.count;
+      cacheSize = stats.formattedSize;
+    } catch (err) {
+      console.error("Failed to load cache stats:", err);
+    } finally {
+      loadingCache = false;
+    }
+  }
+
+  async function handleClearCache() {
+    if (clearingCache || loadingCache) return;
+    clearingCache = true;
+    try {
+      await clearAllCaches();
+      await refreshCacheStats();
+      onStatus("Image cache cleared");
+    } catch (err) {
+      console.error("Failed to clear image cache:", err);
+      onStatus("Failed to clear image cache");
+    } finally {
+      clearingCache = false;
+    }
+  }
+
   onMount(async () => {
+    refreshCacheStats();
+
     try {
       const lang = await invoke<string>("get_language");
       if (lang) selected = saved = lang;
@@ -92,3 +133,22 @@
   <span class="pb-box"></span>
   <span class="pb-check-text">Hide socketable modifiers</span>
 </label>
+
+<div class="st-row">
+  <span class="pb-check-text">
+    Image Cache:
+    {#if loadingCache}
+      Calculating…
+    {:else}
+      {cacheCount} {cacheCount === 1 ? "item" : "items"} ({cacheSize})
+    {/if}
+  </span>
+  <button
+    type="button"
+    class="st-btn"
+    onclick={handleClearCache}
+    disabled={clearingCache || loadingCache || cacheCount === 0}
+  >
+    {clearingCache ? "Clearing…" : "Clear Cache"}
+  </button>
+</div>

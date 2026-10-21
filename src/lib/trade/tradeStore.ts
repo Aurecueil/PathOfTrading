@@ -7,12 +7,20 @@ import type { FilterGroup, FilterDataResponse } from "$lib/types/filters";
 import type { StatGroup, StatsDataResponse } from "$lib/types/stats";
 import type { League, LeagueData } from "$lib/types/leagues";
 import type { StaticCategory, StaticDataResponse } from "$lib/types/statics";
+import type {
+  dataMercenarySkill,
+  dataMercenarySupport,
+  MercenarySkillsMap,
+  MercenarySupportsMap,
+} from "$lib/types/mercenary";
 import {
   statColorCodingEnabled,
   ensureCrossWindowSync,
   loadStatColorConfigsFromDisk,
 } from "./statColors";
+
 export * from "./statColors";
+
 export const itemsPoe = writable<ItemCategory[]>([]);
 export const itemsPoe2 = writable<ItemCategory[]>([]);
 export const filtersPoe = writable<FilterGroup[]>([]);
@@ -23,14 +31,98 @@ export const leaguesPoe = writable<League[]>([]);
 export const leaguesPoe2 = writable<League[]>([]);
 export const staticsPoe = writable<StaticCategory[]>([]);
 export const staticsPoe2 = writable<StaticCategory[]>([]);
+
+// PoE 1 Exclusive Mercenary Stores
+export const mercenarySkills = writable<MercenarySkillsMap>({});
+export const mercenarySupports = writable<MercenarySupportsMap>({});
+
 export const isLoading = writable<boolean>(false);
 export const loadError = writable<string | null>(null);
+export const currentLanguage = writable<string>("EN");
+
+export const authState = writable<boolean>(false);
+
+// Shared Cache Storage bucket with CDN images so "Clear Cache" wipes both
+const CACHE_NAME = "app-cdn-images-v1";
+
+const REPOE_LANG_MAP: Record<string, string> = {
+  EN: "",
+  FR: "French",
+  DE: "German",
+  JP: "Japanese",
+  BR: "Portuguese",
+  RU: "Russian",
+  ES: "Spanish",
+  TH: "Thai",
+};
+
+function getRepoeUrl(
+  fileName: "mercenary_skills.min.json" | "mercenary_supports.min.json",
+  langCode: string,
+): string {
+  const folder = REPOE_LANG_MAP[langCode.toUpperCase()] ?? "";
+  return folder
+    ? `https://repoe-fork.github.io/${folder}/${fileName}`
+    : `https://repoe-fork.github.io/${fileName}`;
+}
+
+/**
+ * Fetches JSON from Cache Storage if available; otherwise fetches from network
+ * and stores it in `app-cdn-images-v1` for future launches.
+ */
+async function fetchCachedJson<T>(url: string): Promise<T> {
+  let cache: Cache | null = null;
+
+  if (typeof window !== "undefined" && "caches" in window) {
+    try {
+      cache = await caches.open(CACHE_NAME);
+      const cachedRes = await cache.match(url);
+      if (cachedRes) {
+        return (await cachedRes.json()) as T;
+      }
+    } catch (err) {
+      console.warn("Cache Storage lookup failed:", err);
+      cache = null;
+    }
+  }
+
+  // Fallback to network request (GitHub Pages supports CORS natively)
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} when fetching ${url}`);
+  }
+
+  if (cache) {
+    try {
+      await cache.put(url, response.clone());
+    } catch (err) {
+      console.warn("Failed to cache JSON response:", err);
+    }
+  }
+
+  return (await response.json()) as T;
+}
 
 export async function initItemData(): Promise<void> {
   isLoading.set(true);
   loadError.set(null);
 
   try {
+    // Resolve active language so RePoE URLs match the selected language
+    let lang = get(currentLanguage);
+    try {
+      const backendLang = await invoke<string>("get_language");
+      if (backendLang) {
+        lang = backendLang;
+        currentLanguage.set(backendLang);
+      }
+    } catch {
+      // Fallback to currentLanguage store value
+    }
+
+    const skillsUrl = getRepoeUrl("mercenary_skills.min.json", lang);
+    const supportsUrl = getRepoeUrl("mercenary_supports.min.json", lang);
+
     const [
       poeItems,
       poe2Items,
@@ -42,6 +134,8 @@ export async function initItemData(): Promise<void> {
       poe2Leagues,
       poeStatics,
       poe2Statics,
+      mercSkills,
+      mercSupports,
     ] = await Promise.allSettled([
       invoke<ItemDataResponse>("load_item_data", { realm: "poe" }),
       invoke<ItemDataResponse>("load_item_data", { realm: "poe2" }),
@@ -53,6 +147,8 @@ export async function initItemData(): Promise<void> {
       invoke<LeagueData>("load_league_data", { realm: "poe2" }),
       invoke<StaticDataResponse>("load_static_data", { realm: "poe" }),
       invoke<StaticDataResponse>("load_static_data", { realm: "poe2" }),
+      fetchCachedJson<MercenarySkillsMap>(skillsUrl),
+      fetchCachedJson<MercenarySupportsMap>(supportsUrl),
     ]);
 
     const errors: string[] = [];
@@ -93,6 +189,14 @@ export async function initItemData(): Promise<void> {
       staticsPoe2.set(poe2Statics.value.result);
     else errors.push(`PoE2 Statics: ${poe2Statics.reason}`);
 
+    if (mercSkills.status === "fulfilled")
+      mercenarySkills.set(mercSkills.value);
+    else errors.push(`PoE Mercenary Skills: ${mercSkills.reason}`);
+
+    if (mercSupports.status === "fulfilled")
+      mercenarySupports.set(mercSupports.value);
+    else errors.push(`PoE Mercenary Supports: ${mercSupports.reason}`);
+
     if (errors.length > 0) {
       loadError.set(errors.join(" | "));
     }
@@ -102,9 +206,28 @@ export async function initItemData(): Promise<void> {
     isLoading.set(false);
   }
 }
+export const mercenarySkillsByHash = derived(mercenarySkills, ($skills) => {
+  const map = new Map<number, dataMercenarySkill>();
+  for (const skill of Object.values($skills)) {
+    if (typeof skill.hash === "number") {
+      map.set(skill.hash, skill);
+    }
+  }
+  return map;
+});
 
-export const currentLanguage = writable<string>("EN");
-
+export const mercenarySupportsByHash = derived(
+  mercenarySupports,
+  ($supports) => {
+    const map = new Map<number, dataMercenarySupport>();
+    for (const sup of Object.values($supports)) {
+      if (typeof sup.hash === "number") {
+        map.set(sup.hash, sup);
+      }
+    }
+    return map;
+  },
+);
 export async function initUserSettings(): Promise<void> {
   await ensureCrossWindowSync();
 
@@ -124,6 +247,7 @@ export async function initUserSettings(): Promise<void> {
     currentLanguage.set(lang.value);
   }
 }
+
 // ---------------------------------------------------------------------------
 // UI-only settings, persisted to disk via webview storage (not stored in Rust)
 // ---------------------------------------------------------------------------

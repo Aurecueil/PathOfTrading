@@ -3,6 +3,55 @@ import { invoke } from "@tauri-apps/api/core"; // In Tauri v1: import { invoke }
 const CACHE_NAME = "app-cdn-images-v1";
 const memoryCache = new Map<string, Promise<string>>();
 
+// e.g., src/lib/utils/imageCache.ts (or wherever fetchCdnImage is located)
+
+export interface CacheSummary {
+  count: number;
+  sizeBytes: number;
+  formattedSize: string;
+}
+
+export async function getCacheStats(): Promise<CacheSummary> {
+  let count = 0;
+  let sizeBytes = 0;
+
+  if (typeof window !== "undefined" && "caches" in window) {
+    try {
+      const hasCache = await caches.has(CACHE_NAME);
+      if (hasCache) {
+        const cache = await caches.open(CACHE_NAME);
+        const requests = await cache.keys();
+        count = requests.length;
+
+        const sizes = await Promise.all(
+          requests.map(async (req) => {
+            const res = await cache.match(req);
+            if (!res) return 0;
+            const blob = await res.blob();
+            return blob.size;
+          }),
+        );
+        sizeBytes = sizes.reduce((acc, b) => acc + b, 0);
+      }
+    } catch (err) {
+      console.error("Failed to read image cache stats:", err);
+    }
+  }
+
+  return {
+    count,
+    sizeBytes,
+    formattedSize: formatBytes(sizeBytes),
+  };
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${(bytes / Math.pow(k, i)).toFixed(i === 0 ? 0 : 2)} ${sizes[i]}`;
+}
 /**
  * Retrieves a CDN image using Tauri IPC for network requests to bypass CORS,
  * with aggressive in-memory and on-disk caching.

@@ -15,6 +15,7 @@
     TradeFetchResponse,
   } from "$lib/types/tradeItem";
   import SearchItemRow from "$lib/searchTile/SearchItemRow.svelte";
+  import { authState } from "$lib/trade/tradeStore";
 
   export let tile: SearchTile;
   export let scale: number = 1;
@@ -566,7 +567,7 @@
         bodyElement.scrollTop = 0;
       }
 
-      if (mode === "regular" || mode === "mixed") {
+      if (!$authState || mode === "regular" || mode === "mixed") {
         for (const id of tile.results) {
           const entry: DisplayEntry = {
             uid: `reg_${id}_${uidCounter++}`,
@@ -588,7 +589,7 @@
         await ensureInViewItemsFetched();
       }
 
-      if (!isDestroyed && (mode === "live" || mode === "mixed")) {
+      if (!isDestroyed && (mode === "live" || mode === "mixed") && $authState) {
         await startLive();
       }
     } catch (err) {
@@ -1181,19 +1182,44 @@
     </div>
 
     <div class="actions" on:pointerdown|stopPropagation>
-      <select
-        class="mode-select"
-        bind:value={tile.mode}
-        on:change={handleModeChange}
-        disabled={disabled || tile.loading || isLiveConnecting}
-        title="Search mode"
-      >
-        <option value="regular">Regular</option>
-        <option value="live">Live</option>
-        <option value="mixed">Mixed</option>
-      </select>
+      <!-- Open on official trade website button (only shows if searchId exists) -->
+      {#if tile.searchId}
+        <button
+          type="button"
+          class="action-btn trade-web-btn"
+          on:click|stopPropagation={async () => {
+            try {
+              await invoke("open_trade_website", {
+                searchId: tile.searchId,
+                realm: tile.realm || "poe",
+                league: currentLeague,
+              });
+            } catch (err) {
+              console.error(
+                `[SearchTile ${tile.id}] Failed to open trade website:`,
+                err,
+              );
+            }
+          }}
+        >
+          🔗
+        </button>
+      {/if}
 
-      {#if mode === "regular"}
+      {#if $authState}
+        <select
+          class="mode-select"
+          bind:value={tile.mode}
+          on:change={handleModeChange}
+          disabled={disabled || tile.loading || isLiveConnecting}
+        >
+          <option value="regular">Regular</option>
+          <option value="live">Live</option>
+          <option value="mixed">Mixed</option>
+        </select>
+      {/if}
+
+      {#if mode === "regular" || !$authState}
         <button
           type="button"
           class="action-btn"
@@ -1657,5 +1683,10 @@
     box-shadow:
       0 0 0 1px #7dc8ff,
       0 8px 24px rgba(0, 0, 0, 0.85);
+  }
+  .actions button.trade-web-btn {
+    width: 28px;
+    padding: 0;
+    font-size: 16px;
   }
 </style>

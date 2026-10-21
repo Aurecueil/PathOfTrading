@@ -5,6 +5,7 @@ pub mod items;
 pub mod league;
 pub mod limiter;
 pub mod live;
+pub mod openWebsite;
 pub mod search;
 pub mod settings;
 pub mod statics;

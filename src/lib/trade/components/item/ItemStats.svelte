@@ -439,23 +439,6 @@
       </div>
     {/if}
 
-    <!-- Mercenary Skills (PoE2) -->
-    {#if item.mercenarySkills && item.mercenarySkills.length > 0}
-      <div class="separator-line"></div>
-      <div class="stat-group mercenary-group">
-        {#each item.mercenarySkills as skill}
-          <div class="mercenary-skill-line">
-            <CdnImage
-              src={skill.icon}
-              alt={skill.name}
-              className="skill-icon"
-            />
-            <span class="skill-name">{cleanBracketText(skill.name)}</span>
-          </div>
-        {/each}
-      </div>
-    {/if}
-
     <!-- Split (split or duplicated) + Exclusive Bottom State + Scourge tier -->
     {#if isSplit || exclusiveState || scourgeTier !== null}
       <div class="separator-line"></div>
