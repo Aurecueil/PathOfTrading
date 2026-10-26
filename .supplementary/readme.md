@@ -1,0 +1,1 @@
+## Files in this dir are additional content, such as static images for readme or scripts
