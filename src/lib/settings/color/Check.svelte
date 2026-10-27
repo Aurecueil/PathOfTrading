@@ -1,3 +1,4 @@
+<!-- src\lib\settings\color\Check.svelte -->
 <script lang="ts">
   let {
     checked,

@@ -205,26 +205,60 @@
   $: shownStatGroupMods = isTooltip ? [] : statGroupMods;
 
   /* ------------------------------------------------------------------ */
-  /* Exclusive Bottom State Tag + Split (split or duplicated)           */
+  /* Bottom State Tags (Split, Mirrored, Unidentified, Corrupted, etc.) */
   /* ------------------------------------------------------------------ */
-  type ExclusiveState =
+  type BottomState =
     | { kind: "foreseeing" }
-    | { kind: "text"; label: string; cls: string }
-    | null;
+    | { kind: "text"; label: string; cls: string };
 
-  $: isSplit = Boolean(item.split || item.duplicated);
+  $: bottomStates = ((): BottomState[] => {
+    const states: BottomState[] = [];
 
-  $: exclusiveState = ((): ExclusiveState => {
-    if (item.foreseeing) return { kind: "foreseeing" };
-    if (item.identified === false)
-      return { kind: "text", label: "Unidentified", cls: "state-corrupted" };
-    if (item.doubleCorrupted)
-      return { kind: "text", label: "Twice Corrupted", cls: "state-corrupted" };
-    if (item.corrupted)
-      return { kind: "text", label: "Corrupted", cls: "state-corrupted" };
-    if (item.sanctified)
-      return { kind: "text", label: "Sanctified", cls: "state-sanctified" };
-    return null;
+    if (item.split) {
+      states.push({ kind: "text", label: "Split", cls: "state-split" });
+    }
+    if (item.duplicated) {
+      states.push({ kind: "text", label: "Mirrored", cls: "state-mirrored" });
+    }
+    if (item.foreseeing) {
+      states.push({ kind: "foreseeing" });
+    }
+    if (item.identified === false) {
+      states.push({
+        kind: "text",
+        label: "Unidentified",
+        cls: "state-corrupted",
+      });
+    }
+    if (item.doubleCorrupted) {
+      states.push({
+        kind: "text",
+        label: "Twice Corrupted",
+        cls: "state-corrupted",
+      });
+    } else if (item.corrupted) {
+      states.push({
+        kind: "text",
+        label: "Corrupted",
+        cls: "state-corrupted",
+      });
+    }
+    if (item.sanctified) {
+      states.push({
+        kind: "text",
+        label: "Sanctified",
+        cls: "state-sanctified",
+      });
+    }
+    if (scourgeTier !== null) {
+      states.push({
+        kind: "text",
+        label: `Scourge (Tier ${scourgeTier})`,
+        cls: "state-scourge",
+      });
+    }
+
+    return states;
   })();
 
   /* ------------------------------------------------------------------ */
@@ -439,29 +473,23 @@
       </div>
     {/if}
 
-    <!-- Split (split or duplicated) + Exclusive Bottom State + Scourge tier -->
-    {#if isSplit || exclusiveState || scourgeTier !== null}
+    <!-- Bottom State Tags (Split, Mirrored, Corrupted, Unidentified, Scourge, etc.) -->
+    {#if bottomStates.length > 0}
       <div class="separator-line"></div>
       <div class="stat-group bottom-state-group">
-        {#if isSplit}
-          <div class="state-stat-line state-split">Split</div>
-        {/if}
-        {#if exclusiveState?.kind === "foreseeing"}
-          <div
-            class="item-popup__desc-text--foreseeing"
-            style="--foresight-url: url('{FORESIGHT_ICON}')"
-            title="Foreseeing"
-          ></div>
-        {:else if exclusiveState?.kind === "text"}
-          <div class="state-stat-line {exclusiveState.cls}">
-            {exclusiveState.label}
-          </div>
-        {/if}
-        {#if scourgeTier !== null}
-          <div class="state-stat-line state-scourge">
-            Scourge (Tier {scourgeTier})
-          </div>
-        {/if}
+        {#each bottomStates as state}
+          {#if state.kind === "foreseeing"}
+            <div
+              class="item-popup__desc-text--foreseeing"
+              style="--foresight-url: url('{FORESIGHT_ICON}')"
+              title="Foreseeing"
+            ></div>
+          {:else}
+            <div class="state-stat-line {state.cls}">
+              {state.label}
+            </div>
+          {/if}
+        {/each}
       </div>
     {/if}
 

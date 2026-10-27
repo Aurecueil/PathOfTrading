@@ -15,7 +15,8 @@
     TradeFetchResponse,
   } from "$lib/types/tradeItem";
   import SearchItemRow from "$lib/searchTile/SearchItemRow.svelte";
-  import { authState } from "$lib/trade/tradeStore";
+  import ItemJsonModal from "$lib/trade/components/item/ItemJsonModal.svelte";
+  import { authState, isDev } from "$lib/trade/tradeStore";
 
   export let tile: SearchTile;
   export let scale: number = 1;
@@ -85,6 +86,46 @@
   let unlistenItems: UnlistenFn | null = null;
   let unlistenStatus: UnlistenFn | null = null;
   let bodyElement: HTMLDivElement | null = null;
+
+  // Dev modal state & response tracking
+  let lastSearchResponse: any = null;
+  let jsonModalOpen: boolean = false;
+  let jsonModalTitle: string = "";
+  let jsonModalData: any = null;
+
+  // Supports both a Svelte readable/writable store and a plain boolean export
+  $: devEnabled =
+    typeof isDev === "object" && isDev !== null && "subscribe" in isDev
+      ? $isDev
+      : Boolean(isDev);
+
+  function openPayloadModal() {
+    const fallbackPayload = tile.full_payload
+      ? buildRegularPayload(tile.full_payload, tile.realm || "poe")
+      : {};
+    jsonModalTitle = `${displayTitle} — Current Payload`;
+    jsonModalData = activePayload ?? fallbackPayload ?? {};
+    jsonModalOpen = true;
+  }
+
+  function openFullResponseModal() {
+    const fetchedItems = orderedEntries
+      .map((e) => e.data)
+      .filter((d): d is TradeFetchResult => d !== null);
+
+    jsonModalTitle = `${displayTitle} — Full Response`;
+    jsonModalData = {
+      searchId: tile.searchId ?? null,
+      league: currentLeague,
+      realm: tile.realm ?? "poe",
+      mode,
+      searchResponse: lastSearchResponse,
+      totalIdsCount: tile.results?.length ?? 0,
+      fetchedItemsCount: fetchedItems.length,
+      fetchedItems,
+    };
+    jsonModalOpen = true;
+  }
 
   $: {
     tile.displayStyle = "auto";
@@ -553,6 +594,7 @@
       const data =
         typeof rawResponse === "string" ? JSON.parse(rawResponse) : rawResponse;
 
+      lastSearchResponse = data;
       tile.searchId = data.id;
       tile.results = data.result || [];
 
@@ -1269,65 +1311,92 @@
     </div>
   </div>
 
-  <div
-    class="tile-body"
-    class:clickable-empty={hasNoSearchYet}
-    bind:this={bodyElement}
-    on:scroll={handleScroll}
-    on:wheel|stopPropagation
-    on:click={handleBodyClick}
-    title={hasNoSearchYet ? "Click to configure filters" : undefined}
-  >
-    {#if tile.loading}
-      <div class="search-overlay">
-        <span>Searching market...</span>
+  <div class="tile-body-wrapper">
+    {#if devEnabled}
+      <div
+        class="dev-overlay-btns"
+        on:pointerdown|stopPropagation
+        on:click|stopPropagation
+      >
+        <button
+          type="button"
+          class="dev-btn"
+          on:click={openPayloadModal}
+          title="View Current Payload JSON"
+        >
+          &#123;&#125; Payload
+        </button>
+        <button
+          type="button"
+          class="dev-btn"
+          on:click={openFullResponseModal}
+          title="View Full Response JSON"
+        >
+          &#123;&#125; Response
+        </button>
       </div>
     {/if}
 
-    {#if displayedItems.length === 0 && !tile.loading}
-      <div class="status-msg empty">
-        {#if disabled}
-          Search disabled (Right-click to enable).
-        {:else if isLiveConnecting}
-          Connecting to live socket...
-        {:else if isLiveActive}
-          Waiting for live listings...
-        {:else if tile.searchId}
-          No items found.
-        {:else}
-          No search executed — click to configure filters.
-        {/if}
-      </div>
-    {:else}
-      <div class="item-list list-{effectiveStyle}">
-        {#each displayedItems as itemEntry (itemEntry.uid)}
-          <SearchItemRow
-            id={itemEntry.id}
-            payload={itemEntry.payload}
-            league={itemEntry.league}
-            data={itemEntry.data}
-            sortValue={itemEntry.sortValue}
-            isLive={itemEntry.isLive ?? false}
-            realm={tile.realm}
-            searchId={tile.searchId ?? ""}
-            {effectiveStyle}
-            tileWidth={tile.w}
-            tileHeight={tile.h}
-            on:sortvalue={handleRowSortValue}
-          />
-        {/each}
+    <div
+      class="tile-body"
+      class:clickable-empty={hasNoSearchYet}
+      bind:this={bodyElement}
+      on:scroll={handleScroll}
+      on:wheel|stopPropagation
+      on:click={handleBodyClick}
+      title={hasNoSearchYet ? "Click to configure filters" : undefined}
+    >
+      {#if tile.loading}
+        <div class="search-overlay">
+          <span>Searching market...</span>
+        </div>
+      {/if}
 
-        {#if visibleCount < orderedEntries.length}
-          <div class="scroll-sentinel">
-            {#if isFetchingMore}
-              Loading more results...
-            {/if}
-          </div>
-        {:else if isFetchingMore}
-          <div class="fetching-more">Loading more results...</div>
-        {/if}
-      </div>
-    {/if}
+      {#if displayedItems.length === 0 && !tile.loading}
+        <div class="status-msg empty">
+          {#if disabled}
+            Search disabled (Right-click to enable).
+          {:else if isLiveConnecting}
+            Connecting to live socket...
+          {:else if isLiveActive}
+            Waiting for live listings...
+          {:else if tile.searchId}
+            No items found.
+          {:else}
+            No search executed — click to configure filters.
+          {/if}
+        </div>
+      {:else}
+        <div class="item-list list-{effectiveStyle}">
+          {#each displayedItems as itemEntry (itemEntry.uid)}
+            <SearchItemRow
+              id={itemEntry.id}
+              payload={itemEntry.payload}
+              league={itemEntry.league}
+              data={itemEntry.data}
+              sortValue={itemEntry.sortValue}
+              isLive={itemEntry.isLive ?? false}
+              realm={tile.realm}
+              searchId={tile.searchId ?? ""}
+              {effectiveStyle}
+              tileWidth={tile.w}
+              tileHeight={tile.h}
+              on:sortvalue={handleRowSortValue}
+            />
+          {/each}
+
+          {#if visibleCount < orderedEntries.length}
+            <div class="scroll-sentinel">
+              {#if isFetchingMore}
+                Loading more results...
+              {/if}
+            </div>
+          {:else if isFetchingMore}
+            <div class="fetching-more">Loading more results...</div>
+          {/if}
+        </div>
+      {/if}
+    </div>
   </div>
 
   <div class="edge n" on:pointerdown={(e) => onResizePointerDown(e, "n")}></div>
@@ -1351,6 +1420,17 @@
     on:pointerdown={(e) => onResizePointerDown(e, "se")}
   ></div>
 </div>
+
+{#if devEnabled}
+  <ItemJsonModal
+    isOpen={jsonModalOpen}
+    rawData={jsonModalData}
+    title={jsonModalTitle}
+    onClose={() => {
+      jsonModalOpen = false;
+    }}
+  />
+{/if}
 
 <style>
   .tile-root {
@@ -1542,6 +1622,50 @@
     width: 28px;
     padding: 0;
     font-size: 18px;
+  }
+
+  .tile-body-wrapper {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .dev-overlay-btns {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    z-index: 15;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    pointer-events: auto;
+  }
+
+  .dev-btn {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    font-weight: 600;
+    height: 22px;
+    padding: 0 7px;
+    background: rgba(12, 10, 6, 0.9);
+    border: 1px solid #8a6a2e;
+    color: #e9cf9f;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(2px);
+    transition:
+      background-color 0.12s ease,
+      border-color 0.12s ease,
+      color 0.12s ease;
+  }
+
+  .dev-btn:hover {
+    background: #3b2c10;
+    border-color: #e9cf9f;
+    color: #ffffff;
   }
 
   .tile-body {

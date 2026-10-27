@@ -1,4 +1,4 @@
-##  Path of Trading //todo icon
+#  Path of Trading //todo icon
 
 **Path of Trading** is Trade manager for [Path of Exile](https://www.pathofexile.com/).
 
@@ -12,17 +12,17 @@
 ## Features
 - trade
 
-# Download //todo link to release downlaod
+## Download //todo link to release downlaod
 
 
-# Updates
+## Updates
 At the momemnt manual only. Will be automated later on. . .
 
 
-# Usage
+## Usage
 uhhh future me will do this
 
-## Acknowledgments
+# Acknowledgments
 
 - *[RePoE](https://github.com/brather1ng/RePoE)*
 - *[poe.ninja](https://poe.ninja/)*

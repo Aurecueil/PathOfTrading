@@ -41,6 +41,7 @@ export const loadError = writable<string | null>(null);
 export const currentLanguage = writable<string>("EN");
 
 export const authState = writable<boolean>(false);
+export const isDev = writable<boolean>(true);
 
 // Shared Cache Storage bucket with CDN images so "Clear Cache" wipes both
 const CACHE_NAME = "app-cdn-images-v1";
