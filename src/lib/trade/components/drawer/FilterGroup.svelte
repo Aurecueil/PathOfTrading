@@ -1,3 +1,4 @@
+<!-- src/lib/trade/components/drawer/FilterGroup.svelte -->
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import FilterRow from "./FilterRow.svelte";
@@ -8,6 +9,7 @@
   export let values: Record<string, any> = {};
   export let collapsed: boolean = false;
   export let uniqueItems: ItemEntry[] = [];
+  export let staticCatalog: any[] = [];
 
   const dispatch = createEventDispatcher<{
     toggle: void;
@@ -35,6 +37,7 @@
           filter={fEntry}
           value={values[fEntry.id] || {}}
           {uniqueItems}
+          {staticCatalog}
           on:change={(e) =>
             dispatch("change", {
               filterId: fEntry.id,

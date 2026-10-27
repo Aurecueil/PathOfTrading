@@ -860,12 +860,25 @@
 
   function nonPassiveWheel(node: HTMLElement) {
     function handleWheel(e: WheelEvent) {
+      const isCtrl = e.ctrlKey || e.metaKey;
+      const target = e.target as HTMLElement;
+
+      if (!isCtrl) {
+        // Without Ctrl: only zoom if we are directly on the empty canvas background
+        const isCanvasBg =
+          target === viewportEl ||
+          target.classList.contains("viewport") ||
+          target.classList.contains("world");
+
+        if (!isCanvasBg) return; // Let tiles/drawers scroll normally
+      }
+
+      // Block browser zoom and stop child elements from receiving the wheel event
+      e.preventDefault();
+      e.stopPropagation();
+
       if (isLocked) return;
 
-      const target = e.target as HTMLElement;
-      if (target.closest(".drawer") || target.closest(".context-menu")) return;
-
-      e.preventDefault();
       const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
       const newScale = Math.min(Math.max(0.2, scale * zoomFactor), 4);
       const vp = getViewportCoords(e.clientX, e.clientY);
@@ -877,17 +890,28 @@
       offsetY = vp.y - worldY * scale;
     }
 
-    node.addEventListener("wheel", handleWheel, { passive: false });
+    const options: AddEventListenerOptions = { passive: false, capture: true };
+    node.addEventListener("wheel", handleWheel, options);
     return {
       destroy() {
-        node.removeEventListener("wheel", handleWheel);
+        node.removeEventListener("wheel", handleWheel, options);
       },
     };
   }
-
   function onPointerDown(e: PointerEvent) {
     contextMenu = null;
     const target = e.target as HTMLElement;
+
+    if (e.button === 1) {
+      if (isLocked) return;
+      e.preventDefault();
+      isPanning = true;
+      const vp = getViewportCoords(e.clientX, e.clientY);
+      panStart = { x: vp.x - offsetX, y: vp.y - offsetY };
+      (viewportEl as HTMLElement).setPointerCapture(e.pointerId);
+      return;
+    }
+
     if (
       target.closest(".drawer") ||
       target.closest(".toolbar") ||
@@ -897,16 +921,6 @@
     }
 
     blurActiveInput();
-
-    if (e.button === 1) {
-      if (isLocked) return;
-      e.preventDefault();
-      isPanning = true;
-      const vp = getViewportCoords(e.clientX, e.clientY);
-      panStart = { x: vp.x - offsetX, y: vp.y - offsetY };
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-      return;
-    }
 
     if (e.button !== 0) return;
 

@@ -29,6 +29,8 @@
     statsPoe2,
     leaguesPoe,
     leaguesPoe2,
+    staticsPoe,
+    staticsPoe2,
     currentLanguage,
     isLoading,
     initItemData,
@@ -48,14 +50,10 @@
   let title: string = initialTitle;
   let realm: "poe" | "poe2" = initialRealm;
   let previousRealm: "poe" | "poe2" = realm;
-  // Language the currently selected item's TEXT is in. Only advances once the
-  // item has actually been migrated to the new language's catalog.
   let previousLanguage: string = $currentLanguage || "EN";
   let previousLeague: string = initialLeague || initialPayload?.league || "";
   let league: string = initialLeague || initialPayload?.league || "";
 
-  // Snapshot of the item catalog at the moment a language change was first seen.
-  // When `allItemEntries` becomes a different array, the catalog was re-fetched.
   let pendingLangCatalog: ItemEntry[] | null = null;
 
   // Sorting state
@@ -157,6 +155,9 @@
   $: currentStatCatalog = extractArray<StatGroupType>(
     realm === "poe2" ? $statsPoe2 : $statsPoe,
   );
+  $: currentStaticCatalog = extractArray<any>(
+    realm === "poe2" ? $staticsPoe2 : $staticsPoe,
+  );
   $: rawLeagues = extractArray<League>(
     realm === "poe2" ? $leaguesPoe2 : $leaguesPoe,
   );
@@ -219,8 +220,6 @@
     }
     selectedItem = item;
     const idx = findItemIndex(allItemEntries, item);
-    // The picked item comes from the catalog currently loaded, whose language is
-    // `previousLanguage` (it may lag behind `$currentLanguage` during a re-fetch).
     currentItemRef =
       idx >= 0
         ? formatItemRef({
@@ -231,7 +230,6 @@
         : null;
   }
 
-  // Re-resolve item via migrateItemRef when realm, language, or league/catalog changes
   $: {
     const lang = $currentLanguage || "EN";
     const realmChanged = realm !== previousRealm;
@@ -244,8 +242,6 @@
       (realmChanged || langChanged || leagueChanged)
     ) {
       if (selectedItem || currentItemRef) {
-        // Remember which catalog array we saw when the language flipped; once the
-        // store hands us a different array, the catalog has been re-fetched.
         if (langChanged && pendingLangCatalog === null) {
           pendingLangCatalog = allItemEntries;
         }
@@ -277,9 +273,8 @@
           { catalogReady },
         );
 
-        // If language changed and catalog hasn't finished re-fetching yet, wait
         if (langChanged && !changed && currentItemRef && !catalogReady) {
-          // Keep previousLanguage untouched so this reactive block re-runs once store updates
+          // Wait for store update
         } else {
           previousRealm = realm;
           previousLanguage = lang;
@@ -311,6 +306,7 @@
     }
   }
 
+  // Mark out-of-realm stats separately from user-toggled `disabled`
   $: if (currentStatCatalog.length > 0) {
     const validStatIds = new Set(
       currentStatCatalog.flatMap((g) => (g.entries || []).map((e) => e.id)),
@@ -318,10 +314,10 @@
     let changed = false;
     const updated = statGroups.map((group) => {
       const updatedFilters = group.filters.map((f) => {
-        const shouldBeDisabled = !validStatIds.has(f.id);
-        if (f.disabled !== shouldBeDisabled) {
+        const isOutOfRealm = !validStatIds.has(f.id);
+        if (f.outOfRealm !== isOutOfRealm) {
           changed = true;
-          return { ...f, disabled: shouldBeDisabled };
+          return { ...f, outOfRealm: isOutOfRealm };
         }
         return f;
       });
@@ -500,8 +496,8 @@
         statGroups = initialPayload.query.stats.map((sg: any, idx: number) => ({
           id: `stat_group_${idx}_${Date.now()}`,
           type: sg.type || "and",
+          // Fix: use collapsed state; do not set a sticky `disabled` property on the group
           collapsed: sg.collapsed ?? sg.disabled ?? false,
-          disabled: sg.disabled ?? false,
           value: sg.value ? { ...sg.value } : undefined,
           filters: (sg.filters || []).map((f: any) => ({
             id: f.id,
@@ -552,6 +548,7 @@
   ) {
     sortKey = "filter:price";
   }
+
   function handleResetForm() {
     title = "";
     isEditingTitle = false;
@@ -642,7 +639,6 @@
       allKnownFilterGroups,
       sortKey,
       sortDirection,
-      // language of the item's text (lags `$currentLanguage` during catalog re-fetch)
       itemLanguage: previousLanguage,
       itemRef: currentItemRef,
     });
@@ -654,7 +650,6 @@
       payloads.full_payload.league = league;
     }
 
-    // Never drop the ref while an item is selected (autosave must not clobber it).
     currentItemRef =
       payloads.full_payload?.item_ref ?? (selectedItem ? currentItemRef : null);
 
@@ -963,6 +958,7 @@
                 values={filterValues[group.id] || {}}
                 collapsed={groupCollapsed[group.id] ?? Boolean(group.hidden)}
                 {uniqueItems}
+                staticCatalog={currentStaticCatalog}
                 on:toggle={() => {
                   groupCollapsed[group.id] = !groupCollapsed[group.id];
                   groupCollapsed = { ...groupCollapsed };
@@ -1097,9 +1093,6 @@
     background: #555555;
   }
 
-  /* --------------------------------------------------------------------------
-     Top Controls Container
-     -------------------------------------------------------------------------- */
   .top-bar {
     display: flex;
     flex-direction: column;
@@ -1150,7 +1143,6 @@
     min-width: 110px;
   }
 
-  /* Unified Top Dropdown Trigger matching SortCombobox & Text Dropdowns */
   .custom-dropdown-trigger {
     font-family: "Fontin", monospace, sans-serif !important;
     font-size: 12px !important;
@@ -1212,7 +1204,6 @@
     scrollbar-color: #555555 #000000;
   }
 
-  /* Main Grid Columns */
   .main-columns {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -1244,16 +1235,12 @@
     box-sizing: border-box;
   }
 
-  /* Non-default filter category fields: white text and white border */
   .filter-groups :global(.is-modified),
   .filter-groups :global([data-modified="true"]) {
     color: #ffffff !important;
     border-color: #ffffff !important;
   }
 
-  /* --------------------------------------------------------------------------
-     Expanded Child Popover / Dropdown Menu Styles (1px White Border)
-     -------------------------------------------------------------------------- */
   .drawer :global(.combobox-dropdown),
   .drawer :global(.autocomplete-dropdown),
   .drawer :global(.dropdown-menu),
@@ -1287,7 +1274,6 @@
     text-overflow: ellipsis !important;
   }
 
-  /* Currently Selected Item: White Text */
   .drawer :global(.combobox-option.selected),
   .drawer :global(.combobox-option[aria-selected="true"]),
   .drawer :global(.autocomplete-option.selected),
@@ -1297,7 +1283,6 @@
     color: #ffffff !important;
   }
 
-  /* Hovered or Highlighted Item: #545454 Background & White Text */
   .drawer :global(.combobox-option:hover),
   .drawer :global(.combobox-option:focus),
   .drawer :global(.autocomplete-option:hover),
@@ -1321,9 +1306,6 @@
     color: #db792f !important;
   }
 
-  /* --------------------------------------------------------------------------
-     Footer Action Buttons
-     -------------------------------------------------------------------------- */
   .actions {
     padding: 0.5rem;
     background: #000000;

@@ -1,3 +1,4 @@
+<!-- src/lib/trade/components/drawer/StatGroupUI.svelte -->
 <script lang="ts">
   import { createEventDispatcher, tick } from "svelte";
   import StatRow from "./StatRow.svelte";
@@ -17,6 +18,7 @@
       groupLabel?: string;
       value?: any;
       disabled?: boolean;
+      outOfRealm?: boolean;
     }>;
   };
 
@@ -29,6 +31,7 @@
     toggleCollapse: void;
     addStat: StatEntry;
     updateStatValue: { index: number; value: any };
+    toggleStatDisabled: number;
     updateStatEntry: { index: number; stat: StatEntry };
     removeStat: number;
     deleteGroup: void;
@@ -41,6 +44,7 @@
   let visibleStatCount: number = 50;
   let dropdownEl: HTMLUListElement | undefined;
   let searchboxEl: HTMLDivElement | undefined;
+  let addStatInputEl: HTMLInputElement | undefined;
   let typeWrapperEl: HTMLDivElement | undefined;
 
   const GROUP_TYPES = [
@@ -65,19 +69,18 @@
 
   function getTagColor(label: string): string {
     const l = (label || "").toLowerCase();
-    if (l.includes("pseudo")) return "#005DBD"; // pseudo
-    if (l.includes("crafted")) return "#D1D1D1"; // crafted
+    if (l.includes("pseudo")) return "#005DBD";
+    if (l.includes("crafted")) return "#D1D1D1";
     if (l.includes("explicit")) return "#57AFF1";
-    if (l.includes("implicit")) return "#625F15"; // impl
-    if (l.includes("fractured")) return "#A08F5F"; // frac
-    if (l.includes("enchant")) return "#89549A"; // enchant
-    if (l.includes("scourge")) return "#FF6E25"; //courage
-    if (l.includes("crucible")) return "#FF7339"; //crucible
-    if (l.includes("mercenary")) return "#8C6F3C"; //luminary
+    if (l.includes("implicit")) return "#625F15";
+    if (l.includes("fractured")) return "#A08F5F";
+    if (l.includes("enchant")) return "#89549A";
+    if (l.includes("scourge")) return "#FF6E25";
+    if (l.includes("crucible")) return "#FF7339";
+    if (l.includes("mercenary")) return "#8C6F3C";
     return "#888888";
   }
 
-  // Flattened entries for fast lookup and search
   $: flatStats = statCatalog.flatMap((g) =>
     (g.entries || []).map((e) => ({
       ...e,
@@ -85,7 +88,6 @@
     })),
   );
 
-  // Group tag restriction logic (also used by rows when editing a stat)
   $: allowedStats = flatStats.filter((item) => {
     const typeLower = (item.type || "").toLowerCase();
     const labelLower = (item.groupLabel || "").toLowerCase();
@@ -99,7 +101,6 @@
     return true;
   });
 
-  // Token-based fuzzy search across text, type, and groupLabel
   $: allMatchingStats = searchQuery.trim()
     ? allowedStats.filter((item) => {
         const tokens = searchQuery.toLowerCase().trim().split(/\s+/);
@@ -116,7 +117,6 @@
       })
     : allowedStats;
 
-  // Infinite scroll slice
   $: displayedStats = allMatchingStats.slice(0, visibleStatCount);
 
   function handleDropdownScroll(e: UIEvent) {
@@ -128,7 +128,9 @@
     }
   }
 
-  $: activeStatsCount = (group.filters || []).filter((f) => !f.disabled).length;
+  $: activeStatsCount = (group.filters || []).filter(
+    (f) => !f.disabled && !f.outOfRealm,
+  ).length;
 
   async function scrollHighlightedIntoView() {
     await tick();
@@ -137,7 +139,6 @@
       ?.scrollIntoView({ block: "nearest" });
   }
 
-  // Move highlight by one; grow the lazily rendered slice when reaching its end.
   function moveHighlight(dir: 1 | -1) {
     const shown = displayedStats.length;
     if (shown === 0) return;
@@ -162,6 +163,36 @@
   }
 
   function handleKeyDown(e: KeyboardEvent) {
+    // 1. Shift + Enter: always allow Search & Close (defocus and bubble to FilterForm)
+    if (e.key === "Enter" && e.shiftKey) {
+      isDropdownOpen = false;
+      highlightedIndex = -1;
+      addStatInputEl?.blur();
+      return;
+    }
+
+    // 2. Escape: close dropdown and defocus from the search box
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      isDropdownOpen = false;
+      highlightedIndex = -1;
+      addStatInputEl?.blur();
+      return;
+    }
+
+    // 3. Enter when current field is empty (and no arrow-highlighted item): act as "Search" command & defocus
+    if (
+      e.key === "Enter" &&
+      searchQuery.trim() === "" &&
+      highlightedIndex < 0
+    ) {
+      isDropdownOpen = false;
+      highlightedIndex = -1;
+      addStatInputEl?.blur();
+      return;
+    }
+
     if (!isDropdownOpen && displayedStats.length > 0) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         isDropdownOpen = true;
@@ -174,6 +205,11 @@
 
     if (!isDropdownOpen) {
       if (e.key === "Enter") {
+        // Empty field when closed -> blur and let FilterForm run search
+        if (searchQuery.trim() === "") {
+          addStatInputEl?.blur();
+          return;
+        }
         e.preventDefault();
         e.stopPropagation();
       }
@@ -196,24 +232,16 @@
       } else if (displayedStats.length > 0) {
         handleSelect(displayedStats[0]);
       }
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      isDropdownOpen = false;
-      highlightedIndex = -1;
     }
   }
 
   function handleWindowClick(e: MouseEvent) {
-    // composedPath is captured at dispatch time, so it stays valid even if the
-    // clicked element was removed from the DOM by a re-render before this ran.
     const path = e.composedPath();
     if (!searchboxEl || !path.includes(searchboxEl)) isDropdownOpen = false;
     if (!typeWrapperEl || !path.includes(typeWrapperEl)) isTypeMenuOpen = false;
   }
 
   function handleHeaderClick(e: MouseEvent) {
-    // Clicks inside the group-type dropdown must not collapse the group.
     if (typeWrapperEl && e.composedPath().includes(typeWrapperEl)) return;
     dispatch("toggleCollapse");
   }
@@ -316,7 +344,7 @@
     <!-- Stat Rows List -->
     <div class="group-stats">
       {#each group.filters as item, index (index)}
-        {#if !item.disabled}
+        {#if !item.outOfRealm}
           {@const matchedStat = item.statEntry ||
             flatStats.find((s) => s.id === item.id) || {
               id: item.id,
@@ -330,7 +358,9 @@
               (matchedStat as any).groupLabel ||
               matchedStat.type}
             value={item.value || {}}
+            disabled={Boolean(item.disabled)}
             {isWeighted}
+            on:toggleDisabled={() => dispatch("toggleStatDisabled", index)}
             on:change={(e) =>
               dispatch("updateStatValue", { index, value: e.detail })}
             on:changeStat={(e) =>
@@ -347,17 +377,19 @@
       bind:this={searchboxEl}
     >
       <input
+        bind:this={addStatInputEl}
         type="text"
         class="add-stat-input"
         placeholder="+ Add Stat Filter"
         bind:value={searchQuery}
         on:focus={() => {
           isDropdownOpen = true;
+          highlightedIndex = -1;
           visibleStatCount = 50;
         }}
         on:input={() => {
           isDropdownOpen = true;
-          highlightedIndex = 0;
+          highlightedIndex = searchQuery.trim() ? 0 : -1;
           visibleStatCount = 50;
         }}
         on:keydown={handleKeyDown}
@@ -522,7 +554,6 @@
     appearance: textfield;
   }
 
-  /* Delete group button - borderless ✕ icon */
   .delete-group-btn {
     font-family: "Fontin", monospace, sans-serif;
     background: transparent;

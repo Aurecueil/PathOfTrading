@@ -21,6 +21,16 @@ import {
 
 export * from "./statColors";
 
+// ---------------------------------------------------------------------------
+// PoE2 Keyword Types & Stores
+// ---------------------------------------------------------------------------
+export interface KeywordEntry {
+  term: string;
+  definition: string;
+}
+
+export type KeywordsMap = Record<string, KeywordEntry>;
+
 export const itemsPoe = writable<ItemCategory[]>([]);
 export const itemsPoe2 = writable<ItemCategory[]>([]);
 export const filtersPoe = writable<FilterGroup[]>([]);
@@ -36,12 +46,16 @@ export const staticsPoe2 = writable<StaticCategory[]>([]);
 export const mercenarySkills = writable<MercenarySkillsMap>({});
 export const mercenarySupports = writable<MercenarySupportsMap>({});
 
+// PoE 2 Keywords Store
+export const keywords = writable<KeywordsMap>({});
+
 export const isLoading = writable<boolean>(false);
 export const loadError = writable<string | null>(null);
 export const currentLanguage = writable<string>("EN");
 
 export const authState = writable<boolean>(false);
 export const isDev = writable<boolean>(true);
+export const showTooltips = writable<boolean>(true);
 
 // Shared Cache Storage bucket with CDN images so "Clear Cache" wipes both
 const CACHE_NAME = "app-cdn-images-v1";
@@ -65,6 +79,15 @@ function getRepoeUrl(
   return folder
     ? `https://repoe-fork.github.io/${folder}/${fileName}`
     : `https://repoe-fork.github.io/${fileName}`;
+}
+
+function getPoe2KeywordsUrl(): string {
+  //(langCode: string): string {
+  // const folder = REPOE_LANG_MAP[langCode.toUpperCase()] ?? "";
+  // return folder
+  //   ? `https://repoe-fork.github.io/${folder}/poe2/keywords.min.json`
+  //   : `https://repoe-fork.github.io/poe2/keywords.min.json`;
+  return `https://repoe-fork.github.io/poe2/keywords.min.json`;
 }
 
 /**
@@ -123,6 +146,7 @@ export async function initItemData(): Promise<void> {
 
     const skillsUrl = getRepoeUrl("mercenary_skills.min.json", lang);
     const supportsUrl = getRepoeUrl("mercenary_supports.min.json", lang);
+    const keywordsUrl = getPoe2KeywordsUrl();
 
     const [
       poeItems,
@@ -137,6 +161,7 @@ export async function initItemData(): Promise<void> {
       poe2Statics,
       mercSkills,
       mercSupports,
+      keywordsData,
     ] = await Promise.allSettled([
       invoke<ItemDataResponse>("load_item_data", { realm: "poe" }),
       invoke<ItemDataResponse>("load_item_data", { realm: "poe2" }),
@@ -150,6 +175,7 @@ export async function initItemData(): Promise<void> {
       invoke<StaticDataResponse>("load_static_data", { realm: "poe2" }),
       fetchCachedJson<MercenarySkillsMap>(skillsUrl),
       fetchCachedJson<MercenarySupportsMap>(supportsUrl),
+      fetchCachedJson<KeywordsMap>(keywordsUrl),
     ]);
 
     const errors: string[] = [];
@@ -198,6 +224,9 @@ export async function initItemData(): Promise<void> {
       mercenarySupports.set(mercSupports.value);
     else errors.push(`PoE Mercenary Supports: ${mercSupports.reason}`);
 
+    if (keywordsData.status === "fulfilled") keywords.set(keywordsData.value);
+    else errors.push(`PoE2 Keywords: ${keywordsData.reason}`);
+
     if (errors.length > 0) {
       loadError.set(errors.join(" | "));
     }
@@ -207,6 +236,7 @@ export async function initItemData(): Promise<void> {
     isLoading.set(false);
   }
 }
+
 export const mercenarySkillsByHash = derived(mercenarySkills, ($skills) => {
   const map = new Map<number, dataMercenarySkill>();
   for (const skill of Object.values($skills)) {
@@ -229,6 +259,7 @@ export const mercenarySupportsByHash = derived(
     return map;
   },
 );
+
 export async function initUserSettings(): Promise<void> {
   await ensureCrossWindowSync();
 

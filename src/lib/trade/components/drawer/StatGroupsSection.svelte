@@ -14,8 +14,6 @@
   export let currentStatCatalog: StatGroupType[] = [];
   export let realm: "poe" | "poe2" = "poe";
   export let isAddGroupMenuOpen: boolean = false;
-  // "auto": prefer opening downwards, flip upwards if it would leave the window.
-  // true / false force the direction.
   export let dropUp: boolean | "auto" = "auto";
   export let showPresets: boolean = true;
 
@@ -44,9 +42,6 @@
     ? $statGroupPresetsStore.filter((p) => p.game === "any" || p.game === realm)
     : [];
 
-  // Menu layout: one column per 8 entries (rounded down, min 1).
-  // Official types fill column 1, custom (preset) entries follow under them
-  // and then continue into the next columns.
   const ROWS_PER_COLUMN = 8;
   const COLUMN_WIDTH_PX = 190;
 
@@ -84,7 +79,6 @@
     return result;
   }
 
-  // Direction handling (prefer down, flip up when it would not fit)
   let wrapperEl: HTMLElement;
   let menuEl: HTMLElement;
   let placeUp = false;
@@ -110,7 +104,6 @@
     }
 
     const btn = wrapperEl.getBoundingClientRect();
-    // Visible area = window, further clipped by the scrolling container (if any)
     const scroller = wrapperEl.closest(".scroll-area");
     const sr = scroller?.getBoundingClientRect();
     const bottomEdge = Math.min(window.innerHeight, sr ? sr.bottom : Infinity);
@@ -134,7 +127,6 @@
   }>();
 
   function injectPreset(preset: StatGroupPreset) {
-    // Resolve saved ids against the stats of the current realm
     const byId = new Map<string, any>();
     for (const g of currentStatCatalog) {
       for (const e of g.entries || []) {
@@ -150,7 +142,6 @@
         type: g.type,
         collapsed: false,
         value: g.value ? { ...g.value } : undefined,
-        // Stats missing in this realm get auto-disabled by the form
         filters: g.filters.map((f) => {
           const entry = byId.get(f.id);
           return {
@@ -159,12 +150,12 @@
             groupLabel: entry?.groupLabel,
             value: { ...(f.value || {}) },
             disabled: false,
+            outOfRealm: !entry,
           };
         }),
       }));
 
     if (added.length === 0) return;
-    // Drop an empty trailing group before appending the preset's groups
     statGroups = [...trimTrailingEmptyGroup(statGroups), ...added];
   }
 
@@ -177,6 +168,7 @@
         groupLabel: (stat as any).groupLabel || stat.type,
         value: {},
         disabled: false,
+        outOfRealm: false,
       },
     ];
     statGroups = [...statGroups];
@@ -188,6 +180,15 @@
     val: any,
   ) {
     statGroups[groupIndex].filters[statIndex].value = val;
+    statGroups = [...statGroups];
+  }
+
+  function toggleStatDisabledInGroup(groupIndex: number, statIndex: number) {
+    const current = Boolean(statGroups[groupIndex].filters[statIndex].disabled);
+    statGroups[groupIndex].filters[statIndex] = {
+      ...statGroups[groupIndex].filters[statIndex],
+      disabled: !current,
+    };
     statGroups = [...statGroups];
   }
 
@@ -208,6 +209,7 @@
       value:
         prevHasOptions !== nextHasOptions ? {} : { ...(prev?.value || {}) },
       disabled: false,
+      outOfRealm: false,
     };
     statGroups = [...statGroups];
   }
@@ -243,6 +245,8 @@
           on:addStat={(e) => addStatToGroup(gIndex, e.detail)}
           on:updateStatValue={(e) =>
             updateStatValueInGroup(gIndex, e.detail.index, e.detail.value)}
+          on:toggleStatDisabled={(e) =>
+            toggleStatDisabledInGroup(gIndex, e.detail)}
           on:updateStatEntry={(e) =>
             updateStatEntryInGroup(gIndex, e.detail.index, e.detail.stat)}
           on:removeStat={(e) => removeStatFromGroup(gIndex, e.detail)}
@@ -386,7 +390,6 @@
     margin: 2px 0 0 0;
   }
 
-  /* Measured before showing so the direction can be decided without flicker */
   .add-group-dropdown.placing {
     visibility: hidden;
   }
@@ -417,7 +420,6 @@
     color: #ffffff;
   }
 
-  /* 2px divider between official types and custom presets */
   .add-group-dropdown li.divider {
     height: 2px;
     margin: 3px 0;

@@ -8,6 +8,18 @@
   export let filter: FilterEntry;
   export let value: Record<string, any> = {};
   export let uniqueItems: ItemEntry[] = [];
+  export let staticCatalog: Array<{
+    id: string;
+    label?: string | null;
+    entries?: Array<{
+      id: string;
+      text: string;
+      image?: string | null;
+      pseudo?: boolean | null;
+      subtext?: string | null;
+      description?: string | null;
+    }>;
+  }> = [];
 
   const dispatch = createEventDispatcher<{
     change: { field: string; value: any };
@@ -57,12 +69,69 @@
       }
     }
 
-    if (f.option?.knownItem?.uniques) {
+    const known = f.option?.knownItem;
+    if (known) {
       const seen = new Set(list.map((o) => o.id));
-      for (const item of uniqueItems) {
-        if (item.name && !seen.has(item.name)) {
-          seen.add(item.name);
-          list.push({ id: item.name, text: item.text || item.name });
+
+      if (typeof known === "object" && known !== null) {
+        const knownObj = known as unknown as Record<
+          string,
+          boolean | undefined
+        >;
+        for (const [key, val] of Object.entries(knownObj)) {
+          if (!val) continue;
+          const lowerKey = key.trim().toLowerCase();
+
+          if (lowerKey === "uniques" || lowerKey === "unique") {
+            for (const item of uniqueItems) {
+              if (item.name && !seen.has(item.name)) {
+                seen.add(item.name);
+                list.push({ id: item.name, text: item.text || item.name });
+              }
+            }
+          } else {
+            const matchedCat = (staticCatalog || []).find(
+              (c) =>
+                String(c?.id ?? "")
+                  .trim()
+                  .toLowerCase() === lowerKey,
+            );
+            if (matchedCat && Array.isArray(matchedCat.entries)) {
+              for (const entry of matchedCat.entries) {
+                const identifier = entry.text || entry.id;
+                if (identifier && !seen.has(identifier)) {
+                  seen.add(identifier);
+                  list.push({ id: identifier, text: identifier });
+                }
+              }
+            }
+          }
+        }
+      } else {
+        const knownKey = String(known).trim().toLowerCase();
+        if (knownKey === "uniques" || knownKey === "unique") {
+          for (const item of uniqueItems) {
+            if (item.name && !seen.has(item.name)) {
+              seen.add(item.name);
+              list.push({ id: item.name, text: item.text || item.name });
+            }
+          }
+        } else if (knownKey) {
+          const matchedCat = (staticCatalog || []).find(
+            (c) =>
+              String(c?.id ?? "")
+                .trim()
+                .toLowerCase() === knownKey,
+          );
+          if (matchedCat && Array.isArray(matchedCat.entries)) {
+            for (const entry of matchedCat.entries) {
+              const identifier = entry.text || entry.id;
+              if (identifier && !seen.has(identifier)) {
+                seen.add(identifier);
+                list.push({ id: identifier, text: identifier });
+              }
+            }
+          }
         }
       }
     }
@@ -75,7 +144,6 @@
   }
 
   $: allOptions = filter.option ? getResolvedOptions(filter) : [];
-  // Uses button trigger when few options or special filter; uses searchable input box when enough options
   $: alwaysSelect = isAlwaysSelectFilter(filter) || allOptions.length <= 8;
   $: selectedOpt = allOptions.find((o) =>
     value?.option ? o.id === value.option : o.id === null,
@@ -203,7 +271,6 @@
     {#if filter.option}
       <div class={`combobox-wrapper combobox-${filter.id} top-custom-dropdown`}>
         {#if alwaysSelect}
-          <!-- Non-searchable custom dropdown trigger (replaces native <select>) -->
           <button
             type="button"
             id={`filter-${filter.id}-opt`}
@@ -226,7 +293,6 @@
             </span>
           </button>
         {:else}
-          <!-- Searchable box where typing happens directly inside the box -->
           <input
             id={`filter-${filter.id}-opt-search`}
             name={`filter_${filter.id}_opt_search`}
@@ -256,7 +322,6 @@
           />
         {/if}
 
-        <!-- Right indicator: White '✕' when a value is set, otherwise '▾' -->
         {#if optionModified}
           <button
             type="button"
@@ -299,30 +364,6 @@
         value={value?.input ?? ""}
         on:input={(e) => updateField("input", e.currentTarget.value)}
       />
-    {/if}
-
-    <!-- Min/Max Controls -->
-    {#if filter.minMax}
-      <div class="min-max-controls">
-        <input
-          id={`filter-${filter.id}-min`}
-          name={`filter_${filter.id}_min`}
-          type="number"
-          class:is-modified={minModified}
-          placeholder="Min"
-          value={value?.min ?? ""}
-          on:input={(e) => updateField("min", e.currentTarget.value)}
-        />
-        <input
-          id={`filter-${filter.id}-max`}
-          name={`filter_${filter.id}_max`}
-          type="number"
-          class:is-modified={maxModified}
-          placeholder="Max"
-          value={value?.max ?? ""}
-          on:input={(e) => updateField("max", e.currentTarget.value)}
-        />
-      </div>
     {/if}
 
     <!-- Sockets Controls -->
@@ -378,6 +419,30 @@
         </div>
       </div>
     {/if}
+
+    <!-- Min/Max Controls (Independent, so both Sockets and MinMax can render if present) -->
+    {#if filter.minMax}
+      <div class="min-max-controls">
+        <input
+          id={`filter-${filter.id}-min`}
+          name={`filter_${filter.id}_min`}
+          type="number"
+          class:is-modified={minModified}
+          placeholder="Min"
+          value={value?.min ?? ""}
+          on:input={(e) => updateField("min", e.currentTarget.value)}
+        />
+        <input
+          id={`filter-${filter.id}-max`}
+          name={`filter_${filter.id}_max`}
+          type="number"
+          class:is-modified={maxModified}
+          placeholder="Max"
+          value={value?.max ?? ""}
+          on:input={(e) => updateField("max", e.currentTarget.value)}
+        />
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -431,7 +496,8 @@
 
   .filter-controls > input,
   .filter-controls > .combobox-wrapper,
-  .filter-controls > .min-max-controls {
+  .filter-controls > .min-max-controls,
+  .filter-controls > .sockets-grid {
     flex: 1 1 0;
     width: 100%;
     min-width: 0;
@@ -549,7 +615,6 @@
     width: 100%;
   }
 
-  /* Shared position for both the triangle arrow and the white X button */
   .trigger-arrow,
   .clear-opt-btn {
     position: absolute;

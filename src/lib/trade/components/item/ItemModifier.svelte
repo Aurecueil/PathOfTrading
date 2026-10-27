@@ -6,6 +6,7 @@
     ItemModFlags,
   } from "$lib/types/tradeItem";
   import { displayTiers } from "$lib/trade/tradeStore";
+  import KeywordText from "./stats/KeywordText.svelte";
 
   export let mod: string | ItemMod;
   export let category:
@@ -24,44 +25,43 @@
 
   let isHovered = false;
 
-  function cleanBracketText(text: string): string {
-    if (!text) return "";
-    return text.replace(/\[([^\]]+)\]/g, (_, inner: string) => {
-      const parts = inner.split("|");
-      return parts[parts.length - 1];
-    });
-  }
-
   /**
-   * Rune mods that are shown inline although bonded ("Bonded: +5% ...") keep
-   * a gray "Bonded:" prefix; the rest of the text uses the normal rune colour.
+   * Rune mods that are shown inline although bonded ("Bonded: +5% ..." or "[Bonded]: +5% ...")
+   * keep a gray "Bonded:" prefix; the rest of the text uses the normal rune colour.
    */
   function splitBondedPrefix(text: string): { prefix: string; rest: string } {
     if (category !== "rune") return { prefix: "", rest: text };
-    const m = text.match(/^\s*(Bonded:)\s*([\s\S]*)$/i);
+    const m = text.match(/^\s*(\[[^\]]*Bonded\]\s*:|Bonded\s*:)\s*([\s\S]*)$/i);
     return m ? { prefix: m[1], rest: m[2] } : { prefix: "", rest: text };
   }
 
+  /**
+   * Injects `[min-max]` after numbers outside of `[keyword|label]` brackets,
+   * preserving all keyword brackets for `<KeywordText />`.
+   */
   function buildHoveredDescription(
-    cleanText: string,
+    rawText: string,
     subMods: ItemModInfo[],
   ): string {
-    if (!subMods || subMods.length === 0) return cleanText;
+    if (!subMods || subMods.length === 0 || !rawText) return rawText;
 
-    const numberRegex = /[+-]?\d+(?:\.\d+)?%?/g;
-    const matches = [...cleanText.matchAll(numberRegex)];
-    const numCount = matches.length;
-    if (numCount === 0) return cleanText;
+    const tokenRegex = /\[[^\]]+\]|[+-]?\d+(?:\.\d+)?%?/g;
+    const allMatches = [...rawText.matchAll(tokenRegex)];
+    const numberMatches = allMatches.filter((m) => !m[0].startsWith("["));
+    const numCount = numberMatches.length;
+    if (numCount === 0) return rawText;
 
     const allSubModsMatchCount =
       subMods.every((sm) => (sm.magnitudes?.length || 0) === numCount) &&
       subMods.some((sm) => (sm.magnitudes?.length || 0) > 0);
 
     const flatMagnitudes = subMods.flatMap((sm) => sm.magnitudes || []);
-    if (flatMagnitudes.length === 0) return cleanText;
+    if (flatMagnitudes.length === 0) return rawText;
 
     let matchIdx = 0;
-    return cleanText.replace(numberRegex, (matchedNum) => {
+    return rawText.replace(tokenRegex, (token) => {
+      if (token.startsWith("[")) return token;
+
       let rangeBracket = "";
       if (allSubModsMatchCount) {
         const parts = subMods
@@ -84,7 +84,7 @@
         }
       }
       matchIdx++;
-      return `${matchedNum}${rangeBracket}`;
+      return `${token}${rangeBracket}`;
     });
   }
 
@@ -107,7 +107,7 @@
 
   $: parsed = (() => {
     if (typeof mod === "string") {
-      const { prefix, rest } = splitBondedPrefix(cleanBracketText(mod));
+      const { prefix, rest } = splitBondedPrefix(mod);
       return {
         prefix,
         description: rest,
@@ -144,9 +144,11 @@
       .map((m) => m.level)
       .filter((l): l is number => typeof l === "number" && l > 0);
     const level = levels.length > 0 ? Math.max(...levels) : null;
-    const clean = cleanBracketText(mod.description);
-    const split = splitBondedPrefix(clean);
-    const hovered = splitBondedPrefix(buildHoveredDescription(clean, subMods));
+    const rawDesc = mod.description || "";
+    const split = splitBondedPrefix(rawDesc);
+    const hovered = splitBondedPrefix(
+      buildHoveredDescription(rawDesc, subMods),
+    );
 
     return {
       prefix: split.prefix,
@@ -211,8 +213,11 @@
   {/if}
 
   <div class="mod-text-center" class:has-badge={hasBadge}>
-    {#if parsed.prefix}<span class="bonded-prefix">{parsed.prefix}</span
-      >&nbsp;{/if}{isHovered ? parsed.hoveredDescription : parsed.description}
+    {#if parsed.prefix}<span class="bonded-prefix"
+        ><KeywordText text={parsed.prefix} /></span
+      >&nbsp;{/if}<KeywordText
+      text={isHovered ? parsed.hoveredDescription : parsed.description}
+    />
   </div>
 
   {#if parsed.level !== null && ($displayTiers || isHovered)}

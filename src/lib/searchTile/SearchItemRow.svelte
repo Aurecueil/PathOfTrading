@@ -219,12 +219,19 @@
   /* ------------------------------------------------------------------ */
   function parseTravelError(err: any): string {
     if (!err) return "Failed";
+    console.log(err);
+
     if (typeof err === "object") {
+      // Check for error code 2 in objects
+      if (err.code === 2 || err.error?.code === 2) {
+        return "You must be in-game";
+      }
       if (typeof err.error?.message === "string") return err.error.message;
       if (typeof err.message === "string") {
         return parseTravelError(err.message);
       }
     }
+
     if (typeof err === "string") {
       const trimmed = err.trim();
       const jsonStart = trimmed.indexOf("{");
@@ -232,6 +239,10 @@
       if (jsonStart !== -1 && jsonEnd > jsonStart) {
         try {
           const parsed = JSON.parse(trimmed.slice(jsonStart, jsonEnd + 1));
+          // Check for error code 2 in parsed JSON
+          if (parsed?.code === 2 || parsed?.error?.code === 2) {
+            return "You must be in-game";
+          }
           if (typeof parsed?.error?.message === "string") {
             return parsed.error.message;
           }
@@ -244,6 +255,7 @@
       }
       return trimmed;
     }
+
     return "Failed";
   }
 

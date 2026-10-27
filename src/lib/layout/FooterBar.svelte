@@ -115,13 +115,22 @@
 
   // The limit that is closest to being full (penalised rules count as full)
   function fill(r: RuleTelemetry): number {
-    if (r.penalty_ms > 0) return 2;
-    return 1 - r.available / Math.max(1, r.max);
+    // If a rule has an active penalty or next slot delay, push it to the absolute top of criticality
+    if (r.penalty_ms > 0 || r.next_slot_ms > 0) {
+      return -1;
+    }
+    // Otherwise, the score is simply the flat available count (lower = more critical)
+    return r.available;
   }
 
   function criticalRule(op: OperationTelemetry): RuleTelemetry | null {
     if (!op.rules || op.rules.length === 0) return null;
-    return op.rules.reduce((a, b) => (fill(b) > fill(a) ? b : a));
+    return op.rules.reduce((a, b) => {
+      const scoreA = fill(a);
+      const scoreB = fill(b);
+      // Pick the one with the lower score (fewer available / penalized)
+      return scoreB < scoreA ? b : a;
+    });
   }
 
   function sumQueueCounts(realmCounts: Record<string, number> = {}): number {
@@ -257,7 +266,9 @@
                   <div class="op-header">
                     <span class="op-name">{col.title}</span>
                     {#if next > 0}
-                      <span class="next-badge wait">next in {formatMs(next)}</span>
+                      <span class="next-badge wait"
+                        >next in {formatMs(next)}</span
+                      >
                     {:else}
                       <span class="next-badge ready">ready</span>
                     {/if}
@@ -271,7 +282,9 @@
                         class="rule-row"
                         class:penalized={rPen > 0}
                         class:blocked={rNext > 0}
-                        title="{ruleLabel(r)}: used {r.used}/{r.max}, reserved free {r.reserved_free}, available {r.available}"
+                        title="{ruleLabel(
+                          r,
+                        )}: used {r.used}/{r.max}, reserved free {r.reserved_free}, available {r.available}"
                       >
                         <span class="rule-label">{ruleLabel(r)}</span>
                         <div class="bar-pip-track">
@@ -279,7 +292,8 @@
                         </div>
                         <span class="rule-count">
                           {#if rPen > 0}
-                            <span class="penalty-tag">ban {formatMs(rPen)}</span>
+                            <span class="penalty-tag">ban {formatMs(rPen)}</span
+                            >
                           {:else if rNext > 0}
                             <span class="next-tag">+{formatMs(rNext)}</span>
                           {:else}

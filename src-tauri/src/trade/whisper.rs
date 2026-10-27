@@ -47,14 +47,15 @@ pub async fn whisper(
         .map_err(|e| format!("HTTP request error: {e}"))?;
 
     let status = res.status();
-    let body = res
-        .json::<Value>()
+    let body_text = res
+        .text()
         .await
-        .map_err(|e| format!("Failed to parse response body as JSON: {e}"))?;
+        .map_err(|e| format!("Failed to read response body: {e}"))?;
 
     if !status.is_success() {
-        return Err(format!("Request failed with status {status}: {body}"));
+        return Err(body_text);
     }
-
+    let body: Value = serde_json::from_str(&body_text)
+        .map_err(|e| format!("Failed to parse response body as JSON: {e}"))?;
     Ok(body)
 }

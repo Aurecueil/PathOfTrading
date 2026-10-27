@@ -4,16 +4,19 @@
   import type { StatEntry } from "$lib/types/stats";
   import StatColorText from "$lib/trade/components/drawer/StatColorText.svelte";
   import RealmIcon from "$lib/trade/components/drawer/RealmIcon.svelte";
+  import Check from "$lib/settings/color/Check.svelte";
 
   export let stat: StatEntry;
   export let allowedStats: Array<StatEntry & { groupLabel?: string }> = [];
   export let groupLabel: string = "";
   export let value: { min?: any; max?: any; option?: any; weight?: any } = {};
+  export let disabled: boolean = false;
   export let isWeighted: boolean = false;
 
   const dispatch = createEventDispatcher<{
     change: { min?: any; max?: any; option?: any; weight?: any };
     changeStat: StatEntry;
+    toggleDisabled: void;
     remove: void;
   }>();
 
@@ -22,6 +25,12 @@
   let editQuery: string = "";
   let highlightedIndex: number = -1;
   let dropdownEl: HTMLUListElement | undefined;
+  let visibleStatCount: number = 50;
+  let editInputEl: HTMLInputElement;
+  let rowWrapperEl: HTMLDivElement;
+
+  // Custom option dropdown state
+  let isOptionMenuOpen: boolean = false;
 
   async function scrollHighlightedIntoView() {
     await tick();
@@ -30,7 +39,6 @@
       ?.scrollIntoView({ block: "nearest" });
   }
 
-  // Move highlight by one; grow the lazily rendered slice when reaching its end.
   function moveHighlight(dir: 1 | -1) {
     const shown = displayedEditStats.length;
     if (shown === 0) return;
@@ -46,12 +54,6 @@
     }
     scrollHighlightedIntoView();
   }
-  let visibleStatCount: number = 50;
-  let editInputEl: HTMLInputElement;
-  let rowWrapperEl: HTMLDivElement;
-
-  // Custom option dropdown state
-  let isOptionMenuOpen: boolean = false;
 
   function updateField(field: "min" | "max" | "option" | "weight", val: any) {
     const updated = { ...value };
@@ -65,15 +67,15 @@
 
   function getTagColor(label: string): string {
     const l = (label || "").toLowerCase();
-    if (l.includes("pseudo")) return "#005DBD"; // pseudo
-    if (l.includes("crafted")) return "#D1D1D1"; // crafted
+    if (l.includes("pseudo")) return "#005DBD";
+    if (l.includes("crafted")) return "#D1D1D1";
     if (l.includes("explicit")) return "#57AFF1";
-    if (l.includes("implicit")) return "#625F15"; // impl
-    if (l.includes("fractured")) return "#A08F5F"; // frac
-    if (l.includes("enchant")) return "#89549A"; // enchant
-    if (l.includes("scourge")) return "#FF6E25"; //courage
-    if (l.includes("crucible")) return "#FF7339"; //crucible
-    if (l.includes("mercenary")) return "#8C6F3C"; //luminary
+    if (l.includes("implicit")) return "#625F15";
+    if (l.includes("fractured")) return "#A08F5F";
+    if (l.includes("enchant")) return "#89549A";
+    if (l.includes("scourge")) return "#FF6E25";
+    if (l.includes("crucible")) return "#FF7339";
+    if (l.includes("mercenary")) return "#8C6F3C";
     return "#888888";
   }
 
@@ -98,7 +100,6 @@
 
   async function startEditingStat() {
     isEditingStat = true;
-    // Pre-fill only with stat text (without types/group tags)
     editQuery = stat.text || "";
     highlightedIndex = 0;
     visibleStatCount = 50;
@@ -113,6 +114,32 @@
   }
 
   function handleEditKeyDown(e: KeyboardEvent) {
+    // Shift + Enter: close inline editor, defocus, and bubble to FilterForm for Search & Close
+    if (e.key === "Enter" && e.shiftKey) {
+      isEditingStat = false;
+      highlightedIndex = -1;
+      editInputEl?.blur();
+      return;
+    }
+
+    // Escape: close inline editor & defocus
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      isEditingStat = false;
+      highlightedIndex = -1;
+      editInputEl?.blur();
+      return;
+    }
+
+    // Enter when empty: close inline editor, defocus, and bubble to FilterForm for Search
+    if (e.key === "Enter" && editQuery.trim() === "") {
+      isEditingStat = false;
+      highlightedIndex = -1;
+      editInputEl?.blur();
+      return;
+    }
+
     if (e.key === "ArrowDown") {
       e.preventDefault();
       e.stopPropagation();
@@ -138,11 +165,6 @@
       } else {
         isEditingStat = false;
       }
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      isEditingStat = false;
-      highlightedIndex = -1;
     }
   }
 
@@ -179,7 +201,19 @@
 
 <svelte:window on:click={handleWindowClick} />
 
-<div class="stat-row" class:is-editing={isEditingStat} bind:this={rowWrapperEl}>
+<div
+  class="stat-row"
+  class:is-editing={isEditingStat}
+  class:is-disabled={disabled}
+  bind:this={rowWrapperEl}
+>
+  <!-- Most-left checkbox to enable / disable this stat -->
+  <Check
+    checked={!disabled}
+    title={disabled ? "Enable stat filter" : "Disable stat filter"}
+    onchange={() => dispatch("toggleDisabled")}
+  />
+
   {#if isEditingStat}
     <div class="stat-edit-container">
       <input
@@ -188,7 +222,7 @@
         class="stat-edit-input"
         bind:value={editQuery}
         on:input={() => {
-          highlightedIndex = 0;
+          highlightedIndex = editQuery.trim() ? 0 : -1;
           visibleStatCount = 50;
         }}
         on:keydown={handleEditKeyDown}
@@ -246,7 +280,6 @@
   {/if}
 
   <div class="stat-controls">
-    <!-- Weight field matching Min/Max box style -->
     {#if isWeighted}
       <input
         type="number"
@@ -257,7 +290,6 @@
       />
     {/if}
 
-    <!-- Stat Option or Min/Max -->
     {#if stat.option?.options && stat.option.options.length > 0}
       <div class="stat-opt-dropdown-wrapper">
         <button
@@ -340,6 +372,12 @@
     min-height: 24px;
     box-sizing: border-box;
     position: relative;
+  }
+
+  .stat-row.is-disabled .stat-info,
+  .stat-row.is-disabled .stat-controls input,
+  .stat-row.is-disabled .stat-opt-trigger {
+    opacity: 0.45;
   }
 
   .stat-row.is-editing {
@@ -573,7 +611,6 @@
     appearance: textfield;
   }
 
-  /* Borderless remove button */
   .remove-btn {
     font-family: "Fontin", monospace, sans-serif;
     background: transparent;

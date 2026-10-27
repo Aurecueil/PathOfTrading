@@ -25,6 +25,7 @@ export interface StatGroupPayloadState {
     groupLabel?: string;
     value?: any;
     disabled?: boolean;
+    outOfRealm?: boolean;
   }>;
 }
 
@@ -42,6 +43,7 @@ function hasValidOption(opt: any): boolean {
 function hasValidNumber(num: any): boolean {
   return num !== undefined && num !== null && num !== "" && !isNaN(Number(num));
 }
+
 export function isEmptyStatGroup(g: {
   filters?: any[];
   value?: { min?: any; max?: any };
@@ -59,13 +61,9 @@ export function trimTrailingEmptyGroup<
     ? groups.slice(0, -1)
     : groups;
 }
+
 /* -------------------------------------------------------------------------- */
 /* Item reference code: "<realm>:<language>:<index>"                          */
-/*   realm    – realm the item was picked from ("poe" | "poe2")               */
-/*   language – language of the catalog the item TEXT belongs to              */
-/*   index    – relative position in that realm's flattened item array        */
-/*              (same flatten order the filter drawer uses)                   */
-/* Stored on full_payload.item_ref (top level, never sent to the trade API).  */
 /* -------------------------------------------------------------------------- */
 
 export interface ItemRef {
@@ -110,12 +108,10 @@ function normalizeRealm(realm: string | undefined | null): "poe" | "poe2" {
   return String(realm ?? "").toLowerCase() === "poe2" ? "poe2" : "poe";
 }
 
-/** NOTE: assumes `currentLanguage` is a Svelte store holding a string. */
 export function getCurrentLanguage(): string {
   return String(get(currentLanguage) ?? "");
 }
 
-/** Flattened item entries of a realm, in the same order as the drawer's `allItemEntries`. */
 export function getRealmItemEntries(realm: string): ItemEntry[] {
   const cats = extractStoreArray<ItemCategory>(
     normalizeRealm(realm) === "poe2" ? get(itemsPoe2) : get(itemsPoe),
@@ -161,7 +157,6 @@ function applyEntryToQuery(query: any, entry: ItemEntry) {
   }
 }
 
-/** True when a catalog entry has exactly the item text currently stored in the query. */
 function entryMatchesQueryText(entry: ItemEntry, query: any): boolean {
   const type = query?.type;
   const targetType = typeof type === "object" ? type?.option : type;
@@ -176,10 +171,6 @@ function clearItemFromQuery(query: any) {
   delete query.type;
 }
 
-/**
- * True when the item code saved on a full_payload was made for a different realm
- * than `realm`, or in a different language than the global `currentLanguage`.
- */
 export function isItemRefStale(
   fullPayload: any,
   realm: string,
@@ -190,24 +181,6 @@ export function isItemRefStale(
   return ref.realm !== normalizeRealm(realm) || ref.language !== language;
 }
 
-/**
- * Re-resolves the item stored in a full_payload for a target realm + language.
- *
- *  - same realm, same language           -> ensure it exists in current catalog, else clear
- *  - same realm, different language      -> refetch entry by relative position (ref.index)
- *  - different realm, same language      -> match unique item by name, else clear
- *  - different realm, different language -> find item at ref.index in ref.realm's array;
- *                                           if unique, get its name and match by name in
- *                                           targetRealm's array, else clear
- *  - legacy payload without item_ref     -> attach a ref if found in current catalog, else clear
- *
- * Does nothing while required item catalogs are not loaded yet.
- *
- * `opts.catalogReady`: the caller knows the catalogs have been re-fetched for
- * `language`, so "entry text still equals the old text" no longer means
- * "catalog is stale" (it can simply be an item whose name is identical in
- * both languages). Skips the wait-for-catalog checks.
- */
 export function migrateItemRef(
   fullPayload: any,
   realm: string,
@@ -228,7 +201,6 @@ export function migrateItemRef(
   const next = JSON.parse(JSON.stringify(fullPayload));
   next.query = next.query || {};
 
-  // Legacy payload (saved before item_ref existed): verify in current catalog and attach ref, else clear.
   if (!ref) {
     const idx = findEntryIndexByQuery(entries, next.query);
     if (idx >= 0) {
@@ -245,15 +217,9 @@ export function migrateItemRef(
     return { payload: next, changed: true };
   }
 
-  // 1. Same realm + same language: ensure item exists in current catalog, else clear.
   if (ref.realm === targetRealm && ref.language === language) {
     let idx = findEntryIndexByQuery(entries, next.query);
 
-    // The ref says "current language" but the stored text isn't in the catalog.
-    // That happens when the ref was stamped with a language before the catalog
-    // (or the project) was actually switched, e.g. the language setting is applied
-    // late after a reload. The index is still valid across languages, so adopt the
-    // entry at that position if it is the same kind of item (named/unnamed, disc).
     if (idx < 0 && ref.index >= 0 && ref.index < entries.length) {
       const cand = entries[ref.index];
       const q = next.query;
@@ -284,7 +250,6 @@ export function migrateItemRef(
       return unchanged;
     }
 
-    // Does not exist in current catalog -> clear
     clearItemFromQuery(next.query);
     delete next.item_ref;
     return { payload: next, changed: true };
@@ -294,13 +259,9 @@ export function migrateItemRef(
   let index = -1;
 
   if (ref.realm === targetRealm && ref.language !== language) {
-    // 2. Same realm, different language: take item with same index in array.
     index = ref.index;
     entry = index >= 0 && index < entries.length ? entries[index] : null;
 
-    // `currentLanguage` flips BEFORE the item catalog is re-fetched. If the entry
-    // at this position still has the old text, the catalog is still the old
-    // language: do nothing now and retry once the new catalog is in the store.
     if (
       !opts.catalogReady &&
       entry &&
@@ -309,7 +270,6 @@ export function migrateItemRef(
       return unchanged;
     }
   } else if (ref.realm !== targetRealm && ref.language === language) {
-    // 3. Different realm, same language: match by finding item with same name (uniques only), else clear.
     const name = next.query.name;
     if (name) {
       index = entries.findIndex(
@@ -318,9 +278,6 @@ export function migrateItemRef(
       entry = index >= 0 ? entries[index] : null;
     }
   } else {
-    // 4. Both language and realm are different:
-    // Find in array matching ref.realm item index; if not unique clear field,
-    // if unique, get name and in current realm try to match by that name, if can't, clear.
     const sourceEntries = getRealmItemEntries(ref.realm);
     if (sourceEntries.length === 0) return unchanged;
 
@@ -330,7 +287,6 @@ export function migrateItemRef(
         : null;
 
     if (sourceItem && sourceItem.flags?.unique && sourceItem.name) {
-      // If source catalog hasn't updated to the new language yet and matches old query text, wait
       if (!opts.catalogReady && entryMatchesQueryText(sourceItem, next.query)) {
         return unchanged;
       }
@@ -353,10 +309,6 @@ export function migrateItemRef(
   return { payload: next, changed: true };
 }
 
-/**
- * Builds a map of GroupID -> Map<FilterID, FilterDef> across a list of FilterGroups.
- * Avoids `.find()` collisions when PoE1 and PoE2 share group IDs like `misc_filters`.
- */
 function buildFilterDefinitionsMap(
   groups: FilterGroup[],
 ): Map<string, Map<string, FilterEntry>> {
@@ -379,22 +331,15 @@ function buildFilterDefinitionsMap(
   return map;
 }
 
-/**
- * Converts a saved `full_payload` and `realm` into an executable regular search `payload`.
- * Strips any disabled groups, disabled filters/stats, or entries not belonging to `realm`.
- * The item (name/type) is re-resolved for `realm` and dropped if it does not
- * exist in that realm's item catalog.
- */
 export function buildRegularPayload(
   fullPayload: any,
   realm: "poe" | "poe2" | string = "poe",
 ): any {
   const normalizedRealm = normalizeRealm(realm);
 
-  // Make sure the item matches the target realm / current language first.
   const resolved = migrateItemRef(fullPayload, normalizedRealm).payload;
   const base = resolved ? JSON.parse(JSON.stringify(resolved)) : {};
-  delete base.item_ref; // internal only, never sent to the trade API
+  delete base.item_ref;
 
   const baseQuery: any = { ...(base.query || {}) };
 
@@ -402,7 +347,6 @@ export function buildRegularPayload(
     baseQuery.status = { option: "securable" };
   }
 
-  // Ensure the item (name/type) exists in the current realm's catalog, otherwise clear it.
   if (baseQuery.name || baseQuery.type) {
     const realmItems = getRealmItemEntries(normalizedRealm);
     if (
@@ -431,7 +375,7 @@ export function buildRegularPayload(
         )
       : null;
 
-  // 1. Build active stats & track index mapping from full_payload stats -> regular payload stats
+  // 1. Build active stats & track index mapping
   const rawStats: any[] = Array.isArray(baseQuery.stats) ? baseQuery.stats : [];
   const searchStats: any[] = [];
   const fullToSearchGroupIndexMap = new Map<number, number>();
@@ -447,8 +391,11 @@ export function buildRegularPayload(
     const isPoe2Restricted =
       normalizedRealm === "poe2" &&
       (gType === "crucible" || gType === "mercenary");
+    // Only collapse state or realm restriction disables the group
     const isGroupDisabled = Boolean(
-      g.disabled || g.collapsed || isPoe2Restricted,
+      g.collapsed !== undefined
+        ? g.collapsed || isPoe2Restricted
+        : g.disabled || isPoe2Restricted,
     );
 
     if (isGroupDisabled) continue;
@@ -456,7 +403,7 @@ export function buildRegularPayload(
     const rawFilters = Array.isArray(g.filters) ? g.filters : [];
     const activeFiltersList = rawFilters
       .filter((f: any) => {
-        if (!f || !f.id || f.disabled) return false;
+        if (!f || !f.id || f.disabled || f.outOfRealm) return false;
         if (validRealmStatIds && !validRealmStatIds.has(f.id)) return false;
         return true;
       })
@@ -487,7 +434,6 @@ export function buildRegularPayload(
       });
 
     if (activeFiltersList.length > 0 || gType === "and") {
-      // value only applies to these types
       let valObj: any = undefined;
       if (
         ["count", "weight", "weight2", "crucible", "mercenary"].includes(
@@ -507,7 +453,6 @@ export function buildRegularPayload(
         : undefined;
 
       if (existingIdx !== undefined) {
-        // merge into the first group of this type
         const target = searchStats[existingIdx];
         target.filters.push(...activeFiltersList);
         if (valObj && !target.value) target.value = valObj;
@@ -523,7 +468,7 @@ export function buildRegularPayload(
     }
   }
 
-  // 2. Build active filter groups (strip disabled groups, disabled filters, and non-realm filters)
+  // 2. Build active filter groups
   const rawFiltersObj =
     baseQuery.filters && typeof baseQuery.filters === "object"
       ? baseQuery.filters
@@ -547,9 +492,7 @@ export function buildRegularPayload(
       rawGroupFilters as Record<string, any>,
     )) {
       if (!fObj || typeof fObj !== "object") continue;
-      // Strip if explicitly disabled in full_payload
       if (fObj.disabled) continue;
-      // Strip if this specific filter ID does not exist in the current realm's group
       if (validGroupFilters && !validGroupFilters.has(filterId)) continue;
 
       const cleanEntry: Record<string, any> = {};
@@ -573,7 +516,7 @@ export function buildRegularPayload(
     }
   }
 
-  // 3. Resolve sort object, remapping statgroup indices or falling back if stat isn't in realm
+  // 3. Resolve sort object
   let searchSortObj: Record<string, "asc" | "desc"> = { price: "asc" };
   if (base.sort && typeof base.sort === "object") {
     const [sField, sDir] = Object.entries(base.sort)[0] || [];
@@ -617,14 +560,6 @@ export function buildRegularPayload(
   return payload;
 }
 
-/**
- * Builds both `full_payload` (retaining ALL values across realms, marking collapsed or
- * out-of-realm items as `disabled: true`) and `payload` (stripped for the active search).
- *
- * `itemLanguage` is the language the selected item's TEXT is in (the language of the
- * catalog it was picked from). It can lag behind `currentLanguage` while the item
- * catalog is being re-fetched; stamping `currentLanguage` there would mislabel old text.
- */
 export function buildPayloads(params: {
   initialPayload: any;
   statGroups: StatGroupPayloadState[];
@@ -638,7 +573,6 @@ export function buildPayloads(params: {
   sortKey: string;
   sortDirection: "asc" | "desc";
   itemLanguage?: string;
-  /** Ref currently held by the form; kept when the item can't be resolved in the loaded catalog. */
   itemRef?: string | null;
 }): { payload: any; full_payload: any } {
   const {
@@ -659,26 +593,15 @@ export function buildPayloads(params: {
 
   const base = initialPayload ? JSON.parse(JSON.stringify(initialPayload)) : {};
 
-  const realmStatCatalog = extractStoreArray<StatGroup>(
-    realm === "poe2" ? get(statsPoe2) : get(statsPoe),
-  );
-  const validRealmStatIds =
-    realmStatCatalog.length > 0
-      ? new Set(
-          realmStatCatalog.flatMap((g) => (g.entries || []).map((e) => e.id)),
-        )
-      : null;
-
-  // 1. Build fullStats (keep all groups & filters, disable collapsed or out-of-realm)
+  // 1. Build fullStats (keep all groups & filters; do NOT sticky-lock group.disabled)
   const fullStats: any[] = [];
   const fullGroupIndexMap = new Map<string, number>();
 
   for (const g of statGroups) {
     const isPoe2Restricted =
       realm === "poe2" && (g.type === "crucible" || g.type === "mercenary");
-    const isGroupDisabled = Boolean(
-      g.collapsed || g.disabled || isPoe2Restricted,
-    );
+    // Fix: only derive disabled from collapsed or realm restriction so uncollapsing re-enables it
+    const isGroupDisabled = Boolean(g.collapsed || isPoe2Restricted);
 
     const valObj: any = {};
     if (
@@ -707,11 +630,8 @@ export function buildPayloads(params: {
         fVal.weight = Number(f.value.weight);
       }
       fil.value = fVal;
-
-      const isOutOfRealm = Boolean(
-        validRealmStatIds && !validRealmStatIds.has(f.id),
-      );
-      fil.disabled = Boolean(f.disabled || isOutOfRealm);
+      // Preserve explicit user checkbox disabled state only
+      fil.disabled = Boolean(f.disabled);
       return fil;
     });
 
@@ -729,7 +649,6 @@ export function buildPayloads(params: {
   const baseQuery: any = { ...(base.query || {}) };
   if (statusOption) baseQuery.status = { option: statusOption };
 
-  // Unique item code: realm + language + relative position in the realm's item array
   let itemRefCode: string | null = null;
   const realmEntries = getRealmItemEntries(realm);
   if (selectedItem) {
@@ -743,10 +662,6 @@ export function buildPayloads(params: {
         index: idx,
       });
     } else {
-      // Not resolvable in the loaded catalog (catalog empty, still the old language,
-      // or already the new language while selectedItem is the old-language object).
-      // Do NOT clear: keep the text and the existing ref so migrateItemRef can
-      // re-resolve it by index once the catalog/language settle.
       applyEntryToQuery(baseQuery, selectedItem);
       const keep = itemRef ?? base.item_ref;
       if (keep) itemRefCode = keep;
@@ -755,7 +670,7 @@ export function buildPayloads(params: {
     clearItemFromQuery(baseQuery);
   }
 
-  // 2. Build fullFilters (merge PoE1 + PoE2 filter definitions properly)
+  // 2. Build fullFilters
   const currentRealmMap = buildFilterDefinitionsMap(renderedFilterGroups);
   const allKnownMap = buildFilterDefinitionsMap(allKnownFilterGroups);
 
@@ -798,7 +713,6 @@ export function buildPayloads(params: {
         currentRealmGroupFilters?.has(filterId),
       );
 
-      // Prefer user state in `filterValues` if any key exists; otherwise fall back to `initialGroupFilters`
       const stateVal = groupState[filterId];
       const hasStateKeys =
         stateVal &&
@@ -841,7 +755,6 @@ export function buildPayloads(params: {
           }
         }
       } else {
-        // Catalogs haven't loaded yet or unknown filter: preserve existing values verbatim
         for (const [k, v] of Object.entries(rawSource)) {
           if (k === "disabled") continue;
           if (v !== undefined && v !== null && v !== "") {

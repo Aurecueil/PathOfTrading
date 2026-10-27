@@ -92,6 +92,7 @@
   let jsonModalOpen: boolean = false;
   let jsonModalTitle: string = "";
   let jsonModalData: any = null;
+  let searchErrorMsg: string | null = null;
 
   // Supports both a Svelte readable/writable store and a plain boolean export
   $: devEnabled =
@@ -170,7 +171,8 @@
     !isLiveActive &&
     !isLiveConnecting &&
     displayedItems.length === 0 &&
-    orderedEntries.length === 0;
+    orderedEntries.length === 0 &&
+    !searchErrorMsg;
 
   async function cancelUiJobs(
     targetUiId: string = String(tile.id || initialUiId),
@@ -538,6 +540,9 @@
   export async function executeSearch(payload?: any, cacheOk: boolean = false) {
     if (isDestroyed || disabled || tile.disabled) return;
 
+    lastSearchResponse = null;
+    searchErrorMsg = null;
+
     if (payload && typeof payload === "object") {
       tile.payload = payload;
     } else if (!tile.payload || tile.payload === "") {
@@ -594,7 +599,7 @@
       const data =
         typeof rawResponse === "string" ? JSON.parse(rawResponse) : rawResponse;
 
-      lastSearchResponse = data;
+      lastSearchResponse = rawResponse;
       tile.searchId = data.id;
       tile.results = data.result || [];
 
@@ -634,9 +639,31 @@
       if (!isDestroyed && (mode === "live" || mode === "mixed") && $authState) {
         await startLive();
       }
-    } catch (err) {
+    } catch (err: any) {
       if (!isDestroyed) {
+        lastSearchResponse = err;
+        let parsedError = err;
+        if (typeof err === "string") {
+          try {
+            parsedError = JSON.parse(err);
+          } catch {
+            // Keep as string if not JSON
+          }
+        }
+        searchErrorMsg =
+          typeof parsedError === "object" &&
+          parsedError !== null &&
+          parsedError.message
+            ? parsedError.message
+            : String(err);
         console.error(`[SearchTile ${tile.id}] Search error:`, err);
+
+        // Clear entries and results on error
+        itemsMap.clear();
+        orderedEntries = [];
+        displayedItems = [];
+        tile.searchId = undefined;
+        tile.results = [];
       }
     } finally {
       if (!isDestroyed) {
@@ -1081,13 +1108,25 @@
     window.addEventListener("pointerup", onPointerUp);
   }
 
-  function handleBodyClick() {
-    if (hasNoSearchYet) {
+  function handleBodyClick(e: MouseEvent) {
+    // If clicking directly on empty body space or status messages (not an active item row)
+    const target = e.target as HTMLElement;
+    if (
+      hasNoSearchYet ||
+      searchErrorMsg ||
+      target.classList.contains("tile-body") ||
+      target.classList.contains("status-msg") ||
+      target.classList.contains("item-list")
+    ) {
       dispatch("openfilters");
     }
   }
 
-  function onResizePointerDown(e: PointerEvent, dir: ResizeDirection) {
+  function onResizePointerDown(e: ResizeDirection, dir: ResizeDirection) {
+    // handled below
+  }
+
+  function onResizePointerDownEvent(e: PointerEvent, dir: ResizeDirection) {
     if (e.button !== 0) return;
     e.stopPropagation();
     dispatch("resize");
@@ -1176,17 +1215,15 @@
   style:transform="translate({tile.x}px, {tile.y}px)"
   style:width="{tile.w}px"
   style:height="{tile.h}px"
-  on:pointerdown|stopPropagation={(e) => {
+  on:pointerdown={(e) => {
+    if (e.button === 1) return; // Let middle click pass through for viewport panning
+    e.stopPropagation();
     (document.activeElement as HTMLElement)?.blur();
     dispatch("select", { shiftKey: e.shiftKey });
   }}
   on:contextmenu={handleContextMenu}
 >
-  <div
-    class="tile-bar"
-    on:pointerdown={onHeaderPointerDown}
-    title="Click to configure filters, drag to move"
-  >
+  <div class="tile-bar" on:pointerdown={onHeaderPointerDown}>
     <div class="bar-left">
       {#if mode === "live" || mode === "mixed"}
         <span
@@ -1224,7 +1261,6 @@
     </div>
 
     <div class="actions" on:pointerdown|stopPropagation>
-      <!-- Open on official trade website button (only shows if searchId exists) -->
       {#if tile.searchId}
         <button
           type="button"
@@ -1338,13 +1374,11 @@
     {/if}
 
     <div
-      class="tile-body"
-      class:clickable-empty={hasNoSearchYet}
+      class="tile-body clickable-empty"
       bind:this={bodyElement}
       on:scroll={handleScroll}
       on:wheel|stopPropagation
       on:click={handleBodyClick}
-      title={hasNoSearchYet ? "Click to configure filters" : undefined}
     >
       {#if tile.loading}
         <div class="search-overlay">
@@ -1352,7 +1386,11 @@
         </div>
       {/if}
 
-      {#if displayedItems.length === 0 && !tile.loading}
+      {#if searchErrorMsg}
+        <div class="status-msg error">
+          <span>⚠️ {searchErrorMsg}</span>
+        </div>
+      {:else if displayedItems.length === 0 && !tile.loading}
         <div class="status-msg empty">
           {#if disabled}
             Search disabled (Right-click to enable).
@@ -1399,25 +1437,37 @@
     </div>
   </div>
 
-  <div class="edge n" on:pointerdown={(e) => onResizePointerDown(e, "n")}></div>
-  <div class="edge s" on:pointerdown={(e) => onResizePointerDown(e, "s")}></div>
-  <div class="edge e" on:pointerdown={(e) => onResizePointerDown(e, "e")}></div>
-  <div class="edge w" on:pointerdown={(e) => onResizePointerDown(e, "w")}></div>
+  <div
+    class="edge n"
+    on:pointerdown={(e) => onResizePointerDownEvent(e, "n")}
+  ></div>
+  <div
+    class="edge s"
+    on:pointerdown={(e) => onResizePointerDownEvent(e, "s")}
+  ></div>
+  <div
+    class="edge e"
+    on:pointerdown={(e) => onResizePointerDownEvent(e, "e")}
+  ></div>
+  <div
+    class="edge w"
+    on:pointerdown={(e) => onResizePointerDownEvent(e, "w")}
+  ></div>
   <div
     class="corner nw"
-    on:pointerdown={(e) => onResizePointerDown(e, "nw")}
+    on:pointerdown={(e) => onResizePointerDownEvent(e, "nw")}
   ></div>
   <div
     class="corner ne"
-    on:pointerdown={(e) => onResizePointerDown(e, "ne")}
+    on:pointerdown={(e) => onResizePointerDownEvent(e, "ne")}
   ></div>
   <div
     class="corner sw"
-    on:pointerdown={(e) => onResizePointerDown(e, "sw")}
+    on:pointerdown={(e) => onResizePointerDownEvent(e, "sw")}
   ></div>
   <div
     class="corner se"
-    on:pointerdown={(e) => onResizePointerDown(e, "se")}
+    on:pointerdown={(e) => onResizePointerDownEvent(e, "se")}
   ></div>
 </div>
 
@@ -1711,6 +1761,11 @@
     align-items: center;
     gap: 0.4rem;
     user-select: none;
+  }
+
+  .status-msg.error {
+    color: #ef4444;
+    padding: 12%;
   }
 
   .item-list {

@@ -7,6 +7,7 @@
   import GrantedSkills from "./stats/GrantedSkills.svelte";
   import VeiledMods from "./stats/VeiledMods.svelte";
   import StatGroupSummary from "./stats/StatGroupSummary.svelte";
+  import KeywordText from "./stats/KeywordText.svelte";
   import CdnImage from "../item/CdnImage.svelte";
   import {
     CDN_BASE,
@@ -56,18 +57,16 @@
   /* Descriptions                                                       */
   /* ------------------------------------------------------------------ */
   // Always show secDescrText when present (above explicit stats, #1BA274)
-  $: secDescrTextClean = cleanBracketText(item.secDescrText || "").trim();
+  $: secDescrTextRaw = (item.secDescrText || "").trim();
 
   // Gem / socketable stats & fallback descrText (shown in tooltips)
   $: tooltipTexts = ((): { desc: string; stats: string[] } => {
     const tab = (item.gemTabs as any[] | undefined)?.[0];
     const stats: string[] = (tab?.pages?.[0]?.stats ?? []).map((t: string) =>
-      cleanBracketText(t),
+      t.trim(),
     );
     const desc =
-      !secDescrTextClean && !stats.length
-        ? cleanBracketText(item.descrText || "").trim()
-        : "";
+      !secDescrTextRaw && !stats.length ? (item.descrText || "").trim() : "";
     return { desc, stats };
   })();
 
@@ -76,11 +75,10 @@
   /* ------------------------------------------------------------------ */
   /* Modifiers & Bonded Handling                                        */
   /* ------------------------------------------------------------------ */
-  // In ItemStats.svelte:
-
   $: showRunes = isTooltip || $displayRune;
   $: shownRuneRegular = showRunes ? separatedMods.runeRegular : [];
   $: shownRuneBonded = showRunes ? separatedMods.runeBonded : [];
+
   // A mod is "bonded" only if it IS a bonded line (starts with the Bonded
   // marker). Text that merely mentions [..|Bonded] mid-sentence is not.
   function isBondedMod(mod: string | ItemMod): boolean {
@@ -399,10 +397,12 @@
     {/if}
 
     <!-- Secondary Description Text (above explicit stats, #1BA274) -->
-    {#if secDescrTextClean}
+    {#if secDescrTextRaw}
       <div class="separator-line"></div>
       <div class="stat-group sec-descr-group">
-        <div class="sec-descr-text">{secDescrTextClean}</div>
+        <div class="sec-descr-text">
+          <KeywordText text={secDescrTextRaw} />
+        </div>
       </div>
     {/if}
 
@@ -410,10 +410,14 @@
       <div class="separator-line"></div>
       <div class="stat-group tooltip-text-group">
         {#each tooltipTexts.stats as line}
-          <div class="tooltip-text-line stat">{line}</div>
+          <div class="tooltip-text-line stat">
+            <KeywordText text={line} />
+          </div>
         {/each}
         {#if tooltipTexts.desc}
-          <div class="tooltip-text-line desc">{tooltipTexts.desc}</div>
+          <div class="tooltip-text-line desc">
+            <KeywordText text={tooltipTexts.desc} />
+          </div>
         {/if}
       </div>
     {/if}
@@ -461,11 +465,11 @@
         {#each item.notableProperties as notable}
           <div class="notable-block">
             <div class="notable-title">
-              {cleanBracketText(notable.name)}
+              <KeywordText text={notable.name} />
             </div>
             {#each notable.values || [] as [line]}
               <div class="notable-line">
-                {cleanBracketText(line)}
+                <KeywordText text={line} />
               </div>
             {/each}
           </div>
