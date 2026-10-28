@@ -1,6 +1,5 @@
 <!-- src/lib/trade/components/item/stats/KeywordTooltip.svelte -->
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
   import KeywordText from "./KeywordText.svelte";
   import { cleanBracketText } from "./statsUtils";
 
@@ -9,11 +8,7 @@
   export let x: number = 0;
   export let y: number = 0;
   export let depth: number = 0;
-
-  const dispatch = createEventDispatcher<{
-    tooltipenter: void;
-    tooltipleave: void;
-  }>();
+  export let pinned: boolean = false;
 
   const TIP_W = 360;
   const OFFSET = 14;
@@ -99,17 +94,15 @@
 </script>
 
 {#if term || paragraphs.length > 0}
-  <!-- svelte-ignore a11y-no-static-element-interactions -->
   <div
     class="keyword-tooltip"
+    class:pinned
     use:portal
     use:measureTip
     style:left="{pos.left}px"
     style:top="{pos.top}px"
     style:width="{TIP_W}px"
     style:z-index={100050 + depth}
-    on:mouseenter={() => dispatch("tooltipenter")}
-    on:mouseleave={() => dispatch("tooltipleave")}
   >
     {#if term}
       <div class="kw-term">{cleanBracketText(term)}</div>
@@ -146,11 +139,17 @@
     box-shadow:
       0 12px 28px rgba(0, 0, 0, 0.88),
       0 0 0 1px #000;
-    pointer-events: auto;
+    pointer-events: none;
     font-family: "FontinRegular", "Fontin", "Palatino Linotype", Georgia, serif;
     text-align: center;
     color: #b6aa82;
     scrollbar-width: thin;
+  }
+
+  .keyword-tooltip.pinned {
+    pointer-events: auto;
+    border-color: #8a6a2e;
+    border-top-color: #d4a753;
   }
 
   .kw-term {

@@ -1,11 +1,42 @@
 <!-- src/lib/trade/components/item/stats/KeywordText.svelte -->
+<script context="module" lang="ts">
+  import { derived } from "svelte/store";
+  import { keywords, type KeywordEntry } from "$lib/trade/tradeStore";
+
+  // Derived store computed ONCE globally whenever `keywords` updates
+  const keywordLookup = derived(keywords, ($kw) => {
+    const raw = $kw || {};
+    const entries = Object.entries(raw);
+    const loaded = entries.length > 0;
+
+    const lowerMap = new Map<string, KeywordEntry>();
+    for (const [k, v] of entries) {
+      lowerMap.set(k.toLowerCase(), v);
+    }
+
+    function resolve(key: string, display: string): KeywordEntry | null {
+      if (!key) return null;
+      const direct =
+        raw[key] ??
+        lowerMap.get(key.toLowerCase()) ??
+        raw[display] ??
+        lowerMap.get(display.toLowerCase());
+
+      if (direct && (direct.term || direct.definition)) {
+        return {
+          term: direct.term || display,
+          definition: direct.definition || "",
+        };
+      }
+      return null;
+    }
+
+    return { loaded, resolve };
+  });
+</script>
+
 <script lang="ts">
-  import { onDestroy } from "svelte";
-  import {
-    keywords,
-    showTooltips,
-    type KeywordEntry,
-  } from "$lib/trade/tradeStore";
+  import { showTooltips } from "$lib/trade/tradeStore";
   import StatColorText from "$lib/trade/components/drawer/StatColorText.svelte";
   import KeywordTooltip from "./KeywordTooltip.svelte";
   import { parseKeywordSegments } from "./statsUtils";
@@ -14,108 +45,147 @@
   export let useColorCoding: boolean = false;
   export let depth: number = 0;
 
-  $: segments = parseKeywordSegments(text);
+  $: keywordsLoaded = $keywordLookup.loaded;
 
-  // Case-insensitive lookup map for fallback matching
-  $: lowerMap = (() => {
-    const map = new Map<string, KeywordEntry>();
-    for (const [k, v] of Object.entries($keywords)) {
-      map.set(k.toLowerCase(), v);
-    }
-    return map;
-  })();
-
-  function resolveKeyword(key: string, display: string): KeywordEntry | null {
-    if (!key) return null;
-    const direct =
-      $keywords[key] ??
-      lowerMap.get(key.toLowerCase()) ??
-      $keywords[display] ??
-      lowerMap.get(display.toLowerCase());
-
-    if (direct && (direct.term || direct.definition)) {
+  // Pre-resolve keyword entries only when `text` or `$keywordLookup` changes,
+  // NOT when `$showTooltips` toggles.
+  $: resolvedSegments = parseKeywordSegments(text).map((seg) => {
+    if (seg.type === "keyword") {
       return {
-        term: direct.term || display,
-        definition: direct.definition || "",
+        ...seg,
+        entry: $keywordLookup.resolve(seg.key, seg.display),
       };
     }
-    return null;
-  }
+    return seg;
+  });
 
-  let activeTip: {
-    term: string;
-    definition: string;
+  let hoveredTarget: {
+    key: string;
+    display: string;
     x: number;
     y: number;
   } | null = null;
 
-  let closeTimer: ReturnType<typeof setTimeout> | null = null;
+  let isHoveringKeyword = false;
+  let isPinned = false;
 
-  function cancelClose() {
-    if (closeTimer) {
-      clearTimeout(closeTimer);
-      closeTimer = null;
+  // Reactively compute the active tooltip so it updates live when $keywordLookup loads in
+  $: activeTip = (() => {
+    if (!$showTooltips || !hoveredTarget) return null;
+
+    if (!$keywordLookup.loaded) {
+      return {
+        term: hoveredTarget.display,
+        definition: "Loading...",
+        x: hoveredTarget.x,
+        y: hoveredTarget.y,
+      };
     }
-  }
 
-  function scheduleClose() {
-    cancelClose();
-    closeTimer = setTimeout(() => {
-      activeTip = null;
-    }, 120);
+    const entry = $keywordLookup.resolve(
+      hoveredTarget.key,
+      hoveredTarget.display,
+    );
+    if (!entry) return null;
+
+    return {
+      term: entry.term,
+      definition: entry.definition,
+      x: hoveredTarget.x,
+      y: hoveredTarget.y,
+    };
+  })();
+
+  // If data loads in and the hovered keyword has no definition, clear pin state
+  $: if (hoveredTarget && keywordsLoaded && !activeTip) {
+    isPinned = false;
   }
 
   // Immediately dismiss any open tooltip if showTooltips is toggled off
-  $: if (!$showTooltips && activeTip) {
-    cancelClose();
-    activeTip = null;
+  $: if (!$showTooltips && hoveredTarget) {
+    hoveredTarget = null;
+    isPinned = false;
+    isHoveringKeyword = false;
   }
 
-  function handleEnter(e: MouseEvent, key: string, display: string) {
+  function handleEnter(
+    e: MouseEvent,
+    key: string,
+    display: string,
+    entry: KeywordEntry | null,
+  ) {
     if (!$showTooltips) return;
-    const entry = resolveKeyword(key, display);
-    if (!entry) return;
-    cancelClose();
-    activeTip = {
-      term: entry.term,
-      definition: entry.definition,
+    // If keywords have already loaded and this token has no definition, ignore
+    if (keywordsLoaded && !entry) return;
+
+    isHoveringKeyword = true;
+    hoveredTarget = {
+      key,
+      display,
       x: e.clientX,
       y: e.clientY,
     };
   }
 
   function handleLeave() {
-    if (!$showTooltips) return;
-    scheduleClose();
+    isHoveringKeyword = false;
+    if (!isPinned) {
+      hoveredTarget = null;
+    }
   }
 
-  onDestroy(() => {
-    cancelClose();
-  });
+  function handleKeyDown(e: KeyboardEvent) {
+    // Only pin if tooltip is currently open and this is a fresh Alt press (not pre-held repeat)
+    if (e.key === "Alt" && !e.repeat && activeTip) {
+      isPinned = true;
+    }
+  }
+
+  function handleKeyUp(e: KeyboardEvent) {
+    if (e.key === "Alt" && isPinned) {
+      isPinned = false;
+      if (!isHoveringKeyword) {
+        hoveredTarget = null;
+      }
+    }
+  }
+
+  function handleWindowBlur() {
+    if (isPinned) {
+      isPinned = false;
+      if (!isHoveringKeyword) {
+        hoveredTarget = null;
+      }
+    }
+  }
 </script>
 
-{#each segments as seg}
-  {@const textContent = seg.type === "keyword" ? seg.display : seg.text}
-  {#if seg.type === "keyword" && $showTooltips}
+<svelte:window
+  on:keydown={handleKeyDown}
+  on:keyup={handleKeyUp}
+  on:blur={handleWindowBlur}
+/>
+
+{#each resolvedSegments as seg}
+  {#if seg.type === "keyword"}
     <!-- svelte-ignore a11y-no-static-element-interactions -->
     <span
       class="kw-token"
-      class:has-def={Boolean(resolveKeyword(seg.key, seg.display))}
-      on:mouseenter={(e) => handleEnter(e, seg.key, seg.display)}
+      class:enabled={$showTooltips}
+      class:has-def={$showTooltips && (!keywordsLoaded || Boolean(seg.entry))}
+      on:mouseenter={(e) => handleEnter(e, seg.key, seg.display, seg.entry)}
       on:mouseleave={handleLeave}
     >
       {#if useColorCoding}
-        <StatColorText text={textContent} />
+        <StatColorText text={seg.display} />
       {:else}
-        {textContent}
+        {seg.display}
       {/if}
     </span>
+  {:else if useColorCoding}
+    <StatColorText text={seg.text} />
   {:else}
-    {#if useColorCoding}
-      <StatColorText text={textContent} />
-    {:else}
-      {textContent}
-    {/if}
+    {seg.text}
   {/if}
 {/each}
 
@@ -126,20 +196,19 @@
     x={activeTip.x}
     y={activeTip.y}
     {depth}
-    on:tooltipenter={cancelClose}
-    on:tooltipleave={scheduleClose}
+    pinned={isPinned}
   />
 {/if}
 
 <style>
-  .kw-token {
+  .kw-token.enabled {
     text-decoration: underline;
     text-decoration-color: currentColor;
     text-underline-offset: 2px;
     text-decoration-thickness: 1px;
   }
 
-  .kw-token.has-def {
+  .kw-token.enabled.has-def {
     cursor: help;
     text-decoration-style: solid;
   }

@@ -12,6 +12,11 @@
     getCacheStats,
     clearAllCaches,
   } from "$lib/trade/utilis/imageService";
+  import CurrencyRatesPreview from "$lib/trade/components/CurrencyRatesPreview.svelte";
+
+  // Optional: bind or pass your app's currently active game and league
+  let activeRealm: "poe" | "poe2" = "poe";
+  let activeLeague = "Standard";
 
   let { onStatus }: { onStatus: (m: string) => void } = $props();
 
@@ -151,4 +156,11 @@
   >
     {clearingCache ? "Clearing…" : "Clear Cache"}
   </button>
+</div>
+<div class="settings-section">
+  <h2>Currency Rates & Overrides</h2>
+  <CurrencyRatesPreview
+    bind:selectedRealm={activeRealm}
+    bind:selectedLeague={activeLeague}
+  />
 </div>

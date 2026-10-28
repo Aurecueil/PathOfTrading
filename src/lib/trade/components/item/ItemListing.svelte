@@ -16,6 +16,14 @@
   export let searchId: string = "";
   export let styleMode: ResolvedDisplayStyle = "full";
   export let onTravel: () => void;
+  export let convertedPrice: number | null = null;
+  export let convertedCurrency: string = "chaos";
+
+  function formatConverted(v: number): string {
+    const digits = v < 10 ? 2 : v < 100 ? 1 : 0;
+    return Number(v.toFixed(digits)).toLocaleString();
+  }
+  $: convertedEntry = findStatic(statics, convertedCurrency);
 
   let whisperCopied = false;
 
@@ -99,19 +107,45 @@
 
 {#if styleMode === "minimal"}
   <div class="listing-minimal" class:center-only={!hasAnyAction}>
-    <div class="min-price">
-      {#if price?.amount !== undefined}
-        <span class="amount">{price.amount}×</span>
-      {/if}
-      {#if currencyEntry?.image}
-        <CdnImage
-          src={currencyEntry.image}
-          alt={currencyEntry.text}
-          className="currency-img"
-          loading="lazy"
-        />
-      {:else if price?.currency}
-        <span class="currency">{currencyEntry?.text ?? price.currency}</span>
+    <div class="min-price-wrap">
+      <div class="min-price">
+        {#if price?.amount !== undefined}
+          <span class="amount">{price.amount}×</span>
+        {/if}
+        {#if currencyEntry?.image}
+          <CdnImage
+            src={currencyEntry.image}
+            alt={currencyEntry.text}
+            className="currency-img"
+            loading="lazy"
+          />
+        {:else if price?.currency}
+          <span class="currency">{currencyEntry?.text ?? price.currency}</span>
+        {/if}
+      </div>
+      {#if convertedPrice !== null}
+        <div
+          class="converted-headline"
+          title="Approximate value in {convertedEntry?.text ??
+            convertedCurrency}"
+        >
+          <span class="paren">(</span>
+          <span class="amount">
+            {formatConverted(convertedPrice)}<span class="times">×</span>
+          </span>
+          {#if convertedEntry?.image}
+            <CdnImage
+              src={convertedEntry.image}
+              alt={convertedEntry.text}
+              className="currency-img"
+              loading="lazy"
+            />
+          {/if}
+          <span class="currency"
+            >{convertedEntry?.text ?? convertedCurrency}</span
+          >
+          <span class="paren">)</span>
+        </div>
       {/if}
     </div>
 
@@ -191,7 +225,30 @@
           {currencyEntry?.text ?? price?.currency ?? "Unpriced"}
         </span>
       </div>
-
+      {#if convertedPrice !== null}
+        <div
+          class="converted-headline"
+          title="Approximate value in {convertedEntry?.text ??
+            convertedCurrency}"
+        >
+          <span class="paren">(</span>
+          <span class="amount">
+            {formatConverted(convertedPrice)}<span class="times">×</span>
+          </span>
+          {#if convertedEntry?.image}
+            <CdnImage
+              src={convertedEntry.image}
+              alt={convertedEntry.text}
+              className="currency-img"
+              loading="lazy"
+            />
+          {/if}
+          <span class="currency"
+            >{convertedEntry?.text ?? convertedCurrency}</span
+          >
+          <span class="paren">)</span>
+        </div>
+      {/if}
       {#if listing?.fee && styleMode === "full"}
         <div class="fee-text" title="Gold fee for travelling to this hideout">
           <span class="coin" aria-hidden="true"></span>
@@ -680,5 +737,65 @@
     .spin {
       animation-duration: 3s;
     }
+  }
+  .converted-headline {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: nowrap;
+    gap: 0.25rem;
+    margin-top: 0.15rem;
+    opacity: 0.85;
+    white-space: nowrap;
+  }
+  .converted-headline .amount {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--price);
+    text-shadow: none;
+  }
+  .converted-headline .currency {
+    font-size: 0.8rem;
+    color: var(--currency);
+  }
+  .converted-headline .paren {
+    font-size: 0.85rem;
+    color: var(--currency);
+  }
+  .price-box .converted-headline :global(.currency-img),
+  .min-price-wrap .converted-headline :global(.currency-img) {
+    width: 20px;
+    height: 20px;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.75));
+  }
+  .mode-compact .converted-headline .amount {
+    font-size: 0.88rem;
+  }
+  .mode-compact .converted-headline .currency {
+    font-size: 0.74rem;
+  }
+  .listing-minimal .converted-headline {
+    justify-content: flex-end;
+  }
+  .listing-minimal.center-only .converted-headline {
+    justify-content: center;
+  }
+
+  .min-price-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    line-height: 1.1;
+  }
+  .listing-minimal.center-only .min-price-wrap {
+    align-items: center;
+  }
+  .converted-price {
+    margin-top: 0.15rem;
+    font-size: 0.76rem;
+    color: var(--currency);
+    opacity: 0.85;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 </style>

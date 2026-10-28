@@ -164,7 +164,7 @@
 
   $: availableLeagues = rawLeagues.filter((l) => {
     if (realm === "poe") {
-      const r = (l.realms || (l as any).realm || "").toString().toLowerCase();
+      const r = (l.realm || (l as any).realm || "").toString().toLowerCase();
       return r === "pc";
     }
     return true;

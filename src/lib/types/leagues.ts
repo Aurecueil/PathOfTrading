@@ -1,7 +1,7 @@
 export interface League {
-  id: String;
-  realms: String;
-  text: String;
+  id: string;
+  realm: string;
+  text: string;
 }
 
 export interface LeagueData {

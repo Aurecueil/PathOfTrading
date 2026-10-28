@@ -12,6 +12,7 @@
   import MercenarySkills from "$lib/trade/components/item/MercenarySkills.svelte";
   import { getCategorySymbols } from "$lib/trade/components/item/categorySymbols";
   import { extractSortValue } from "$lib/trade/components/item/sortValue";
+  import { convertCurrency } from "$lib/trade/pricing";
 
   export let id: string;
   export let payload: any = null;
@@ -133,13 +134,59 @@
   /* ------------------------------------------------------------------ */
   /* Sort value: the whole field the payload sorts by, passed to the parent */
   /* ------------------------------------------------------------------ */
+  /* Currency conversion (→ chaos) */
+  const TARGET_CURRENCY = "chaos";
+  const CONVERT_FAILED = -9;
+
+  $: gameRealm =
+    (item?.realm || realm || "").toLowerCase() === "poe2"
+      ? ("poe2" as const)
+      : ("poe" as const);
+
+  // Price expressed in chaos, or null when it can't be converted
+  $: priceInChaos = ((): number | null => {
+    const p = listing?.price;
+    if (!p || typeof p.amount !== "number" || !p.currency) return null;
+    if (p.currency === TARGET_CURRENCY) return p.amount;
+    try {
+      const v = convertCurrency(
+        p.amount,
+        p.currency,
+        TARGET_CURRENCY,
+        league,
+        gameRealm,
+      );
+      return Number.isFinite(v) && v !== CONVERT_FAILED ? v : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  // Only show "(X chaos)" when the listing isn't already in chaos
+  $: displayConvertedPrice =
+    listing?.price?.currency !== TARGET_CURRENCY ? priceInChaos : null;
+
+  /* Sort value */
+  $: sortField = (() => {
+    const s = payload?.sort;
+    if (!s || typeof s !== "object") return "price";
+    return Object.keys(s)[0] ?? "price";
+  })();
+  $: isPriceSort = sortField === "price";
+
+  // Whole field value, untouched (price -> { amount, currency, type })
   $: computedSortValue = data ? extractSortValue(data, payload) : null;
 
-  $: effectiveSortValue =
-    computedSortValue !== null && computedSortValue !== undefined
+  $: effectiveSortValue = (() => {
+    if (isPriceSort) {
+      // converted chaos value if possible, else the raw amount
+      const raw = computedSortValue?.amount ?? listing?.price?.amount ?? null;
+      return priceInChaos ?? raw;
+    }
+    return computedSortValue !== null && computedSortValue !== undefined
       ? computedSortValue
       : sortValue;
-
+  })();
   // Dispatch only when the VALUE really changed (compared by content, never
   // by identity), so a parent echoing the value back can't cause a loop.
   function sortKey(v: any): string {
@@ -401,6 +448,8 @@
       <ItemListing
         {listing}
         sortValue={effectiveSortValue}
+        convertedPrice={displayConvertedPrice}
+        convertedCurrency={TARGET_CURRENCY}
         {isTraveling}
         {isQueued}
         {travelError}

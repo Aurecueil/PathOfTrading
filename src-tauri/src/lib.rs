@@ -4,7 +4,26 @@ pub mod settings;
 pub mod trade;
 
 // fn initialize() {}
+#[cfg(windows)]
+unsafe extern "system" fn block_alt_menu(
+    hwnd: windows::Win32::Foundation::HWND,
+    msg: u32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+    _id: usize,
+    _data: usize,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::Foundation::LRESULT;
+    use windows::Win32::UI::Shell::DefSubclassProc;
+    use windows::Win32::UI::WindowsAndMessaging::WM_SYSCOMMAND;
 
+    const SC_KEYMENU: usize = 0xF100;
+    // lparam == 0 means Alt was pressed alone (Alt+Space has lparam == ' ')
+    if msg == WM_SYSCOMMAND && (wparam.0 & 0xFFF0) == SC_KEYMENU && lparam.0 == 0 {
+        return LRESULT(0);
+    }
+    DefSubclassProc(hwnd, msg, wparam, lparam)
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let limiter = trade::ApiRateLimiter::new();
@@ -44,6 +63,18 @@ pub fn run() {
             });
             trade::settings::load_settings_from_disk(app.handle());
             // initialize();
+            #[cfg(windows)]
+            {
+                use tauri::Manager;
+                use windows::Win32::Foundation::HWND;
+                use windows::Win32::UI::Shell::SetWindowSubclass;
+
+                let win = app.get_webview_window("main").unwrap();
+                let raw = win.hwnd().unwrap().0;
+                unsafe {
+                    let _ = SetWindowSubclass(HWND(raw as _), Some(block_alt_menu), 1, 0);
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

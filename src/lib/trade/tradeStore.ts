@@ -1,6 +1,6 @@
 // src/lib/trade/tradeStore.ts
 import { writable, get, derived } from "svelte/store";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, transformCallback } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import type { ItemCategory, ItemDataResponse } from "$lib/types/baseItem";
 import type { FilterGroup, FilterDataResponse } from "$lib/types/filters";
@@ -18,7 +18,8 @@ import {
   ensureCrossWindowSync,
   loadStatColorConfigsFromDisk,
 } from "./statColors";
-
+import { registerPricingStores } from "./pricing";
+export * from "./pricing";
 export * from "./statColors";
 
 // ---------------------------------------------------------------------------
@@ -41,6 +42,8 @@ export const leaguesPoe = writable<League[]>([]);
 export const leaguesPoe2 = writable<League[]>([]);
 export const staticsPoe = writable<StaticCategory[]>([]);
 export const staticsPoe2 = writable<StaticCategory[]>([]);
+
+registerPricingStores(leaguesPoe, leaguesPoe2);
 
 // PoE 1 Exclusive Mercenary Stores
 export const mercenarySkills = writable<MercenarySkillsMap>({});

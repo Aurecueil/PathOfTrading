@@ -17,6 +17,7 @@
   import SearchItemRow from "$lib/searchTile/SearchItemRow.svelte";
   import ItemJsonModal from "$lib/trade/components/item/ItemJsonModal.svelte";
   import { authState, isDev } from "$lib/trade/tradeStore";
+  import { convertCurrency } from "$lib/trade/pricing";
 
   export let tile: SearchTile;
   export let scale: number = 1;
@@ -108,7 +109,22 @@
     jsonModalData = activePayload ?? fallbackPayload ?? {};
     jsonModalOpen = true;
   }
-
+  function toChaos(amount: number, currency?: string): number | null {
+    if (!currency) return null;
+    if (currency === "chaos") return amount;
+    try {
+      const v = convertCurrency(
+        amount,
+        currency,
+        "chaos",
+        currentLeague,
+        isPoe2 ? "poe2" : "poe",
+      );
+      return Number.isFinite(v) && v !== -9 ? v : null;
+    } catch {
+      return null;
+    }
+  }
   function openFullResponseModal() {
     const fetchedItems = orderedEntries
       .map((e) => e.data)
@@ -302,7 +318,9 @@
   function extractSortValue(entry: TradeFetchResult, field: string): any {
     if (!entry) return null;
     if (field === "price") {
-      return entry.listing?.price?.amount ?? null;
+      const p = entry.listing?.price;
+      if (!p || typeof p.amount !== "number") return null;
+      return toChaos(p.amount, p.currency) ?? p.amount;
     }
 
     const it = entry.item;
@@ -388,12 +406,31 @@
       return (entry.listing as any)[field];
     return null;
   }
+  function normalizeRowSortValue(v: any): any {
+    if (v === null || v === undefined) return undefined; // keep tile's own value
+    if (typeof v === "number" || typeof v === "string") return v;
 
+    if (typeof v === "object") {
+      // price object { amount, currency, type }
+      if ("amount" in v && "currency" in v) {
+        const amt = Number(v.amount);
+        if (!Number.isFinite(amt)) return undefined;
+        return toChaos(amt, v.currency) ?? amt;
+      }
+      // mod objects etc.: the tile's own extractSortValue already computes
+      // a proper number (summed duplicates, weight/count), so ignore these.
+    }
+    return undefined;
+  }
   function handleRowSortValue(e: CustomEvent<{ id: string; value: any }>) {
     const { id, value } = e.detail;
     const existing = itemsMap.get(id);
-    if (!existing || existing.sortValue === value) return;
-    existing.sortValue = value;
+    if (!existing) return;
+
+    const normalized = normalizeRowSortValue(value);
+    if (normalized === undefined || existing.sortValue === normalized) return;
+
+    existing.sortValue = normalized;
     if (mode === "mixed") {
       sortOrderedList();
     }
