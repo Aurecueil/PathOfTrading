@@ -72,6 +72,7 @@
   let mode: SearchMode = tile.mode;
   let isLiveActive: boolean = false;
   let isLiveConnecting: boolean = false;
+  let liveErrorMsg: string | null = null;
   let isFetchingMore: boolean = false;
   let lastCacheOk: boolean = false;
   let uidCounter: number = 1;
@@ -86,6 +87,7 @@
 
   let unlistenItems: UnlistenFn | null = null;
   let unlistenStatus: UnlistenFn | null = null;
+  let unlistenError: UnlistenFn | null = null;
   let bodyElement: HTMLDivElement | null = null;
 
   // Dev modal state & response tracking
@@ -651,7 +653,7 @@
         bodyElement.scrollTop = 0;
       }
 
-      if (!$authState || mode === "regular" || mode === "mixed") {
+      if (!$authState || mode === "regular") {
         for (const id of tile.results) {
           const entry: DisplayEntry = {
             uid: `reg_${id}_${uidCounter++}`,
@@ -997,12 +999,17 @@
       unlistenStatus();
       unlistenStatus = null;
     }
+    if (unlistenError) {
+      unlistenError();
+      unlistenError = null;
+    }
   }
 
   async function startLive() {
     if (isDestroyed || !tile.searchId || disabled) return;
     cleanupListeners();
     isLiveConnecting = true;
+    liveErrorMsg = null;
 
     try {
       unlistenStatus = await listen<boolean>(
@@ -1011,10 +1018,20 @@
           if (event.payload) {
             isLiveActive = true;
             isLiveConnecting = false;
+            liveErrorMsg = null;
           }
         },
       );
-
+      // Listen for backend error notifications
+      unlistenError = await listen<{ tile_id: string; message: string }>(
+        `live-error-${tile.id}`,
+        (event) => {
+          if (isDestroyed) return;
+          liveErrorMsg = event.payload.message;
+          isLiveActive = false;
+          isLiveConnecting = false;
+        },
+      );
       unlistenItems = await listen<any>(
         `live-items-${tile.id}`,
         async (event) => {
@@ -1061,6 +1078,7 @@
       }
     } catch (err) {
       if (!isDestroyed) {
+        liveErrorMsg = String(err);
         console.error(
           `[SearchTile ${tile.id}] Failed to start live search:`,
           err,

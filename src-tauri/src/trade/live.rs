@@ -25,6 +25,11 @@ pub struct LiveItemBatchEvent {
     pub tile_id: String,
     pub item_ids: Vec<String>,
 }
+#[derive(Clone, Serialize)]
+pub struct LiveErrorEvent {
+    pub tile_id: String,
+    pub message: String,
+}
 
 #[tauri::command]
 pub async fn start_live_search(
@@ -85,16 +90,28 @@ pub async fn start_live_search(
         .map_err(|e| format!("Request build error: {e}"))?;
 
     // 3. Connect socket in background task
+    // 3. Connect socket in background task
     tokio::spawn(async move {
-        let (ws_stream, _) = match connect_async(request).await {
-            Ok(res) => res,
+        let ws_stream = match connect_async(request).await {
+            Ok(res) => res.0,
             Err(e) => {
-                eprintln!("[Live WS {tile_id}] Connect error: {e}");
+                let err_msg = format!("Connection failed: {e}");
+                eprintln!("[Live WS {tile_id}] {err_msg}");
+
+                let _ = app.emit(&format!("live-status-{tile_id}"), false);
+                let _ = app.emit(
+                    &format!("live-error-{tile_id}"),
+                    LiveErrorEvent {
+                        tile_id: tile_id.clone(),
+                        message: err_msg,
+                    },
+                );
                 return;
             }
         };
 
         let (_, mut read) = ws_stream.split();
+        let mut exit_reason: Option<String> = None;
 
         loop {
             tokio::select! {
@@ -105,11 +122,25 @@ pub async fn start_live_search(
                     let msg = match msg_opt {
                         Some(Ok(Message::Text(t))) => t,
                         Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => continue,
-                        Some(Ok(Message::Close(_))) | None => break,
+                        Some(Ok(Message::Close(frame))) => {
+                            let reason = frame
+                                .map(|f| f.reason.to_string())
+                                .unwrap_or_else(|| "Server closed connection".to_string());
+                            exit_reason = Some(format!("WebSocket closed: {reason}"));
+                            break;
+                        }
+                        None => {
+                            exit_reason = Some("Connection stream ended unexpectedly".to_string());
+                            break;
+                        }
+                        Some(Err(e)) => {
+                            exit_reason = Some(format!("Stream error: {e}"));
+                            break;
+                        }
                         _ => continue,
                     };
 
-                  if let Ok(val) = serde_json::from_str::<Value>(&msg) {
+                    if let Ok(val) = serde_json::from_str::<Value>(&msg) {
                         // Handshake confirmation
                         if val.get("auth").and_then(|a| a.as_bool()).unwrap_or(false) {
                             if let Err(e) = app.emit(&format!("live-status-{tile_id}"), true) {
@@ -154,8 +185,22 @@ pub async fn start_live_search(
                 }
             }
         }
-    });
 
+        // Notify frontend that the live session has stopped
+        let _ = app.emit(&format!("live-status-{tile_id}"), false);
+
+        // If it exited due to an error/close rather than manual cancellation, send the error notification
+        if let Some(reason) = exit_reason {
+            eprintln!("[Live WS {tile_id}] {reason}");
+            let _ = app.emit(
+                &format!("live-error-{tile_id}"),
+                LiveErrorEvent {
+                    tile_id: tile_id.clone(),
+                    message: reason,
+                },
+            );
+        }
+    });
     Ok(())
 }
 
