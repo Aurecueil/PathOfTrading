@@ -22,6 +22,7 @@
   import SettingsOverlay from "$lib/settings/SettingsOverlay.svelte";
   import { openSettings } from "$lib/settings/settingsState.svelte";
   import { authState } from "$lib/trade/tradeStore";
+  import { t } from "$lib/translation/text";
 
   const LOGIN_NOTICE_DELAY_SECS = 5;
 
@@ -321,7 +322,7 @@
         if (!fileMenuOpen) realmLeagueExpanded = false;
       }}
     >
-      File
+      {$t("file")}
     </button>
 
     {#if fileMenuOpen}
@@ -331,7 +332,7 @@
           class="dropdown-item"
           onclick={handleNewProjectMenu}
         >
-          <span>New Project</span>
+          <span>{$t("new_project")}</span>
           <kbd>Ctrl+N</kbd>
         </button>
         <button
@@ -339,7 +340,7 @@
           class="dropdown-item"
           onclick={handleOpenProjectsPage}
         >
-          <span>Project Selection...</span>
+          <span>{$t("prject_selection")}</span>
           <kbd>Ctrl+O</kbd>
         </button>
         <div class="divider"></div>
@@ -349,7 +350,7 @@
           disabled={!isInsideProject}
           onclick={handleSaveMenu}
         >
-          <span>Save Project</span>
+          <span>{$t("save_project")}</span>
           <kbd>Ctrl+S</kbd>
         </button>
 
@@ -359,7 +360,7 @@
           disabled={!isInsideProject}
           onclick={() => (realmLeagueExpanded = !realmLeagueExpanded)}
         >
-          <span>Project Realm / League</span>
+          <span>{$t("project_realm_league")}</span>
           <span class="chevron">{realmLeagueExpanded ? "▾" : "▸"}</span>
         </button>
 
@@ -417,14 +418,14 @@
           disabled={!isInsideProject}
           onclick={() => openImportModal("elements")}
         >
-          <span>Import Elements from Code...</span>
+          <span>{$t("import_elements_from_code")}</span>
         </button>
         <button
           type="button"
           class="dropdown-item"
           onclick={() => openImportModal("new-project")}
         >
-          <span>Import Project from Code...</span>
+          <span>{$t("import_project_from_code")}</span>
         </button>
         <div class="divider"></div>
         <button
@@ -433,7 +434,7 @@
           disabled={!isInsideProject}
           onclick={() => handleCopyProjectShareCode(false)}
         >
-          <span>Copy Project Share Code</span>
+          <span>{$t("copy_project_code")}</span>
         </button>
         <button
           type="button"
@@ -441,7 +442,7 @@
           disabled={!isInsideProject}
           onclick={() => handleCopyProjectShareCode(true)}
         >
-          <span>Copy Selected Elements Code</span>
+          <span>{$t("copy_selected_elements_code")}</span>
         </button>
         <div class="divider"></div>
         <button
@@ -449,7 +450,7 @@
           class="dropdown-item"
           onclick={handleOpenSettingsMenu}
         >
-          <span>Settings</span>
+          <span>{$t("settings")}</span>
         </button>
       </div>
     {/if}

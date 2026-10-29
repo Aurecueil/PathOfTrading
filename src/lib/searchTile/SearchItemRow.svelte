@@ -2,7 +2,10 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import type { ResolvedDisplayStyle } from "$lib/types/types";
+  import type {
+    ResolvedDisplayStyle,
+    TileDisplayOptions,
+  } from "$lib/types/types";
   import type { Item, TradeFetchResult } from "$lib/types/tradeItem";
   import ItemIcon from "$lib/trade/components/item/ItemIcon.svelte";
   import ItemStats from "$lib/trade/components/item/ItemStats.svelte";
@@ -14,6 +17,8 @@
   import { extractSortValue } from "$lib/trade/components/item/sortValue";
   import { convertCurrency } from "$lib/trade/pricing";
 
+  export let displayCurrency: string = "chaos";
+  export let displayOptions: Partial<TileDisplayOptions> | null = null;
   export let id: string;
   export let payload: any = null;
   export let league: string = "";
@@ -134,25 +139,24 @@
   /* ------------------------------------------------------------------ */
   /* Sort value: the whole field the payload sorts by, passed to the parent */
   /* ------------------------------------------------------------------ */
-  /* Currency conversion (→ chaos) */
-  const TARGET_CURRENCY = "chaos";
   const CONVERT_FAILED = -9;
+  $: targetCurrency = displayCurrency || "chaos";
 
   $: gameRealm =
     (item?.realm || realm || "").toLowerCase() === "poe2"
       ? ("poe2" as const)
       : ("poe" as const);
 
-  // Price expressed in chaos, or null when it can't be converted
-  $: priceInChaos = ((): number | null => {
+  // Price expressed in the tile's display currency, or null when it can't be converted
+  $: priceInTarget = ((): number | null => {
     const p = listing?.price;
     if (!p || typeof p.amount !== "number" || !p.currency) return null;
-    if (p.currency === TARGET_CURRENCY) return p.amount;
+    if (p.currency === targetCurrency) return p.amount;
     try {
       const v = convertCurrency(
         p.amount,
         p.currency,
-        TARGET_CURRENCY,
+        targetCurrency,
         league,
         gameRealm,
       );
@@ -162,9 +166,9 @@
     }
   })();
 
-  // Only show "(X chaos)" when the listing isn't already in chaos
+  // Only show the "(X currency)" line when the listing isn't already in that currency
   $: displayConvertedPrice =
-    listing?.price?.currency !== TARGET_CURRENCY ? priceInChaos : null;
+    listing?.price?.currency !== targetCurrency ? priceInTarget : null;
 
   /* Sort value */
   $: sortField = (() => {
@@ -181,7 +185,7 @@
     if (isPriceSort) {
       // converted chaos value if possible, else the raw amount
       const raw = computedSortValue?.amount ?? listing?.price?.amount ?? null;
-      return priceInChaos ?? raw;
+      return priceInTarget ?? raw;
     }
     return computedSortValue !== null && computedSortValue !== undefined
       ? computedSortValue
@@ -435,6 +439,7 @@
       <ItemStats
         {item}
         {realm}
+        {displayOptions}
         styleMode={resolvedStyle}
         tileWidth={boxWidth}
       />
@@ -449,7 +454,7 @@
         {listing}
         sortValue={effectiveSortValue}
         convertedPrice={displayConvertedPrice}
-        convertedCurrency={TARGET_CURRENCY}
+        convertedCurrency={targetCurrency}
         {isTraveling}
         {isQueued}
         {travelError}

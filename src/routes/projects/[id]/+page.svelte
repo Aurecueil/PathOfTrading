@@ -9,6 +9,7 @@
   import CanvasShape from "$lib/viewport/CanvasShape.svelte";
   import CanvasTitle from "$lib/viewport/CanvasTitle.svelte";
   import CanvasRichText from "$lib/viewport/CanvasRichText.svelte";
+  import { convertFileSrc } from "@tauri-apps/api/core";
   import {
     openTabs,
     workspaceState,
@@ -35,11 +36,36 @@
   } from "$lib/types/types";
   import { migrateItemRef } from "$lib/trade/utilis/tradePayload";
   import {
+    normalizeTileExtras,
+    normalizeDisplayOptions,
+    normalizeCurrency,
+    normalizeSearchOnLoad,
+  } from "$lib/trade/components/drawer/tileDisplay";
+  import {
     currentLanguage,
     isLoading,
     itemsPoe,
     itemsPoe2,
+    canvasBgPath,
+    canvasBgOpacity,
   } from "$lib/trade/tradeStore";
+
+  function resolveBgUrl(rawPath: string): string {
+    const trimmed = rawPath.trim();
+    if (!trimmed) return "";
+    if (
+      trimmed.startsWith("http://") ||
+      trimmed.startsWith("https://") ||
+      trimmed.startsWith("data:") ||
+      trimmed.startsWith("asset:") ||
+      trimmed.startsWith("blob:")
+    ) {
+      return trimmed;
+    }
+    return convertFileSrc(trimmed);
+  }
+
+  $: resolvedBgUrl = resolveBgUrl($canvasBgPath);
 
   interface CanvasSnapshot {
     tiles: SearchTile[];
@@ -285,6 +311,8 @@
           results: [],
           payload: "",
           full_payload: clonedFullPayload,
+          // displayOptions / currency / searchOnLoad (defaults for old saves)
+          ...normalizeTileExtras(item),
         });
         hydratedZ.set(tileUniqueId, ++zCounter);
       }
@@ -297,9 +325,10 @@
     await tick();
     isHydratingProject = false;
 
-    // Run cached search & fetch (cache_ok = true) for all non-disabled tiles
+    // Run cached search & fetch (cache_ok = true) for non-disabled tiles that opted in.
+    // executeSearch also starts live mode, so searchOnLoad=false tiles won't auto-connect.
     for (const t of tiles) {
-      if (!t.disabled) {
+      if (!t.disabled && t.searchOnLoad) {
         tileRefs[t.id]?.executeSearch(undefined, true);
       }
     }
@@ -424,6 +453,8 @@
           results: [],
           payload: "",
           full_payload: clonedFullPayload,
+          // displayOptions / currency / searchOnLoad (defaults for old share codes)
+          ...normalizeTileExtras(item),
         });
       }
     }
@@ -434,7 +465,7 @@
     bringToFront([...newSelection]);
     await tick();
     for (const t of addedTiles) {
-      if (!t.disabled) {
+      if (!t.disabled && t.searchOnLoad) {
         tileRefs[t.id]?.executeSearch(undefined, true);
       }
     }
@@ -520,7 +551,11 @@
 
     await tick();
     for (const t of tiles) {
-      if (!t.disabled && (!t.results || t.results.length === 0)) {
+      if (
+        !t.disabled &&
+        t.searchOnLoad &&
+        (!t.results || t.results.length === 0)
+      ) {
         tileRefs[t.id]?.executeSearch(undefined, true);
       }
     }
@@ -553,7 +588,11 @@
 
     await tick();
     for (const t of tiles) {
-      if (!t.disabled && (!t.results || t.results.length === 0)) {
+      if (
+        !t.disabled &&
+        t.searchOnLoad &&
+        (!t.results || t.results.length === 0)
+      ) {
         tileRefs[t.id]?.executeSearch(undefined, true);
       }
     }
@@ -645,7 +684,11 @@
     bringToFront([...newSelected]);
     await tick();
     for (const t of pastedTiles) {
-      if (!t.disabled && (!t.results || t.results.length === 0)) {
+      if (
+        !t.disabled &&
+        t.searchOnLoad &&
+        (!t.results || t.results.length === 0)
+      ) {
         tileRefs[t.id]?.executeSearch(undefined, true);
       }
     }
@@ -747,6 +790,8 @@
       results: [],
       payload: "",
       full_payload: deepClone(defaultFullPayload),
+      // defaults: all mods shown, chaos, search on load
+      ...normalizeTileExtras(null),
     };
     tiles = [...tiles, newTile];
     bringToFront([newTile.id]);
@@ -1236,8 +1281,17 @@
   function handleSaveOnly(e: CustomEvent<any>) {
     if (activeTileId === null) return;
     markDirty();
-    const { title, displayName, realm, league, payload, full_payload } =
-      e.detail;
+    const {
+      title,
+      displayName,
+      realm,
+      league,
+      payload,
+      full_payload,
+      displayOptions,
+      currency,
+      searchOnLoad,
+    } = e.detail;
 
     const resolvedTitle = displayName?.trim() || title?.trim() || "";
     const effectiveLeague = league || currentProjectLeague;
@@ -1258,6 +1312,9 @@
       target.league = effectiveLeague;
       target.payload = effectivePayload;
       target.full_payload = effectiveFullPayload;
+      target.displayOptions = normalizeDisplayOptions(displayOptions);
+      target.currency = normalizeCurrency(currency);
+      target.searchOnLoad = normalizeSearchOnLoad(searchOnLoad);
       tiles = tiles;
     }
   }
@@ -1265,8 +1322,18 @@
   async function handleFormSubmit(e: CustomEvent<any>) {
     if (activeTileId === null) return;
     saveSnapshot();
-    const { title, displayName, realm, league, payload, full_payload, close } =
-      e.detail;
+    const {
+      title,
+      displayName,
+      realm,
+      league,
+      payload,
+      full_payload,
+      displayOptions,
+      currency,
+      searchOnLoad,
+      close,
+    } = e.detail;
     const targetId = activeTileId;
 
     const resolvedTitle = displayName?.trim() || title?.trim() || "";
@@ -1288,6 +1355,9 @@
       target.league = effectiveLeague;
       target.payload = effectivePayload;
       target.full_payload = effectiveFullPayload;
+      target.displayOptions = normalizeDisplayOptions(displayOptions);
+      target.currency = normalizeCurrency(currency);
+      target.searchOnLoad = normalizeSearchOnLoad(searchOnLoad);
       tiles = tiles;
     }
 
@@ -1297,6 +1367,7 @@
 
     await tick();
     const ref = tileRefs[targetId];
+    // Explicit user search: always runs, regardless of searchOnLoad
     ref?.executeSearch(effectivePayload, false);
   }
 
@@ -1333,9 +1404,20 @@
   on:pointercancel={onPointerUp}
   on:dragstart|preventDefault
   on:contextmenu|preventDefault
-  style:background-size="{GRID_SIZE * scale}px {GRID_SIZE * scale}px"
-  style:background-position="{offsetX}px {offsetY}px"
 >
+  {#if resolvedBgUrl}
+    <div
+      class="viewport-bg-image"
+      style:background-image="url('{resolvedBgUrl}')"
+      style:opacity={$canvasBgOpacity}
+    ></div>
+  {/if}
+
+  <div
+    class="viewport-grid"
+    style:background-size="{GRID_SIZE * scale}px {GRID_SIZE * scale}px"
+    style:background-position="{offsetX}px {offsetY}px"
+  ></div>
   <CanvasToolbar
     bind:activeTool
     bind:snapToGrid
@@ -1449,6 +1531,9 @@
         initialRealm={activeTile.realm === "poe2" ? "poe2" : "poe"}
         initialLeague={activeTile.league || currentProjectLeague}
         initialPayload={activeTile.full_payload ?? null}
+        initialDisplayOptions={activeTile.displayOptions ?? null}
+        initialCurrency={activeTile.currency}
+        initialSearchOnLoad={activeTile.searchOnLoad}
         on:close={() => (activeTileId = null)}
         on:save_only={handleSaveOnly}
         on:save_and_search={handleFormSubmit}
@@ -1499,11 +1584,6 @@
     -webkit-user-select: none;
     touch-action: none;
     background-color: #080b10;
-    background-image: radial-gradient(
-      circle,
-      rgba(255, 255, 255, 0.12) 1.5px,
-      transparent 1.5px
-    );
     font-family: "Fontin", sans-serif;
     color: #d3d3d3;
     font-size: 11px;
@@ -1512,6 +1592,33 @@
     outline: none;
     scrollbar-width: none;
     -ms-overflow-style: none;
+  }
+
+  .viewport-bg-image {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    background-position: center;
+    background-repeat: no-repeat;
+    /* Use "cover" to fill the viewport while keeping aspect ratio, or "100% 100%" to stretch */
+    background-size: cover;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .viewport-grid {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    background-image: radial-gradient(
+      circle,
+      rgba(255, 255, 255, 0.12) 1.5px,
+      transparent 1.5px
+    );
+    pointer-events: none;
+    z-index: 0;
   }
 
   .viewport.panning {

@@ -1,7 +1,10 @@
 <!-- src/lib/trade/components/item/ItemStats.svelte -->
 <script lang="ts">
   import type { Item, ItemMod } from "$lib/types/tradeItem";
-  import type { ResolvedDisplayStyle } from "$lib/types/types";
+  import type {
+    ResolvedDisplayStyle,
+    TileDisplayOptions,
+  } from "$lib/types/types";
   import ItemModifier from "../item/ItemModifier.svelte";
   import ItemProperties from "./stats/ItemProperties.svelte";
   import GrantedSkills from "./stats/GrantedSkills.svelte";
@@ -17,7 +20,9 @@
   } from "./stats/statsUtils";
   import { extractSkills } from "./stats/extractSkills";
   import { displayRune } from "$lib/trade/tradeStore";
+  import { normalizeDisplayOptions } from "$lib/trade/components/drawer/tileDisplay";
 
+  export let displayOptions: Partial<TileDisplayOptions> | null = null;
   export let item: Item;
   export let realm: string = "poe";
   export let styleMode: ResolvedDisplayStyle = "full";
@@ -30,6 +35,7 @@
   $: isCompact = effectiveMode === "compact";
   $: isPoe2 = (item.realm || realm || "").toLowerCase() === "poe2";
 
+  $: show = normalizeDisplayOptions(isTooltip ? null : displayOptions);
   /* ------------------------------------------------------------------ */
   /* Mod row height + PoE2 veiled scale                                 */
   /* ------------------------------------------------------------------ */
@@ -139,19 +145,21 @@
       }
     });
 
-    const implicitRegular: Array<string | ItemMod> = [
-      ...(item.implicitMods || []),
-    ];
+    const implicitRegular: Array<string | ItemMod> = show.displayImplicitMods
+      ? [...(item.implicitMods || [])]
+      : [];
+
     return { runeRegular, implicitRegular, runeBonded };
   })();
-
-  $: enchantMods = item.enchantMods ?? [];
-  $: crucibleMods = item.crucibleMods ?? [];
-
-  // Scourge mods (displayed above implicits) + tier (displayed with state tags)
-  $: scourgeMods = (item.scourgeMods ?? []) as Array<string | ItemMod>;
+  $: enchantMods = show.displayEnchantMods ? (item.enchantMods ?? []) : [];
+  $: crucibleMods = show.displayCrucibleMods ? (item.crucibleMods ?? []) : [];
+  $: scourgeMods = show.displayScourgeMods
+    ? ((item.scourgeMods ?? []) as Array<string | ItemMod>)
+    : [];
   $: scourgeTier =
-    typeof item.scourged?.tier === "number" ? item.scourged.tier : null;
+    show.displayScourgeMods && typeof item.scourged?.tier === "number"
+      ? item.scourged.tier
+      : null;
 
   $: classifiedExplicits = (() => {
     const prefixes: Array<{ mod: string | ItemMod; cat: "prefix" | "bonded" }> =
@@ -161,10 +169,13 @@
     const others: Array<{ mod: string | ItemMod; cat: "generic" | "bonded" }> =
       [];
 
-    // Everything in bondedMods (header line AND the lines under it) is bonded
     const allExplicitMods: Array<{ mod: string | ItemMod; forced: boolean }> = [
-      ...(item.explicitMods || []).map((mod) => ({ mod, forced: false })),
-      ...(item.bondedMods || []).map((mod) => ({ mod, forced: true })),
+      ...(show.displayExplicitMods
+        ? (item.explicitMods || []).map((mod) => ({ mod, forced: false }))
+        : []),
+      ...(show.displayBondedMods
+        ? (item.bondedMods || []).map((mod) => ({ mod, forced: true }))
+        : []),
     ];
 
     allExplicitMods.forEach(({ mod, forced }) => {
@@ -186,8 +197,9 @@
     return [...prefixes, ...suffixes, ...others];
   })();
 
-  $: veiledMods = (item.veiledMods ?? []) as Array<string | ItemMod>;
-
+  $: veiledMods = show.displayVeiledMods
+    ? ((item.veiledMods ?? []) as Array<string | ItemMod>)
+    : [];
   /* ------------------------------------------------------------------ */
   /* Pseudo mods: `statgroup.N` ones are Count / Sum lines at the bottom */
   /* ------------------------------------------------------------------ */
@@ -199,7 +211,9 @@
 
   $: allPseudoMods = (item.pseudoMods ?? []) as Array<string | ItemMod>;
   $: statGroupMods = allPseudoMods.filter(isStatGroupMod);
-  $: pseudoMods = allPseudoMods.filter((m) => !isStatGroupMod(m));
+  $: pseudoMods = show.displayPseudoMods
+    ? allPseudoMods.filter((m) => !isStatGroupMod(m))
+    : [];
   $: shownStatGroupMods = isTooltip ? [] : statGroupMods;
 
   /* ------------------------------------------------------------------ */

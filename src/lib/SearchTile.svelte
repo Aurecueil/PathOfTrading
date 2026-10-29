@@ -111,20 +111,41 @@
     jsonModalData = activePayload ?? fallbackPayload ?? {};
     jsonModalOpen = true;
   }
-  function toChaos(amount: number, currency?: string): number | null {
+  function toTargetCurrency(amount: number, currency?: string): number | null {
     if (!currency) return null;
-    if (currency === "chaos") return amount;
+    const target = tile.currency || "chaos";
+    if (currency === target) return amount;
     try {
       const v = convertCurrency(
         amount,
         currency,
-        "chaos",
+        target,
         currentLeague,
         isPoe2 ? "poe2" : "poe",
       );
       return Number.isFinite(v) && v !== -9 ? v : null;
     } catch {
       return null;
+    }
+  }
+  let lastSortCurrency = tile.currency;
+
+  $: if (tile.currency !== lastSortCurrency) {
+    lastSortCurrency = tile.currency;
+    recomputePriceSortValues();
+  }
+
+  function recomputePriceSortValues() {
+    const { field } = getSortConfig();
+    if (field !== "price") return;
+    for (const e of itemsMap.values()) {
+      if (e.data) e.sortValue = extractSortValue(e.data, field);
+    }
+    if (mode === "mixed") {
+      sortOrderedList();
+    } else {
+      orderedEntries = orderedEntries;
+      displayedItems = displayedItems;
     }
   }
   function openFullResponseModal() {
@@ -322,7 +343,7 @@
     if (field === "price") {
       const p = entry.listing?.price;
       if (!p || typeof p.amount !== "number") return null;
-      return toChaos(p.amount, p.currency) ?? p.amount;
+      return toTargetCurrency(p.amount, p.currency) ?? p.amount;
     }
 
     const it = entry.item;
@@ -417,7 +438,7 @@
       if ("amount" in v && "currency" in v) {
         const amt = Number(v.amount);
         if (!Number.isFinite(amt)) return undefined;
-        return toChaos(amt, v.currency) ?? amt;
+        return toTargetCurrency(amt, v.currency) ?? amt;
       }
       // mod objects etc.: the tile's own extractSortValue already computes
       // a proper number (summed duplicates, weight/count), so ignore these.
@@ -1474,6 +1495,8 @@
               {effectiveStyle}
               tileWidth={tile.w}
               tileHeight={tile.h}
+              displayCurrency={tile.currency || "chaos"}
+              displayOptions={tile.displayOptions ?? null}
               on:sortvalue={handleRowSortValue}
             />
           {/each}

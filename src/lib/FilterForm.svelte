@@ -41,6 +41,26 @@
   import type { StatGroup as StatGroupType } from "$lib/types/stats";
   import type { League } from "$lib/types/leagues";
 
+  import DisplayOptionsGroup from "$lib/trade/components/drawer/DisplayOptionsGroup.svelte";
+  import {
+    normalizeDisplayOptions,
+    normalizeCurrency,
+    normalizeSearchOnLoad,
+    DEFAULT_CURRENCY,
+    DEFAULT_SEARCH_ON_LOAD,
+  } from "$lib/trade/components/drawer/tileDisplay";
+  import type { TileDisplayOptions } from "$lib/types/types";
+
+  export let initialDisplayOptions: Partial<TileDisplayOptions> | null = null;
+  export let initialCurrency: string = DEFAULT_CURRENCY;
+  export let initialSearchOnLoad: boolean = DEFAULT_SEARCH_ON_LOAD;
+
+  let displayOptions: TileDisplayOptions = normalizeDisplayOptions(
+    initialDisplayOptions,
+  );
+  let currency: string = normalizeCurrency(initialCurrency);
+  let searchOnLoad: boolean = normalizeSearchOnLoad(initialSearchOnLoad);
+
   export let initialTitle: string = "";
   export let initialDisplayName: string = "";
   export let initialRealm: "poe" | "poe2" = "poe";
@@ -111,6 +131,9 @@
       payload: any;
       full_payload: any;
       close: boolean;
+      displayOptions: TileDisplayOptions;
+      currency: string;
+      searchOnLoad: boolean;
     };
     save_only: {
       title: string;
@@ -119,6 +142,9 @@
       league: string;
       payload: any;
       full_payload: any;
+      displayOptions: TileDisplayOptions;
+      currency: string;
+      searchOnLoad: boolean;
     };
   }>();
 
@@ -561,6 +587,10 @@
     isItemDropdownOpen = false;
     openTopDropdown = null;
 
+    displayOptions = normalizeDisplayOptions(null);
+    currency = DEFAULT_CURRENCY;
+    searchOnLoad = DEFAULT_SEARCH_ON_LOAD;
+
     const defaultOpt =
       statusOptions.find((o) => o.id === "securable") || statusOptions[0];
     statusOption = defaultOpt?.id ?? "";
@@ -691,6 +721,9 @@
       payload,
       full_payload,
       close: true,
+      displayOptions,
+      currency,
+      searchOnLoad,
     });
     dispatch("close");
   }
@@ -706,6 +739,9 @@
       payload,
       full_payload,
       close: false,
+      displayOptions,
+      currency,
+      searchOnLoad,
     });
   }
 
@@ -719,6 +755,9 @@
       league,
       payload,
       full_payload,
+      displayOptions,
+      currency,
+      searchOnLoad,
     });
   }
 
@@ -974,7 +1013,13 @@
             {/each}
           </div>
         </div>
-
+        <DisplayOptionsGroup
+          bind:displayOptions
+          bind:currency
+          bind:searchOnLoad
+          {realm}
+          staticCatalog={currentStaticCatalog}
+        />
         <StatGroupsSection
           bind:statGroups
           bind:isAddGroupMenuOpen

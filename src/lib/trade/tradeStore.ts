@@ -18,7 +18,11 @@ import {
   ensureCrossWindowSync,
   loadStatColorConfigsFromDisk,
 } from "./statColors";
-import { registerPricingStores } from "./pricing";
+import {
+  registerPricingStores,
+  preferDirectExchange,
+  tadedExchangeRatios,
+} from "./pricing";
 export * from "./pricing";
 export * from "./statColors";
 
@@ -59,6 +63,7 @@ export const currentLanguage = writable<string>("EN");
 export const authState = writable<boolean>(false);
 export const isDev = writable<boolean>(true);
 export const showTooltips = writable<boolean>(true);
+export { preferDirectExchange, tadedExchangeRatios };
 
 // Shared Cache Storage bucket with CDN images so "Clear Cache" wipes both
 const CACHE_NAME = "app-cdn-images-v1";
@@ -85,11 +90,6 @@ function getRepoeUrl(
 }
 
 function getPoe2KeywordsUrl(): string {
-  //(langCode: string): string {
-  // const folder = REPOE_LANG_MAP[langCode.toUpperCase()] ?? "";
-  // return folder
-  //   ? `https://repoe-fork.github.io/${folder}/poe2/keywords.min.json`
-  //   : `https://repoe-fork.github.io/poe2/keywords.min.json`;
   return `https://repoe-fork.github.io/poe2/keywords.min.json`;
 }
 
@@ -288,7 +288,12 @@ export async function initUserSettings(): Promise<void> {
 // ---------------------------------------------------------------------------
 const UI_SETTINGS_KEY = "pot.uiSettings";
 
-type UiSettings = { displayTiers?: boolean; displayRune?: boolean };
+type UiSettings = {
+  displayTiers?: boolean;
+  displayRune?: boolean;
+  canvasBgPath?: string;
+  canvasBgOpacity?: number;
+};
 
 function readUiSettings(): UiSettings {
   try {
@@ -310,7 +315,16 @@ export const displayTiers = writable<boolean>(
 export const displayRune = writable<boolean>(
   typeof initialUi.displayRune === "boolean" ? initialUi.displayRune : true,
 );
+export const canvasBgPath = writable<string>(
+  typeof initialUi.canvasBgPath === "string" ? initialUi.canvasBgPath : "",
+);
 
+// Static canvas background opacity (0.0 to 1.0)
+export const canvasBgOpacity = writable<number>(
+  typeof initialUi.canvasBgOpacity === "number"
+    ? initialUi.canvasBgOpacity
+    : 0.35,
+);
 function persistUiSettings() {
   try {
     localStorage.setItem(
@@ -327,6 +341,8 @@ function persistUiSettings() {
 
 displayTiers.subscribe(persistUiSettings);
 displayRune.subscribe(persistUiSettings);
+canvasBgPath.subscribe(persistUiSettings);
+canvasBgOpacity.subscribe(persistUiSettings);
 
 // Keep other app windows in sync (the "storage" event only fires in other windows)
 if (typeof window !== "undefined") {
@@ -337,5 +353,9 @@ if (typeof window !== "undefined") {
       displayTiers.set(next.displayTiers);
     if (typeof next.displayRune === "boolean")
       displayRune.set(next.displayRune);
+    if (typeof next.canvasBgPath === "string")
+      canvasBgPath.set(next.canvasBgPath);
+    if (typeof next.canvasBgOpacity === "number")
+      canvasBgOpacity.set(next.canvasBgOpacity);
   });
 }

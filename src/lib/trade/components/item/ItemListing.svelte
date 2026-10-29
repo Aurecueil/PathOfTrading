@@ -5,6 +5,7 @@
   import type { StaticEntry } from "$lib/types/statics";
   import { staticsPoe, staticsPoe2 } from "$lib/trade/tradeStore";
   import CdnImage from "./CdnImage.svelte";
+  import RelativeTime from "./RelativeTime.svelte";
 
   export let listing: ItemListing | undefined;
   export let sortValue: any = null;
@@ -20,7 +21,7 @@
   export let convertedCurrency: string = "chaos";
 
   function formatConverted(v: number): string {
-    const digits = v < 10 ? 2 : v < 100 ? 1 : 0;
+    const digits = v < 1 ? 3 : v < 10 ? 2 : v < 100 ? 1 : 0;
     return Number(v.toFixed(digits)).toLocaleString();
   }
   $: convertedEntry = findStatic(statics, convertedCurrency);
@@ -73,25 +74,6 @@
     return undefined;
   }
 
-  $: ageSec = listing?.indexed
-    ? Math.max(
-        0,
-        Math.floor((Date.now() - new Date(listing.indexed).getTime()) / 1000),
-      )
-    : null;
-  $: isFresh = ageSec !== null && ageSec < 300;
-
-  $: relativeAge = (() => {
-    if (ageSec === null) return "";
-    const diffSec = ageSec;
-    if (diffSec < 60) return `${diffSec}s ago`;
-    const diffMin = Math.floor(diffSec / 60);
-    if (diffMin < 60) return `${diffMin}m ago`;
-    const diffHr = Math.floor(diffMin / 60);
-    if (diffHr < 24) return `${diffHr}h ago`;
-    return `${Math.floor(diffHr / 24)}d ago`;
-  })();
-
   async function copyWhisper() {
     const textToCopy = listing?.whisper || listing?.whisper_token;
     if (!textToCopy) return;
@@ -124,11 +106,7 @@
         {/if}
       </div>
       {#if convertedPrice !== null}
-        <div
-          class="converted-headline"
-          title="Approximate value in {convertedEntry?.text ??
-            convertedCurrency}"
-        >
+        <div class="converted-headline">
           <span class="paren">(</span>
           <span class="amount">
             {formatConverted(convertedPrice)}<span class="times">×</span>
@@ -141,9 +119,6 @@
               loading="lazy"
             />
           {/if}
-          <span class="currency"
-            >{convertedEntry?.text ?? convertedCurrency}</span
-          >
           <span class="paren">)</span>
         </div>
       {/if}
@@ -154,9 +129,6 @@
         type="button"
         class="btn-icon-travel"
         disabled={isTraveling || isQueued}
-        title="{hasWhisperToken
-          ? 'Whisper Player'
-          : 'Travel to hideout'} ({account?.name ?? 'Seller'})"
         aria-label={hasWhisperToken ? "Whisper Player" : "Travel to hideout"}
         on:click|stopPropagation={onTravel}
       >
@@ -182,7 +154,6 @@
       <button
         type="button"
         class="btn-icon-travel"
-        title={whisperCopied ? "Copied" : "Copy Whisper"}
         aria-label="Copy Whisper"
         on:click|stopPropagation={copyWhisper}
       >
@@ -226,11 +197,7 @@
         </span>
       </div>
       {#if convertedPrice !== null}
-        <div
-          class="converted-headline"
-          title="Approximate value in {convertedEntry?.text ??
-            convertedCurrency}"
-        >
+        <div class="converted-headline">
           <span class="paren">(</span>
           <span class="amount">
             {formatConverted(convertedPrice)}<span class="times">×</span>
@@ -250,7 +217,7 @@
         </div>
       {/if}
       {#if listing?.fee && styleMode === "full"}
-        <div class="fee-text" title="Gold fee for travelling to this hideout">
+        <div class="fee-text">
           <span class="coin" aria-hidden="true"></span>
           {listing.fee.toLocaleString()} gold
         </div>
@@ -265,26 +232,13 @@
             class="status-dot"
             class:online={account?.online === true}
             class:offline={account?.online === false}
-            title={account?.online === true
-              ? "Online"
-              : account?.online === false
-                ? "Offline"
-                : "Status unknown"}
           ></span>
-          <span class="seller-name" title={account?.name}>
+          <span class="seller-name">
             {account?.name ?? "Anonymous"}
           </span>
         </div>
-        {#if relativeAge}
-          <div
-            class="age-badge"
-            class:fresh={isFresh}
-            title={listing?.indexed
-              ? new Date(listing.indexed).toLocaleString()
-              : ""}
-          >
-            Listed {relativeAge}
-          </div>
+        {#if listing?.indexed}
+          <RelativeTime time={listing.indexed} />
         {/if}
       </div>
     {/if}
@@ -334,7 +288,6 @@
                 type="button"
                 class="btn-whisper"
                 class:is-copied={whisperCopied}
-                title={whisperCopied ? "Whisper copied" : "Copy trade whisper"}
                 aria-label="Copy trade whisper"
                 on:click|stopPropagation={copyWhisper}
               >

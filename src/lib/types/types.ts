@@ -27,6 +27,9 @@ export interface SearchTile {
   results: string[];
   loading?: boolean;
   mode?: SearchMode;
+  displayOptions?: TileDisplayOptions;
+  currency: string;
+  searchOnLoad: boolean;
 }
 
 export interface SavedSearchTile {
@@ -40,6 +43,9 @@ export interface SavedSearchTile {
   disabled: boolean;
   full_payload: any;
   mode: SearchMode;
+  displayOptions?: TileDisplayOptions;
+  currency: string;
+  searchOnLoad: boolean;
 }
 
 export type ToolType =
@@ -109,4 +115,15 @@ export interface SortOptionItem {
   category: "group" | "filter" | "stat";
   label: string;
   tag?: string;
+}
+export interface TileDisplayOptions {
+  displayImplicitMods: boolean;
+  displayExplicitMods: boolean;
+  displayEnchantMods: boolean;
+  displayRuneMods: boolean;
+  displayScourgeMods: boolean; // poe1
+  displayBondedMods: boolean; // poe2
+  displayCrucibleMods: boolean; // poe1
+  displayVeiledMods: boolean;
+  displayPseudoMods: boolean;
 }
