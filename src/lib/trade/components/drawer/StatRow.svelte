@@ -12,6 +12,7 @@
   export let value: { min?: any; max?: any; option?: any; weight?: any } = {};
   export let disabled: boolean = false;
   export let isWeighted: boolean = false;
+  export let showToggle: boolean = true;
 
   const dispatch = createEventDispatcher<{
     change: { min?: any; max?: any; option?: any; weight?: any };
@@ -208,12 +209,9 @@
   bind:this={rowWrapperEl}
 >
   <!-- Most-left checkbox to enable / disable this stat -->
-  <Check
-    checked={!disabled}
-    title={disabled ? "Enable stat filter" : "Disable stat filter"}
-    onchange={() => dispatch("toggleDisabled")}
-  />
-
+  {#if showToggle}
+    <Check checked={!disabled} onchange={() => dispatch("toggleDisabled")} />
+  {/if}
   {#if isEditingStat}
     <div class="stat-edit-container">
       <input
@@ -262,11 +260,7 @@
   {:else}
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-static-element-interactions -->
-    <div
-      class="stat-info editable"
-      on:click={startEditingStat}
-      title="Click to edit stat ({stat.text})"
-    >
+    <div class="stat-info editable" on:click={startEditingStat}>
       <span
         class="stat-tag"
         style="border-color: {tagColor}; color: {tagColor};"
@@ -352,7 +346,6 @@
       type="button"
       class="remove-btn"
       on:click={() => dispatch("remove")}
-      title="Remove stat"
     >
       ✕
     </button>

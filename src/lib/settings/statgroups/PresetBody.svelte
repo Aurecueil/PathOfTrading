@@ -87,6 +87,7 @@
     currentStatCatalog={catalog}
     realm={uiRealm}
     showPresets={false}
+    showToggle={false}
     on:deleteGroup={(e) => {
       statGroups = statGroups.filter((g) => g.id !== e.detail);
     }}

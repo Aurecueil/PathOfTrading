@@ -24,6 +24,7 @@
 
   export let statCatalog: StatGroup[] = [];
   export let canDelete: boolean = true;
+  export let showToggle: boolean = true;
 
   const dispatch = createEventDispatcher<{
     changeType: string;
@@ -332,7 +333,6 @@
           type="button"
           class="delete-group-btn"
           on:click|stopPropagation={() => dispatch("deleteGroup")}
-          title="Delete group"
         >
           ✕
         </button>
@@ -354,6 +354,7 @@
           <StatRow
             stat={matchedStat}
             {allowedStats}
+            {showToggle}
             groupLabel={item.groupLabel ||
               (matchedStat as any).groupLabel ||
               matchedStat.type}

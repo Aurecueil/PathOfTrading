@@ -16,6 +16,7 @@
   export let isAddGroupMenuOpen: boolean = false;
   export let dropUp: boolean | "auto" = "auto";
   export let showPresets: boolean = true;
+  export let showToggle: boolean = true;
 
   const STAT_GROUP_OPTIONS = [
     { id: "and", label: "And" },
@@ -228,6 +229,7 @@
       {#if !(realm === "poe2" && isPoe1Only(group.type))}
         <StatGroupUI
           {group}
+          {showToggle}
           statCatalog={currentStatCatalog}
           canDelete={true}
           on:toggleCollapse={() => {
@@ -295,7 +297,6 @@
               {#each col.presets as preset (preset.id)}
                 <li
                   class="preset-item"
-                  title="Insert {preset.groups.length} stat group(s)"
                   on:click={() => {
                     injectPreset(preset);
                     isAddGroupMenuOpen = false;

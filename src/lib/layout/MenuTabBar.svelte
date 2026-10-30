@@ -575,7 +575,7 @@
             }}>GGG ToU</a
           > section 7i.
         </p>
-        <p class="small-text">You use the app at your own risk.</p>
+        <p class="small-text">You use the login feature at your own risk.</p>
         <p class="small-text">
           Login is only required to use "Live Search" and "Teleport to hideout".
         </p>

@@ -33,5 +33,14 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENBM0REQjQ4QzA0MEU1RjcKUldUMzVVREFTTnM5eW41aEc1Mm9kWDltMUFlTjNBNklBRGcxdDczS25Vb0xFQlJPUmJOaTJhNzUK",
+      "endpoints": [
+        "https://github.com/Aurecueil/PathOfTrading/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
