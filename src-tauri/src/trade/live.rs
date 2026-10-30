@@ -1,4 +1,5 @@
 // src-tauri/src/live.rs
+use super::tp::TpController;
 use crate::auth::env::load_secret;
 use futures_util::StreamExt;
 use http::header::{
@@ -10,7 +11,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
 use tokio_tungstenite::{
     connect_async, tungstenite::handshake::client::generate_key, tungstenite::protocol::Message,
@@ -24,6 +25,7 @@ pub struct LiveSessionState(pub Arc<Mutex<HashMap<String, CancellationToken>>>);
 pub struct LiveItemBatchEvent {
     pub tile_id: String,
     pub item_ids: Vec<String>,
+    pub count: u32,
 }
 #[derive(Clone, Serialize)]
 pub struct LiveErrorEvent {
@@ -89,8 +91,8 @@ pub async fn start_live_search(
         .body(())
         .map_err(|e| format!("Request build error: {e}"))?;
 
-    // 3. Connect socket in background task
-    // 3. Connect socket in background task
+    let tp: Arc<TpController> = app.state::<Arc<TpController>>().inner().clone();
+    tp.clear_live(&tile_id).await;
     tokio::spawn(async move {
         let ws_stream = match connect_async(request).await {
             Ok(res) => res.0,
@@ -115,75 +117,77 @@ pub async fn start_live_search(
 
         loop {
             tokio::select! {
-                _ = cancel_token.cancelled() => {
-                    break;
-                }
-                msg_opt = read.next() => {
-                    let msg = match msg_opt {
-                        Some(Ok(Message::Text(t))) => t,
-                        Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => continue,
-                        Some(Ok(Message::Close(frame))) => {
-                            let reason = frame
-                                .map(|f| f.reason.to_string())
-                                .unwrap_or_else(|| "Server closed connection".to_string());
-                            exit_reason = Some(format!("WebSocket closed: {reason}"));
-                            break;
-                        }
-                        None => {
-                            exit_reason = Some("Connection stream ended unexpectedly".to_string());
-                            break;
-                        }
-                        Some(Err(e)) => {
-                            exit_reason = Some(format!("Stream error: {e}"));
-                            break;
-                        }
-                        _ => continue,
-                    };
-
-                    if let Ok(val) = serde_json::from_str::<Value>(&msg) {
-                        // Handshake confirmation
-                        if val.get("auth").and_then(|a| a.as_bool()).unwrap_or(false) {
-                            if let Err(e) = app.emit(&format!("live-status-{tile_id}"), true) {
-                                eprintln!("[Live WS {tile_id}] Frontend closed (status emit failed: {e}). Aborting socket.");
+                            _ = cancel_token.cancelled() => {
                                 break;
                             }
-                            continue;
-                        }
-
-                        // Single token result: {"result": "...", "count": 1}
-                        if let Some(single_id) = val.get("result").and_then(|r| r.as_str()) {
-                            let event = LiveItemBatchEvent {
-                                tile_id: tile_id.clone(),
-                                item_ids: vec![single_id.to_string()],
-                            };
-
-                            if let Err(e) = app.emit(&format!("live-items-{tile_id}"), event) {
-                                eprintln!("[Live WS {tile_id}] Frontend closed (items emit failed: {e}). Aborting socket.");
-                                break;
-                            }
-                        }
-                        // Array result fallback: {"new": ["...", "..."]}
-                        else if let Some(items) = val.get("new").and_then(|v| v.as_array()) {
-                            let ids: Vec<String> = items
-                                .iter()
-                                .filter_map(|x| x.as_str().map(|s| s.to_string()))
-                                .collect();
-
-                            if !ids.is_empty() {
-                                let event = LiveItemBatchEvent {
-                                    tile_id: tile_id.clone(),
-                                    item_ids: ids,
+                            msg_opt = read.next() => {
+                                let msg = match msg_opt {
+                                    Some(Ok(Message::Text(t))) => t,
+                                    Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => continue,
+                                    Some(Ok(Message::Close(frame))) => {
+                                        let reason = frame
+                                            .map(|f| f.reason.to_string())
+                                            .unwrap_or_else(|| "Server closed connection".to_string());
+                                        exit_reason = Some(format!("WebSocket closed: {reason}"));
+                                        break;
+                                    }
+                                    None => {
+                                        exit_reason = Some("Connection stream ended unexpectedly".to_string());
+                                        break;
+                                    }
+                                    Some(Err(e)) => {
+                                        exit_reason = Some(format!("Stream error: {e}"));
+                                        break;
+                                    }
+                                    _ => continue,
                                 };
 
-                                if let Err(e) = app.emit(&format!("live-items-{tile_id}"), event) {
-                                    eprintln!("[Live WS {tile_id}] Frontend closed (batch emit failed: {e}). Aborting socket.");
-                                    break;
+                                if let Ok(val) = serde_json::from_str::<Value>(&msg) {
+                                    // Handshake confirmation
+                                    if val.get("auth").and_then(|a| a.as_bool()).unwrap_or(false) {
+                                        if let Err(e) = app.emit(&format!("live-status-{tile_id}"), true) {
+                                            eprintln!("[Live WS {tile_id}] Frontend closed (status emit failed: {e}). Aborting socket.");
+                                            break;
+                                        }
+                                        continue;
+                                    }
+
+                                    // Single token result: {"result": "...", "count": 1}
+                                    if let Some(single_id) = val.get("result").and_then(|r| r.as_str()) {
+                                        let count = val.get("count").and_then(|c| c.as_u64()).unwrap_or(1).max(1) as u32;
+                tp.on_live_code(&tile_id, single_id).await;
+                let event = LiveItemBatchEvent {
+                    tile_id: tile_id.clone(),
+                    item_ids: vec![single_id.to_string()],
+                    count,
+                };
+
+                                        if let Err(e) = app.emit(&format!("live-items-{tile_id}"), event) {
+                                            eprintln!("[Live WS {tile_id}] Frontend closed (items emit failed: {e}). Aborting socket.");
+                                            break;
+                                        }
+                                    }
+                                    // Array result fallback: {"new": ["...", "..."]}
+                                    else if let Some(items) = val.get("new").and_then(|v| v.as_array()) {
+                                        let ids: Vec<String> = items
+                                            .iter()
+                                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                                            .collect();
+
+                                        if !ids.is_empty() {
+                                            for id in &ids { tp.on_live_code(&tile_id, id).await; }
+            let event = LiveItemBatchEvent { tile_id: tile_id.clone(), item_ids: ids, count: 1 };
+
+
+                                            if let Err(e) = app.emit(&format!("live-items-{tile_id}"), event) {
+                                                eprintln!("[Live WS {tile_id}] Frontend closed (batch emit failed: {e}). Aborting socket.");
+                                                break;
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
-                    }
-                }
-            }
         }
 
         // Notify frontend that the live session has stopped

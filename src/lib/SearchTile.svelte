@@ -1,6 +1,6 @@
 <!-- src/lib/SearchTile.svelte -->
 <script lang="ts">
-  import { createEventDispatcher, onDestroy, tick } from "svelte";
+  import { createEventDispatcher, onDestroy, onMount, tick } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { buildRegularPayload } from "$lib/trade/utilis/tradePayload";
@@ -27,6 +27,7 @@
   export let disabled: boolean = false;
   export let z: number = 0;
   export let filtersOpen: boolean = false;
+  export let tpActive: boolean = false;
 
   const dispatch = createEventDispatcher<{
     openfilters: void;
@@ -38,6 +39,7 @@
     resize: void;
     change: void;
     contextmenu: { clientX: number; clientY: number };
+    tptoggle: void;
   }>();
 
   type ResizeDirection = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
@@ -96,7 +98,120 @@
   let jsonModalTitle: string = "";
   let jsonModalData: any = null;
   let searchErrorMsg: string | null = null;
+  /* ---------- Global teleport hotkey (Rust does the work) ---------- */
+  $: tpTarget =
+    tpActive && $authState && !disabled && tile.searchId
+      ? {
+          tile_id: String(tile.id),
+          realm: tile.realm || "poe",
+          league: currentLeague,
+          search_id: tile.searchId,
+          mode,
+        }
+      : null;
 
+  let lastTpTargetKey = "";
+  let lastTpItemsKey = "";
+  let tpItemsTimer: ReturnType<typeof setTimeout> | undefined;
+
+  $: if (!tpActive) {
+    lastTpTargetKey = "";
+    lastTpItemsKey = "";
+  }
+  $: if (tpTarget) pushTpTarget(tpTarget);
+  $: if (tpTarget && tpTarget.mode !== "live") {
+    // Immediate push on target change, or schedule if entries change
+    pushTpItems();
+  }
+
+  async function pushTpTarget(t: NonNullable<typeof tpTarget>) {
+    const key = JSON.stringify(t);
+    if (key === lastTpTargetKey) return;
+    lastTpTargetKey = key;
+    try {
+      await invoke("tp_set_active", { active: t });
+    } catch (err) {
+      console.error(`[SearchTile ${tile.id}] tp_set_active failed:`, err);
+    }
+  }
+
+  async function pushTpItems(force = false) {
+    if (isDestroyed || !tpActive || !tile.searchId || mode === "live") return;
+    const ids = orderedEntries
+      .filter((e) => !(e.isLive && e.data === null))
+      .map((e) => e.id);
+
+    if (ids.length === 0) return;
+
+    const key = `${tile.searchId}|${ids.join(",")}`;
+    if (!force && key === lastTpItemsKey) return;
+    lastTpItemsKey = key;
+
+    try {
+      await invoke("tp_set_items", {
+        tileId: String(tile.id),
+        searchId: tile.searchId,
+        ids,
+      });
+    } catch (err) {
+      console.error(`[SearchTile ${tile.id}] tp_set_items failed:`, err);
+    }
+  }
+
+  async function clearTpSeen() {
+    try {
+      await invoke("tp_clear_seen");
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  // Rust reached an item that isn't fetched yet: expand the list and fetch it
+  async function revealIndex(index: number, id: string) {
+    if (isDestroyed || !tile.searchId) return;
+    const idx =
+      orderedEntries[index]?.id === id
+        ? index
+        : orderedEntries.findIndex((e) => e.id === id);
+    if (idx < 0) return;
+
+    if (visibleCount <= idx) {
+      visibleCount = idx + 1;
+      displayedItems = orderedEntries.slice(0, visibleCount);
+      await tick();
+    }
+
+    // target first, so it is part of the first chunk the batcher resolves
+    const batch: string[] = [];
+    for (
+      let i = idx;
+      i < orderedEntries.length && batch.length < BATCH_SIZE;
+      i++
+    ) {
+      const e = orderedEntries[i];
+      if (!e.isLive && e.data === null && !inFlightIds.has(e.id))
+        batch.push(e.id);
+    }
+    if (batch.length > 0) {
+      await fetchRegularBatch(batch, tile.searchId, lastCacheOk);
+    }
+    bodyElement
+      ?.querySelectorAll<HTMLElement>(".item-list > .item-row")
+      [idx]?.scrollIntoView({ block: "nearest" });
+  }
+
+  onMount(() => {
+    let cancelled = false;
+    let off: UnlistenFn | null = null;
+    listen<{ tile_id: string; index: number; id: string }>("tp-reveal", (e) => {
+      if (e.payload.tile_id !== String(tile.id)) return;
+      void revealIndex(e.payload.index, e.payload.id);
+    }).then((u) => (cancelled ? u() : (off = u)));
+    return () => {
+      cancelled = true;
+      off?.();
+    };
+  });
   // Supports both a Svelte readable/writable store and a plain boolean export
   $: devEnabled =
     typeof isDev === "object" && isDev !== null && "subscribe" in isDev
@@ -674,7 +789,7 @@
         bodyElement.scrollTop = 0;
       }
 
-      if (!$authState || mode === "regular") {
+      if (!$authState || mode === "regular" || mode === "mixed") {
         for (const id of tile.results) {
           const entry: DisplayEntry = {
             uid: `reg_${id}_${uidCounter++}`,
@@ -1301,6 +1416,21 @@
 >
   <div class="tile-bar" on:pointerdown={onHeaderPointerDown}>
     <div class="bar-left">
+      {#if $authState}
+        <button
+          type="button"
+          class="tp-btn"
+          class:active={tpActive}
+          title={tpActive
+            ? "Hotkey teleport target (click to unset, right-click to reset visited items)"
+            : "Use this tile for the teleport hotkey"}
+          on:pointerdown|stopPropagation
+          on:click|stopPropagation={() => dispatch("tptoggle")}
+          on:contextmenu|preventDefault|stopPropagation={clearTpSeen}
+        >
+          TP
+        </button>
+      {/if}
       {#if mode === "live" || mode === "mixed"}
         <span
           class="live-dot"
@@ -1561,6 +1691,33 @@
 {/if}
 
 <style>
+  .tp-btn {
+    font-family: "Fontin", monospace, sans-serif !important;
+    font-size: 18px;
+    height: 28px;
+    padding: 0 8px;
+    border: 2px solid #7f7f7f;
+    border-radius: 0 !important;
+    background: #000000;
+    color: #9a9a9a;
+    cursor: pointer;
+    flex-shrink: 0;
+    line-height: 1;
+  }
+  .tp-btn:hover {
+    border-color: #ffffff;
+    color: #ffffff;
+  }
+  .tp-btn.active {
+    border-color: #d4a017;
+    color: #d4a017;
+  }
+  .tile-root.tp-active {
+    border-color: #d4a017;
+    box-shadow:
+      0 0 0 1px #d4a017,
+      0 8px 24px rgba(0, 0, 0, 0.85);
+  }
   .tile-root {
     position: absolute;
     top: 0;

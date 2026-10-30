@@ -10,6 +10,7 @@ pub mod search;
 pub mod settings;
 pub mod statics;
 pub mod stats;
+pub mod tp;
 pub mod whisper;
 
 use reqwest::header::HeaderMap;
@@ -181,6 +182,7 @@ pub struct ApiRateLimiter {
     cf_paused: Arc<AtomicBool>,
     cf_notify: Arc<Notify>,
     cf_last_done: Arc<Mutex<Option<Instant>>>,
+    tp_index: Arc<tp::TpIndex>,
 }
 
 impl ApiRateLimiter {
@@ -206,9 +208,12 @@ impl ApiRateLimiter {
             cf_paused: Arc::new(AtomicBool::new(false)),
             cf_notify: Arc::new(Notify::new()),
             cf_last_done: Arc::new(Mutex::new(None)),
+            tp_index: Arc::new(tp::TpIndex::default()),
         }
     }
-
+    pub fn tp_index(&self) -> Arc<tp::TpIndex> {
+        self.tp_index.clone()
+    }
     pub async fn wait_if_cf_paused(&self) {
         loop {
             let notified = self.cf_notify.notified();
@@ -578,6 +583,7 @@ impl ApiRateLimiter {
                 }
             }
             if all_found && !cached_results.is_empty() {
+                self.tp_index.ingest_items(cached_results.iter());
                 return Ok(serde_json::json!({ "result": cached_results }));
             }
         }
@@ -737,6 +743,7 @@ impl ApiRateLimiter {
                         }
 
                         if let Some(json) = parsed_json {
+                            self.tp_index.ingest_code(&token_id, &json);
                             let _ = pending.tx.send(Ok(json));
                         } else {
                             let _ = pending.tx.send(Err("Invalid JSON payload".to_string()));
@@ -989,6 +996,7 @@ impl ApiRateLimiter {
                     if let Some(json) = parsed_json {
                         let mut returned_items_by_id: HashMap<String, Value> = HashMap::new();
                         if let Some(items) = json.get("result").and_then(|r| r.as_array()) {
+                            self.tp_index.ingest_items(items.iter());
                             for (idx, item) in items.iter().enumerate() {
                                 if let Some(req_id) = selected_ids.get(idx) {
                                     if !item.is_null() {

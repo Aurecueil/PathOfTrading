@@ -8,6 +8,7 @@
     leaguesPoe,
     initUserSettings,
     loadStatColorConfigsFromDisk,
+    updateTpHotkey,
   } from "$lib/trade/tradeStore";
   import {
     workspaceState,
@@ -55,6 +56,7 @@
     try {
       initItemData();
       initUserSettings();
+      updateTpHotkey("CommandOrControl+Shift+T");
       loadStatColorConfigsFromDisk();
     } catch (error) {
       // Dev mode fallback

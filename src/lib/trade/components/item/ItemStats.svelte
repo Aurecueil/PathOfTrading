@@ -11,7 +11,7 @@
   import VeiledMods from "./stats/VeiledMods.svelte";
   import StatGroupSummary from "./stats/StatGroupSummary.svelte";
   import KeywordText from "./stats/KeywordText.svelte";
-  import CdnImage from "../item/CdnImage.svelte";
+  import MercenarySkills from "../item/MercenarySkills.svelte";
   import {
     CDN_BASE,
     cleanBracketText,
@@ -54,8 +54,19 @@
   /* Minimal                                                            */
   /* ------------------------------------------------------------------ */
   $: minimalName = cleanBracketText(item.name || "").trim();
+
+  $: isMercenaryWarrant =
+    item?.baseType === "Mercenary Warrant" ||
+    item?.typeLine === "Mercenary Warrant";
+
+  $: mercenaryName = isMercenaryWarrant
+    ? (item?.properties?.[0]?.values?.[0]?.[0] ?? "")
+    : "";
+
   $: minimalBase = (() => {
-    const b = cleanBracketText(item.typeLine || item.baseType || "").trim();
+    const b = cleanBracketText(
+      mercenaryName || item.typeLine || item.baseType || "",
+    ).trim();
     return b && b !== minimalName ? b : "";
   })();
 
@@ -76,12 +87,14 @@
     return { desc, stats };
   })();
 
-  $: extractedSkills = extractSkills(item);
+  // Granted / socketed skills follow the implicit-mods option
+  $: extractedSkills = show.displayImplicitMods ? extractSkills(item) : [];
 
   /* ------------------------------------------------------------------ */
   /* Modifiers & Bonded Handling                                        */
   /* ------------------------------------------------------------------ */
-  $: showRunes = isTooltip || $displayRune;
+  // Runes need BOTH the tile option and the global toggle (tooltips always show them)
+  $: showRunes = isTooltip || ($displayRune && show.displayRuneMods);
   $: shownRuneRegular = showRunes ? separatedMods.runeRegular : [];
   $: shownRuneBonded = showRunes ? separatedMods.runeBonded : [];
 
@@ -217,6 +230,21 @@
   $: shownStatGroupMods = isTooltip ? [] : statGroupMods;
 
   /* ------------------------------------------------------------------ */
+  /* Section visibility flags (a divider is only drawn for real content) */
+  /* ------------------------------------------------------------------ */
+  $: hasEnchantRuneBlock =
+    enchantMods.length > 0 ||
+    shownRuneRegular.length > 0 ||
+    shownRuneBonded.length > 0;
+  $: hasExplicitBlock =
+    classifiedExplicits.length > 0 ||
+    veiledMods.length > 0 ||
+    pseudoMods.length > 0;
+  $: hasTooltipText =
+    isTooltip && (tooltipTexts.desc || tooltipTexts.stats.length > 0);
+  $: showMercSkills = !isTooltip && (item.mercenarySkills?.length ?? 0) > 0;
+
+  /* ------------------------------------------------------------------ */
   /* Bottom State Tags (Split, Mirrored, Unidentified, Corrupted, etc.) */
   /* ------------------------------------------------------------------ */
   type BottomState =
@@ -274,7 +302,7 @@
   })();
 
   /* ------------------------------------------------------------------ */
-  /* Portaled Tooltip for Granted Skills & Compact Socketed Items       */
+  /* Portaled Tooltip for Granted Skills, Merc Skills & Socketed Items  */
   /* ------------------------------------------------------------------ */
   const TIP_W = 450;
   let hoveredItem: { item: Item; left: number; top: number } | null = null;
@@ -334,187 +362,232 @@
       </div>
     {/if}
 
-    <!-- Top Properties Block (props, requirements, quality, sockets) -->
-    <ItemProperties
-      {item}
-      {effectiveMode}
-      on:itemhover={(e) => openItemTooltip(e.detail.item, e.detail.rect)}
-      on:itemleave={closeItemTooltip}
-    />
-
-    <!-- Rune, Enchant & Bonded Rune Mods (Together) -->
-    {#if shownRuneRegular.length > 0 || enchantMods.length > 0 || shownRuneBonded.length > 0}
-      <div class="separator-line"></div>
-      <div class="stat-group">
-        {#each enchantMods as mod}
-          <ItemModifier {mod} {realm} category="enchant" compact={isCompact} />
-        {/each}
-        <div class="separator-line"></div>
-        {#each shownRuneRegular as mod}
-          <ItemModifier {mod} {realm} category="rune" compact={isCompact} />
-        {/each}
-        {#if shownRuneBonded.length > 0}
-          {#if !isTooltip}
-            <button
-              type="button"
-              class="btn-bonded-inline"
-              on:click|stopPropagation={() =>
-                (showBondedMods = !showBondedMods)}
-            >
-              {showBondedMods
-                ? "▾ Hide Bonded"
-                : `▸ +${shownRuneBonded.length} Bonded`}
-            </button>
-          {/if}
-          {#if isTooltip || showBondedMods}
-            {#each shownRuneBonded as bMod}
-              <ItemModifier
-                mod={bMod}
-                {realm}
-                category="bonded"
-                compact={isCompact}
-              />
-            {/each}
-          {/if}
-        {/if}
-      </div>
-    {/if}
-
-    <!-- Granted / Socketed Skills (Right Above Implicit Modifiers) -->
-    {#if extractedSkills.length > 0}
-      <div class="separator-line"></div>
-      <GrantedSkills
-        skills={extractedSkills}
+    <!-- Properties (hidden by CSS when it renders nothing) -->
+    <div class="props-block">
+      <ItemProperties
+        {item}
+        {effectiveMode}
         on:itemhover={(e) => openItemTooltip(e.detail.item, e.detail.rect)}
         on:itemleave={closeItemTooltip}
       />
+    </div>
+
+    <!-- Enchant + Rune + Bonded -->
+    {#if hasEnchantRuneBlock}
+      <div class="section">
+        <div class="stat-group">
+          {#each enchantMods as mod}
+            <ItemModifier
+              {mod}
+              {realm}
+              category="enchant"
+              compact={isCompact}
+            />
+          {/each}
+          {#if enchantMods.length > 0 && (shownRuneRegular.length > 0 || shownRuneBonded.length > 0)}
+            <div class="separator-line"></div>
+          {/if}
+          {#each shownRuneRegular as mod}
+            <ItemModifier {mod} {realm} category="rune" compact={isCompact} />
+          {/each}
+          {#if shownRuneBonded.length > 0}
+            {#if !isTooltip}
+              <button
+                type="button"
+                class="btn-bonded-inline"
+                on:click|stopPropagation={() =>
+                  (showBondedMods = !showBondedMods)}
+              >
+                {showBondedMods
+                  ? "▾ Hide Bonded"
+                  : `▸ +${shownRuneBonded.length} Bonded`}
+              </button>
+            {/if}
+            {#if isTooltip || showBondedMods}
+              {#each shownRuneBonded as bMod}
+                <ItemModifier
+                  mod={bMod}
+                  {realm}
+                  category="bonded"
+                  compact={isCompact}
+                />
+              {/each}
+            {/if}
+          {/if}
+        </div>
+      </div>
+    {/if}
+
+    <!-- Granted / socketed skills (follow displayImplicitMods) -->
+    {#if extractedSkills.length > 0}
+      <div class="section">
+        <GrantedSkills
+          skills={extractedSkills}
+          on:itemhover={(e) => openItemTooltip(e.detail.item, e.detail.rect)}
+          on:itemleave={closeItemTooltip}
+        />
+      </div>
     {/if}
 
     <!-- Scourge Mods (above implicit mods) -->
     {#if scourgeMods.length > 0}
-      <div class="separator-line"></div>
-      <div class="stat-group">
-        {#each scourgeMods as mod}
-          <ItemModifier {mod} {realm} category="scourge" compact={isCompact} />
-        {/each}
+      <div class="section">
+        <div class="stat-group">
+          {#each scourgeMods as mod}
+            <ItemModifier
+              {mod}
+              {realm}
+              category="scourge"
+              compact={isCompact}
+            />
+          {/each}
+        </div>
       </div>
     {/if}
 
     <!-- Implicit Mods -->
     {#if separatedMods.implicitRegular.length > 0}
-      <div class="separator-line"></div>
-      <div class="stat-group">
-        {#each separatedMods.implicitRegular as mod}
-          <ItemModifier {mod} {realm} category="implicit" compact={isCompact} />
-        {/each}
+      <div class="section">
+        <div class="stat-group">
+          {#each separatedMods.implicitRegular as mod}
+            <ItemModifier
+              {mod}
+              {realm}
+              category="implicit"
+              compact={isCompact}
+            />
+          {/each}
+        </div>
       </div>
     {/if}
 
     <!-- Secondary Description Text (above explicit stats, #1BA274) -->
     {#if secDescrTextRaw}
-      <div class="separator-line"></div>
-      <div class="stat-group sec-descr-group">
-        <div class="sec-descr-text">
-          <KeywordText text={secDescrTextRaw} />
+      <div class="section">
+        <div class="stat-group sec-descr-group">
+          <div class="sec-descr-text">
+            <KeywordText text={secDescrTextRaw} />
+          </div>
         </div>
       </div>
     {/if}
 
-    {#if isTooltip && (tooltipTexts.desc || tooltipTexts.stats.length > 0)}
-      <div class="separator-line"></div>
-      <div class="stat-group tooltip-text-group">
-        {#each tooltipTexts.stats as line}
-          <div class="tooltip-text-line stat">
-            <KeywordText text={line} />
-          </div>
-        {/each}
-        {#if tooltipTexts.desc}
-          <div class="tooltip-text-line desc">
-            <KeywordText text={tooltipTexts.desc} />
-          </div>
-        {/if}
+    {#if hasTooltipText}
+      <div class="section">
+        <div class="stat-group tooltip-text-group">
+          {#each tooltipTexts.stats as line}
+            <div class="tooltip-text-line stat">
+              <KeywordText text={line} />
+            </div>
+          {/each}
+          {#if tooltipTexts.desc}
+            <div class="tooltip-text-line desc">
+              <KeywordText text={tooltipTexts.desc} />
+            </div>
+          {/if}
+        </div>
       </div>
     {/if}
 
     <!-- Explicit Mods + Veiled / Unrevealed Mods + Pseudo Mods -->
-    {#if classifiedExplicits.length > 0 || veiledMods.length > 0 || pseudoMods.length > 0}
-      <div class="separator-line"></div>
-      <div class="stat-group">
-        {#each classifiedExplicits as entry}
-          <ItemModifier
-            mod={entry.mod}
-            {realm}
-            category={entry.cat}
-            compact={isCompact}
-          />
-        {/each}
+    {#if hasExplicitBlock}
+      <div class="section">
+        <div class="stat-group">
+          {#each classifiedExplicits as entry}
+            <ItemModifier
+              mod={entry.mod}
+              {realm}
+              category={entry.cat}
+              compact={isCompact}
+            />
+          {/each}
 
-        <VeiledMods mods={veiledMods} {isPoe2} compact={isCompact} />
+          <VeiledMods mods={veiledMods} {isPoe2} compact={isCompact} />
 
-        {#each pseudoMods as pMod}
-          <ItemModifier
-            mod={pMod}
-            {realm}
-            category="pseudo"
-            compact={isCompact}
-          />
-        {/each}
+          {#each pseudoMods as pMod}
+            <ItemModifier
+              mod={pMod}
+              {realm}
+              category="pseudo"
+              compact={isCompact}
+            />
+          {/each}
+        </div>
       </div>
     {/if}
 
     <!-- Crucible Mods (Under Explicit Mods) -->
     {#if crucibleMods.length > 0}
-      <div class="separator-line"></div>
-      <div class="stat-group">
-        {#each crucibleMods as mod}
-          <ItemModifier {mod} {realm} category="crucible" compact={isCompact} />
-        {/each}
+      <div class="section">
+        <div class="stat-group">
+          {#each crucibleMods as mod}
+            <ItemModifier
+              {mod}
+              {realm}
+              category="crucible"
+              compact={isCompact}
+            />
+          {/each}
+        </div>
       </div>
     {/if}
 
     <!-- Notable Properties -->
     {#if item.notableProperties && item.notableProperties.length > 0}
-      <div class="separator-line"></div>
-      <div class="stat-group notable-group">
-        {#each item.notableProperties as notable}
-          <div class="notable-block">
-            <div class="notable-title">
-              <KeywordText text={notable.name} />
-            </div>
-            {#each notable.values || [] as [line]}
-              <div class="notable-line">
-                <KeywordText text={line} />
+      <div class="section">
+        <div class="stat-group notable-group">
+          {#each item.notableProperties as notable}
+            <div class="notable-block">
+              <div class="notable-title">
+                <KeywordText text={notable.name} />
               </div>
-            {/each}
-          </div>
-        {/each}
+              {#each notable.values || [] as [line]}
+                <div class="notable-line">
+                  <KeywordText text={line} />
+                </div>
+              {/each}
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
+    <!-- Mercenary skills -->
+    {#if showMercSkills}
+      <div class="section">
+        <MercenarySkills
+          skills={item.mercenarySkills ?? []}
+          {item}
+          on:itemhover={(e) => openItemTooltip(e.detail.item, e.detail.rect)}
+          on:itemleave={closeItemTooltip}
+        />
       </div>
     {/if}
 
     <!-- Bottom State Tags (Split, Mirrored, Corrupted, Unidentified, Scourge, etc.) -->
     {#if bottomStates.length > 0}
-      <div class="separator-line"></div>
-      <div class="stat-group bottom-state-group">
-        {#each bottomStates as state}
-          {#if state.kind === "foreseeing"}
-            <div
-              class="item-popup__desc-text--foreseeing"
-              style="--foresight-url: url('{FORESIGHT_ICON}')"
-              title="Foreseeing"
-            ></div>
-          {:else}
-            <div class="state-stat-line {state.cls}">
-              {state.label}
-            </div>
-          {/if}
-        {/each}
+      <div class="section">
+        <div class="stat-group bottom-state-group">
+          {#each bottomStates as state}
+            {#if state.kind === "foreseeing"}
+              <div
+                class="item-popup__desc-text--foreseeing"
+                style="--foresight-url: url('{FORESIGHT_ICON}')"
+                title="Foreseeing"
+              ></div>
+            {:else}
+              <div class="state-stat-line {state.cls}">{state.label}</div>
+            {/if}
+          {/each}
+        </div>
       </div>
     {/if}
 
     <!-- Stat group lines (statgroup.N pseudo mods: Count, Sum, Sum2, ...) -->
     {#if shownStatGroupMods.length > 0}
-      <div class="separator-line"></div>
-      <StatGroupSummary mods={shownStatGroupMods} compact={isCompact} />
+      <div class="section">
+        <StatGroupSummary mods={shownStatGroupMods} compact={isCompact} />
+      </div>
     {/if}
   </div>
 {/if}
@@ -522,6 +595,7 @@
 {#if hoveredItem}
   <div
     class="stats-skill-tooltip"
+    class:r-gem={hoveredItem.item.frameTypeId === "Gem"}
     use:portal
     style:left="{hoveredItem.left}px"
     style:top="{hoveredItem.top}px"
@@ -627,6 +701,55 @@
     width: 100%;
   }
 
+  /* Dividers: a section draws its own divider ABOVE itself. Sections only
+     exist when they have content, so dividers can never double up or dangle. */
+  .section {
+    display: flex;
+    flex-direction: column;
+    gap: inherit;
+    width: 100%;
+  }
+  .section::before {
+    content: "";
+    flex-shrink: 0;
+    height: 1px;
+    margin: 0.05rem 0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      #283042 20%,
+      #283042 80%,
+      transparent
+    );
+  }
+
+  .props-block {
+    display: flex;
+    flex-direction: column;
+    gap: inherit;
+    width: 100%;
+  }
+  /* No properties -> collapse it, and the first section needs no divider */
+  .props-block:not(:has(*)) {
+    display: none;
+  }
+  .props-block:not(:has(*)) + .section::before {
+    display: none;
+  }
+
+  /* Only used between enchant and rune lines inside one group */
+  .separator-line {
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      #283042 20%,
+      #283042 80%,
+      transparent
+    );
+    margin: 0.05rem 0;
+  }
+
   /* Secondary Description Text (Skills / Gems) */
   .sec-descr-group {
     align-items: center;
@@ -717,19 +840,6 @@
     font-size: 0.94rem;
   }
 
-  /* Separator */
-  .separator-line {
-    height: 1px;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      #283042 20%,
-      #283042 80%,
-      transparent
-    );
-    margin: 0.05rem 0;
-  }
-
   /* Bottom Exclusive State & Split */
   .bottom-state-group {
     align-items: center;
@@ -783,5 +893,10 @@
       0 0 0 1px #000;
     pointer-events: none;
     scrollbar-width: thin;
+  }
+  /* Portaled to <body>, so it loses the row's --rc tokens */
+  .stats-skill-tooltip.r-gem {
+    --rc: #1ba29b;
+    --rc-rgb: 27, 162, 155;
   }
 </style>

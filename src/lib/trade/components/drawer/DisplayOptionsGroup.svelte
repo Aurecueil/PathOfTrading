@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createEventDispatcher } from "svelte";
   import type { TileDisplayOptions } from "$lib/types/types";
   import {
     MOD_DISPLAY_FIELDS,
@@ -15,6 +16,8 @@
   export let realm: "poe" | "poe2" = "poe";
   export let staticCatalog: any[] = [];
 
+  const dispatch = createEventDispatcher<{ change: void }>();
+
   let collapsed = false;
   let isCurrencyOpen = false;
   let highlightedIndex = -1;
@@ -23,13 +26,12 @@
     (f) => f.realm === "both" || f.realm === realm,
   );
 
-  // Realm switch (or an invalid saved value): keep the currency if the new
-  // realm supports it (vaal, divine, ...), otherwise fall back to chaos.
+  // Realm switch: fall back to default currency if invalid
   $: if (!isCurrencyValidForRealm(currency, realm)) {
     currency = DEFAULT_CURRENCY;
+    dispatch("change");
   }
 
-  // Labels come from the static catalog when it has the id, else a prettified id.
   $: catalogLabels = (() => {
     const map = new Map<string, string>();
     for (const g of staticCatalog) {
@@ -51,6 +53,12 @@
 
   function setMod(flag: keyof TileDisplayOptions, v: boolean) {
     displayOptions = { ...displayOptions, [flag]: v };
+    dispatch("change");
+  }
+
+  function handleSearchOnLoadChange(e: Event) {
+    searchOnLoad = (e.currentTarget as HTMLInputElement).checked;
+    dispatch("change");
   }
 
   function openCurrency() {
@@ -62,7 +70,10 @@
   }
 
   function selectCurrency(id: string) {
-    currency = id;
+    if (currency !== id) {
+      currency = id;
+      dispatch("change");
+    }
     isCurrencyOpen = false;
     highlightedIndex = -1;
   }
@@ -125,7 +136,11 @@
           class:checked={searchOnLoad}
           title="Run this search automatically when the project loads. When off, the tile stays empty (and live tiles don't connect) until you press Search."
         >
-          <input type="checkbox" bind:checked={searchOnLoad} />
+          <input
+            type="checkbox"
+            bind:checked={searchOnLoad}
+            on:change={handleSearchOnLoadChange}
+          />
           <span>Search on load</span>
         </label>
 

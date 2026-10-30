@@ -64,7 +64,21 @@ export const authState = writable<boolean>(false);
 export const isDev = writable<boolean>(true);
 export const showTooltips = writable<boolean>(true);
 export { preferDirectExchange, tadedExchangeRatios };
+export const compactMercenaryDisplay = writable<boolean>(false);
+export const tpHotkey = writable<string>("CommandOrControl+Shift+T");
 
+export async function updateTpHotkey(newHotkey: string): Promise<void> {
+  try {
+    // The backend argument name is `accelerator`
+    await invoke("tp_set_hotkey", { accelerator: newHotkey });
+
+    // Update store only when backend command succeeds
+    tpHotkey.set(newHotkey);
+  } catch (error) {
+    console.error("Failed to register TP hotkey:", error);
+    throw error;
+  }
+}
 // Shared Cache Storage bucket with CDN images so "Clear Cache" wipes both
 const CACHE_NAME = "app-cdn-images-v1";
 

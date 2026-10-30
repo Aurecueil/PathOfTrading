@@ -36,6 +36,7 @@ url = "2"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 futures = "0.3"
 tokio-util = "0.7.20"
+tauri-plugin-global-shortcut = "2"
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

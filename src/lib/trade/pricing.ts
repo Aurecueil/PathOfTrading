@@ -99,7 +99,7 @@ let poe2LeaguesStore: Readable<League[]> | null = null;
 // ---------------------------------------------------------------------------
 // Stores
 // ---------------------------------------------------------------------------
-export const preferDirectExchange = writable<boolean>(true);
+export const preferDirectExchange = writable<boolean>(false);
 export const tadedExchangeRatios = writable<boolean>(false);
 
 export const rawPrices = writable<RawPricesStoreMap>({ poe: {}, poe2: {} });

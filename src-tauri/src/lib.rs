@@ -29,6 +29,8 @@ pub fn run() {
     let limiter = trade::ApiRateLimiter::new();
     let live_state = trade::live::LiveSessionState::default();
 
+    let tp_controller = trade::tp::TpController::new(limiter.clone());
+
     std::env::set_var(
         "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
         "--disable-blink-features=AutomationControlled --enable-features=NetworkService,NetworkServiceInProcess",
@@ -39,6 +41,8 @@ pub fn run() {
     tauri::Builder::default()
         .manage(limiter)
         .manage(live_state)
+        .manage(tp_controller)
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(move |app| {
             let app_handle = app.handle().clone();
 
@@ -51,7 +55,7 @@ pub fn run() {
                     Ok(true) => {
                         println!("Existing session found. Refreshing POETOKEN...");
                         match auth::refresh::refresh_poetoken_background(app_handle).await {
-                            Ok(t) => println!("POETOKEN refreshed successfully {t}"),
+                            Ok(t) => println!("POETOKEN refreshed successfully"),
                             Err(err) => eprintln!("Background POETOKEN refresh failed: {err}"),
                         }
                     }
@@ -118,6 +122,10 @@ pub fn run() {
             project::statgroup::get_stat_group_presets,
             project::statgroup::save_stat_group_presets,
             trade::openWebsite::open_trade_website,
+            trade::tp::tp_set_active,
+            trade::tp::tp_set_items,
+            trade::tp::tp_clear_seen,
+            trade::tp::tp_set_hotkey,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

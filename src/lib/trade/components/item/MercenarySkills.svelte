@@ -1,11 +1,12 @@
 <!-- src/lib/trade/components/item/MercenarySkills.svelte -->
 <script lang="ts">
+  import { createEventDispatcher } from "svelte";
   import {
     mercenarySkillsByHash,
     mercenarySupportsByHash,
+    compactMercenaryDisplay,
   } from "$lib/trade/tradeStore";
-  import { fetchCdnImage } from "$lib/trade/utilis/imageService";
-  import ItemStats from "$lib/trade/components/item/ItemStats.svelte";
+  import CdnImage from "$lib/trade/components/item/CdnImage.svelte";
   import type {
     Item,
     ItemProperty,
@@ -20,9 +21,12 @@
 
   export let skills: MercenarySkill[] = [];
   export let item: Item | null = null;
-  export let realm: string = "poe";
 
-  const TIP_W = 450;
+  // The tooltip itself is rendered by ItemStats (one shared portal).
+  const dispatch = createEventDispatcher<{
+    itemhover: { item: Item; rect: DOMRect };
+    itemleave: void;
+  }>();
 
   const ROMAN_TIERS: Record<number, string> = {
     1: "I",
@@ -180,7 +184,7 @@
     const properties: ItemProperty[] = [];
     const mercLvl = getMercenaryLevel(item);
 
-    const [bestLvl, level] = getBestSkillLevel(repoeSkill, mercLvl) ?? []; // MercenarySkillLevel
+    const [bestLvl, level] = getBestSkillLevel(repoeSkill, mercLvl) ?? [];
 
     const filteredTypes = filterSkillTypes(repoeSkill?.active_skill?.types);
     if (filteredTypes.length > 0) {
@@ -190,7 +194,6 @@
 
       let currentIndex = 0;
       for (let i = 0; i < numGroups; i++) {
-        // Distribute the remainder items across the first few groups
         const groupSize = baseSize + (i < remainder ? 1 : 0);
         const group = filteredTypes.slice(
           currentIndex,
@@ -219,6 +222,7 @@
         (repoeSkill as Record<string, any>)?.[key]
       );
     };
+
     // 1. Cooldown Time & Stored Uses
     const cooldown = getProp("cooldown");
     const storedUses = getProp("stored_uses");
@@ -237,7 +241,7 @@
     }
 
     // 2. Cast Time
-    const castTime = getProp("cast_time" as keyof MercenarySkillLevel); // if cast_time exists on types
+    const castTime = getProp("cast_time" as keyof MercenarySkillLevel);
     if (typeof castTime === "number" && castTime > 0) {
       properties.push({
         displayMode: 0,
@@ -246,7 +250,7 @@
       });
     }
 
-    // 3. Costs (e.g. {"Mana": 28} -> "Mana Cost")
+    // 3. Costs
     const costs = getProp("costs");
     if (costs && typeof costs === "object") {
       for (const [resource, amount] of Object.entries(costs)) {
@@ -260,7 +264,7 @@
       }
     }
 
-    // 4. Attack Speed Multiplier (e.g. 15 -> "115% of Base")
+    // 4. Attack Speed Multiplier
     const attackSpeedMult = getProp("attack_speed_multiplier");
     if (typeof attackSpeedMult === "number") {
       properties.push({
@@ -270,7 +274,7 @@
       });
     }
 
-    // 5. Damage Multiplier (e.g. 5620 -> "156.2% of Base")
+    // 5. Damage Multiplier
     const damageMult = getProp("damage_multiplier");
     if (typeof damageMult === "number") {
       const formattedDamage = (100 + damageMult / 100).toFixed(1);
@@ -281,7 +285,7 @@
       });
     }
 
-    // 6. Damage Effectiveness (e.g. 56 -> "156%")
+    // 6. Damage Effectiveness
     const damageEff = getProp("damage_effectiveness");
     if (typeof damageEff === "number") {
       properties.push({
@@ -291,7 +295,7 @@
       });
     }
 
-    // 7. Critical Strike Chance (e.g. 600 -> "6%")
+    // 7. Critical Strike Chance
     const critChance = getProp("crit_chance");
     if (typeof critChance === "number") {
       properties.push({
@@ -346,7 +350,6 @@
     repoeSup?: dataMercenarySupport,
   ): Item {
     const name = itemSup.name || repoeSup?.name || "Unknown Support";
-
     const stats = extractStatLines(repoeSup?.stat_text);
 
     return {
@@ -387,234 +390,230 @@
     } as unknown as Item;
   }
 
-  function portal(node: HTMLElement) {
-    if (typeof document !== "undefined" && document.body) {
-      document.body.appendChild(node);
+  /* ------------------------------------------------------------------ */
+  /* Tooltip events (rendered by the parent ItemStats)                  */
+  /* ------------------------------------------------------------------ */
+  function rectOf(e: MouseEvent, atCursor = false): DOMRect {
+    if (atCursor) {
+      return DOMRectReadOnly.fromRect({
+        x: e.clientX,
+        y: e.clientY,
+        width: 0,
+        height: 0,
+      }) as unknown as DOMRect;
     }
-    return {
-      destroy() {
-        if (node.parentNode) {
-          node.parentNode.removeChild(node);
-        }
-      },
-    };
+    return (e.currentTarget as HTMLElement).getBoundingClientRect();
   }
 
-  let hoveredItem: { item: Item; left: number; top: number } | null = null;
-
-  function openItemTooltip(targetItem: Item, e: MouseEvent) {
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    let left = rect.right + 8;
-    if (left + TIP_W > window.innerWidth - 8) {
-      left = Math.max(8, rect.left - TIP_W - 8);
-    }
-    const top = Math.max(8, Math.min(rect.top, window.innerHeight - 340));
-    hoveredItem = { item: targetItem, left, top };
-  }
-
-  function showSkillTooltip(e: MouseEvent, itemSkill: MercenarySkill) {
+  function showSkillTooltip(
+    e: MouseEvent,
+    itemSkill: MercenarySkill,
+    atCursor = false,
+  ) {
     const repoeSkill = $mercenarySkillsByHash.get(itemSkill.hash);
-    const targetItem = buildSkillGemItem(itemSkill, repoeSkill);
-    openItemTooltip(targetItem, e);
+    dispatch("itemhover", {
+      item: buildSkillGemItem(itemSkill, repoeSkill),
+      rect: rectOf(e, atCursor),
+    });
   }
 
-  function showSupportTooltip(e: MouseEvent, itemSup: MercenarySkillSupport) {
+  function showSupportTooltip(
+    e: MouseEvent,
+    itemSup: MercenarySkillSupport,
+    atCursor = false,
+  ) {
     const repoeSup = $mercenarySupportsByHash.get(itemSup.hash);
-    const targetItem = buildSupportGemItem(itemSup, repoeSup);
-    openItemTooltip(targetItem, e);
+    dispatch("itemhover", {
+      item: buildSupportGemItem(itemSup, repoeSup),
+      rect: rectOf(e, atCursor),
+    });
   }
 
   function hideTooltip() {
-    hoveredItem = null;
+    dispatch("itemleave");
   }
 </script>
 
 {#if skills && skills.length > 0}
-  <div class="merc-skills-wrap">
-    <div class="merc-skills-table">
-      {#each skills as skill (skill.hash)}
-        {@const repoeSkill = $mercenarySkillsByHash.get(skill.hash)}
-        <div class="merc-row">
-          <!-- svelte-ignore a11y-no-static-element-interactions -->
-          <div
-            class="merc-col-skill"
-            on:mouseenter={(e) => showSkillTooltip(e, skill)}
-            on:mouseleave={hideTooltip}
-          >
-            {#if skill.icon}
-              {#await fetchCdnImage(skill.icon)}
-                <div class="merc-skill-icon placeholder"></div>
-              {:then src}
-                <img
-                  class="merc-skill-icon"
-                  {src}
-                  alt={skill.name}
-                  loading="lazy"
-                />
-              {:catch}
-                <img
-                  class="merc-skill-icon"
-                  src={skill.icon}
-                  alt={skill.name}
-                  loading="lazy"
-                />
-              {/await}
-            {:else}
-              <div class="merc-skill-icon placeholder"></div>
-            {/if}
-            <span class="merc-skill-name">
-              {skill.name || repoeSkill?.name || "Unknown Skill"}
-            </span>
-          </div>
+  {#if $compactMercenaryDisplay}
+    <!-- COMPACT: skill on the left, support icons in a row on the right -->
+    <div class="merc-skills-wrap">
+      <div class="merc-skills-table">
+        {#each skills as skill (skill.hash)}
+          {@const repoeSkill = $mercenarySkillsByHash.get(skill.hash)}
+          <div class="merc-row">
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <div
+              class="merc-col-skill"
+              on:mouseenter={(e) => showSkillTooltip(e, skill, false)}
+              on:mouseleave={hideTooltip}
+            >
+              <CdnImage
+                src={skill.icon}
+                alt={skill.name || "Skill"}
+                className="merc-icon merc-icon-26"
+              />
+              <span class="merc-skill-name">
+                {skill.name || repoeSkill?.name || "Unknown Skill"}
+              </span>
+            </div>
 
-          <div class="merc-col-supports">
-            {#if skill.supports && skill.supports.length > 0}
-              {#each skill.supports as sup (sup.hash)}
+            <div class="merc-col-supports">
+              {#each skill.supports ?? [] as sup (sup.hash)}
                 {@const repoeSup = $mercenarySupportsByHash.get(sup.hash)}
-                {@const supIconUrl = getSupportIconUrl(repoeSup)}
+                {@const supUrl = getSupportIconUrl(repoeSup)}
                 {@const tierRoman = toRoman(sup.tier ?? repoeSup?.tier)}
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <div
-                  class="merc-support-item"
-                  on:mouseenter={(e) => showSupportTooltip(e, sup)}
+                  class="merc-support-item merc-support-item-26"
+                  on:mouseenter={(e) => showSupportTooltip(e, sup, false)}
                   on:mouseleave={hideTooltip}
                 >
-                  {#if supIconUrl}
-                    {#await fetchCdnImage(supIconUrl)}
-                      <div class="merc-support-icon placeholder"></div>
-                    {:then src}
-                      <img
-                        class="merc-support-icon"
-                        {src}
-                        alt={sup.name}
-                        loading="lazy"
-                      />
-                    {:catch}
-                      <img
-                        class="merc-support-icon"
-                        src={supIconUrl}
-                        alt={sup.name}
-                        loading="lazy"
-                      />
-                    {/await}
+                  {#if supUrl}
+                    <CdnImage
+                      src={supUrl}
+                      alt={sup.name || "Support"}
+                      className="merc-icon merc-icon-26"
+                    />
                   {:else}
-                    <div class="merc-support-icon fallback">
+                    <span class="merc-icon-fallback fallback-26">
                       {sup.name?.slice(0, 2) ?? "?"}
-                    </div>
+                    </span>
                   {/if}
-
                   {#if tierRoman}
                     <span class="merc-tier-badge">{tierRoman}</span>
                   {/if}
                 </div>
               {/each}
-            {/if}
+            </div>
           </div>
+        {/each}
+      </div>
+    </div>
+  {:else}
+    <!-- STACKED: one centered line per skill / support, whole line is hoverable -->
+    <div class="merc-stack">
+      {#each skills as skill (skill.hash)}
+        {@const repoeSkill = $mercenarySkillsByHash.get(skill.hash)}
+        <div class="merc-group">
+          <!-- svelte-ignore a11y-no-static-element-interactions -->
+          <div
+            class="merc-line merc-line-skill"
+            on:mouseenter={(e) => showSkillTooltip(e, skill, true)}
+            on:mouseleave={hideTooltip}
+          >
+            <CdnImage
+              src={skill.icon}
+              alt={skill.name || "Skill"}
+              className="merc-icon merc-icon-22"
+            />
+            <span class="merc-line-text">
+              {skill.name || repoeSkill?.name || "Unknown Skill"}
+            </span>
+          </div>
+
+          {#each skill.supports ?? [] as sup (sup.hash)}
+            {@const repoeSup = $mercenarySupportsByHash.get(sup.hash)}
+            {@const supUrl = getSupportIconUrl(repoeSup)}
+            {@const tierNum = sup.tier ?? repoeSup?.tier}
+            {@const tierRoman = toRoman(tierNum)}
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <div
+              class="merc-line merc-line-support"
+              on:mouseenter={(e) => showSupportTooltip(e, sup, true)}
+              on:mouseleave={hideTooltip}
+            >
+              <div class="merc-support-item merc-support-item-20">
+                {#if supUrl}
+                  <CdnImage
+                    src={supUrl}
+                    alt={sup.name || "Support"}
+                    className="merc-icon merc-icon-20"
+                  />
+                {:else}
+                  <span class="merc-icon-fallback fallback-20">
+                    {sup.name?.slice(0, 2) ?? "?"}
+                  </span>
+                {/if}
+                {#if tierRoman}
+                  <span class="merc-tier-badge merc-tier-badge-sm"
+                    >{tierRoman}</span
+                  >
+                {/if}
+              </div>
+              <span class="merc-line-text">
+                {sup.name || repoeSup?.name || "Unknown Support"}{tierNum
+                  ? ` (Tier: ${tierNum})`
+                  : ""}
+              </span>
+            </div>
+          {/each}
         </div>
       {/each}
     </div>
-  </div>
-{/if}
-
-{#if hoveredItem}
-  <div
-    class="stats-skill-tooltip r-gem"
-    use:portal
-    style:left="{hoveredItem.left}px"
-    style:top="{hoveredItem.top}px"
-    style:width="{TIP_W}px"
-  >
-    <ItemStats
-      item={hoveredItem.item}
-      {realm}
-      styleMode="compact"
-      isTooltip={true}
-      tileWidth={TIP_W}
-    />
-  </div>
+  {/if}
 {/if}
 
 <style>
-  .merc-skills-wrap {
-    width: 100%;
-    display: flex;
-    justify-content: center;
-    padding-top: 4px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    margin-top: 2px;
-  }
-
-  .merc-skills-table {
-    display: grid;
-    grid-template-columns: 290px 1fr;
-    row-gap: 4px;
-    column-gap: 14px;
-    align-items: center;
-  }
-
-  .merc-row {
-    display: contents;
-  }
-
-  .merc-col-skill {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    cursor: default;
-  }
-
-  .merc-skill-icon {
-    width: 26px;
-    height: 26px;
+  /* ---------------------------------------------------------------- */
+  /* Shared Icon sizing & fallbacks                                   */
+  /* ---------------------------------------------------------------- */
+  :global(.merc-icon) {
+    display: inline-block;
     object-fit: contain;
     flex-shrink: 0;
-    display: block;
   }
-
-  .merc-skill-icon.placeholder {
-    background: rgba(255, 255, 255, 0.05);
+  :global(.merc-icon-26) {
+    width: 26px;
+    height: 26px;
   }
-
-  .merc-skill-name {
-    color: #e2e2d8;
-    font-size: 22px;
-    line-height: 1;
-    white-space: nowrap;
+  :global(.merc-icon-22) {
+    width: 22px;
+    height: 22px;
   }
-
-  .merc-col-supports {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px;
-    min-height: 26px;
+  :global(.merc-icon-20) {
+    width: 20px;
+    height: 20px;
   }
 
   .merc-support-item {
     position: relative;
-    width: 26px;
-    height: 26px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     cursor: default;
+    flex-shrink: 0;
   }
-
-  .merc-support-icon {
+  .merc-support-item-26 {
     width: 26px;
     height: 26px;
-    object-fit: contain;
-    display: block;
+  }
+  .merc-support-item-20 {
+    width: 20px;
+    height: 20px;
   }
 
-  .merc-support-icon.placeholder,
-  .merc-support-icon.fallback {
-    font-size: 10px;
-    color: #888;
-    display: flex;
+  .merc-icon-fallback {
+    display: inline-flex;
     align-items: center;
     justify-content: center;
+    font-weight: 700;
+    color: #8b95a5;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+    user-select: none;
+    flex-shrink: 0;
+  }
+  .merc-icon-fallback.fallback-26 {
+    width: 26px;
+    height: 26px;
+    font-size: 11px;
+  }
+  .merc-icon-fallback.fallback-20 {
+    width: 20px;
+    height: 20px;
+    font-size: 10px;
   }
 
   .merc-tier-badge {
@@ -639,24 +638,106 @@
       -1px 0px 0 #000,
       1px 0px 0 #000;
   }
+  .merc-tier-badge-sm {
+    font-size: 10px;
+    bottom: -2px;
+    right: -2px;
+  }
 
-  .stats-skill-tooltip.r-gem {
-    --rc: #1ba29b;
-    --rc-rgb: 27, 162, 155;
-    position: fixed;
-    z-index: 100000;
-    max-height: 80vh;
-    overflow-y: auto;
-    box-sizing: border-box;
-    padding: 0.55rem 0.65rem;
-    background: rgba(4, 5, 7, 0.97);
-    border: 1px solid #3a3326;
-    border-top: 2px solid #8a6a2e;
-    border-radius: 0;
-    box-shadow:
-      0 14px 34px rgba(0, 0, 0, 0.85),
-      0 0 0 1px #000;
-    pointer-events: none;
-    scrollbar-width: thin;
+  /* ---------------------------------------------------------------- */
+  /* Compact display                                                  */
+  /* ---------------------------------------------------------------- */
+  .merc-skills-wrap {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+  }
+
+  .merc-skills-table {
+    display: grid;
+    grid-template-columns: 290px 1fr;
+    row-gap: 4px;
+    column-gap: 14px;
+    align-items: center;
+  }
+
+  .merc-row {
+    display: contents;
+  }
+
+  .merc-col-skill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    cursor: default;
+  }
+
+  .merc-skill-name {
+    color: #c1afa0;
+    font-size: 22px;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .merc-col-supports {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 26px;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Stacked (non-compact) display                                    */
+  /* ---------------------------------------------------------------- */
+  .merc-stack {
+    --merc-font-size: 15px;
+    --merc-skill-color: #c1afa0;
+    --merc-support-color: #8888ff;
+
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    text-align: center;
+  }
+  .merc-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .merc-group + .merc-group {
+    margin-top: 5px;
+  }
+  .merc-line {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    cursor: default;
+  }
+  .merc-line-skill {
+    min-height: 24px;
+    margin-bottom: 1px;
+  }
+  .merc-line-support {
+    min-height: 20px;
+    padding: 0;
+    margin: 0;
+  }
+  .merc-line-text {
+    line-height: 1.1;
+  }
+  .merc-line-skill .merc-line-text {
+    font-size: var(--merc-font-size);
+    color: var(--merc-skill-color);
+  }
+  .merc-line-support .merc-line-text {
+    font-size: calc(var(--merc-font-size) - 2px);
+    color: var(--merc-support-color);
+  }
+  .merc-line:hover .merc-line-text {
+    filter: brightness(1.25);
   }
 </style>

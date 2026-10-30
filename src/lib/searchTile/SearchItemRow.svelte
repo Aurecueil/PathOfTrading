@@ -12,7 +12,6 @@
   import ItemListing from "$lib/trade/components/item/ItemListing.svelte";
   import ItemJsonModal from "$lib/trade/components/item/ItemJsonModal.svelte";
   import ItemTitleBar from "$lib/trade/components/item/ItemTitleBar.svelte";
-  import MercenarySkills from "$lib/trade/components/item/MercenarySkills.svelte";
   import { getCategorySymbols } from "$lib/trade/components/item/categorySymbols";
   import { extractSortValue } from "$lib/trade/components/item/sortValue";
   import { convertCurrency } from "$lib/trade/pricing";
@@ -443,9 +442,6 @@
         styleMode={resolvedStyle}
         tileWidth={boxWidth}
       />
-      {#if item.mercenarySkills && item.mercenarySkills.length > 0 && resolvedStyle !== "minimal"}
-        <MercenarySkills skills={item.mercenarySkills} />
-      {/if}
     </div>
 
     <!-- Right / bottom: listing & trade actions -->

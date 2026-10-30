@@ -522,7 +522,7 @@
         statGroups = initialPayload.query.stats.map((sg: any, idx: number) => ({
           id: `stat_group_${idx}_${Date.now()}`,
           type: sg.type || "and",
-          // Fix: use collapsed state; do not set a sticky `disabled` property on the group
+          // Fix: use collapsed state; do not set a sticky `disabled` property on the the group
           collapsed: sg.collapsed ?? sg.disabled ?? false,
           value: sg.value ? { ...sg.value } : undefined,
           filters: (sg.filters || []).map((f: any) => ({
@@ -705,7 +705,10 @@
       selectedItem !== undefined ||
       filterValues !== undefined ||
       groupCollapsed !== undefined ||
-      statGroups !== undefined)
+      statGroups !== undefined ||
+      displayOptions !== undefined ||
+      currency !== undefined ||
+      searchOnLoad !== undefined)
   ) {
     autoSave();
   }
@@ -1019,6 +1022,7 @@
           bind:searchOnLoad
           {realm}
           staticCatalog={currentStaticCatalog}
+          on:change={autoSave}
         />
         <StatGroupsSection
           bind:statGroups

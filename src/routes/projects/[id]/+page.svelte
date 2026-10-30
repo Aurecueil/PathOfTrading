@@ -1,5 +1,7 @@
 <!-- src/routes/projects/[id]/+page.svelte -->
 <script lang="ts">
+  import { invoke } from "@tauri-apps/api/core";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { page } from "$app/stores";
   import { onMount, onDestroy, tick } from "svelte";
   import Tile from "$lib/SearchTile.svelte";
@@ -42,6 +44,7 @@
     normalizeSearchOnLoad,
   } from "$lib/trade/components/drawer/tileDisplay";
   import {
+    authState,
     currentLanguage,
     isLoading,
     itemsPoe,
@@ -75,6 +78,32 @@
   const GRID_SIZE = 40;
   const MAX_HISTORY = 50;
   const AUTOSAVE_INTERVAL_MS = 25000;
+
+  let tpTileId: string | number | null = null;
+  let tpMessage = "";
+  let tpMessageTimer: ReturnType<typeof setTimeout> | undefined;
+  let unlistenTp: UnlistenFn | undefined;
+  function toggleTpTile(id: string | number) {
+    tpTileId = tpTileId === id ? null : id;
+  }
+
+  // logged out or tile deleted -> no teleport tile
+  $: if (
+    !$authState ||
+    (tpTileId !== null && !tiles.some((t) => t.id === tpTileId))
+  ) {
+    tpTileId = null;
+  }
+  // Rust unregisters the hotkey when nothing is active
+  $: if (tpTileId === null) {
+    invoke("tp_set_active", { active: null }).catch(() => {});
+  }
+
+  function showTpMessage(msg: string) {
+    tpMessage = msg;
+    clearTimeout(tpMessageTimer);
+    tpMessageTimer = setTimeout(() => (tpMessage = ""), 3000);
+  }
 
   let currentProjectId: string = "";
   let currentProjectName: string = "";
@@ -472,6 +501,10 @@
   }
 
   onMount(() => {
+    listen<{ tile_id: string; status: string; message: string }>(
+      "tp-status",
+      (e) => showTpMessage(e.payload.message),
+    ).then((u) => (unlistenTp = u));
     registerCanvasHandlers({
       save: saveCurrentProject,
       importElements: importElementsIntoCanvas,
@@ -1487,6 +1520,7 @@
         gridSize={GRID_SIZE}
         selected={selectedIds.has(tile.id)}
         disabled={tile.disabled ?? false}
+        tpActive={tpTileId === tile.id}
         on:select={(e) => selectItem(tile.id, e.detail?.shiftKey)}
         on:dragstart={() => startGroupDrag(tile.id)}
         on:dragmove={(e) => moveGroupDrag(e.detail.dx, e.detail.dy)}
@@ -1496,6 +1530,7 @@
         on:openfilters={(e) => handleOpenFilters(tile.id, e)}
         on:delete={() => removeTile(tile.id)}
         on:contextmenu={(e) => handleTileContextMenu(tile.id, e.detail)}
+        on:tptoggle={() => toggleTpTile(tile.id)}
       />
     {/each}
 
