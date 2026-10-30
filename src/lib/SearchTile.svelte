@@ -158,14 +158,33 @@
     }
   }
 
+  type TpStateKind = "idle" | "waiting" | "traveling" | "done" | "error";
+  let tpState: TpStateKind = "idle";
+  let tpStatusMessage: string = "";
+  let tpActiveItemId: string | null = null;
+  let tpVisitedIds: Set<string> = new Set();
+  let tpItemErrors: Map<string, string> = new Map();
+  let tpStatusTimer: ReturnType<typeof setTimeout> | undefined;
+
+  $: if (!tpActive) {
+    lastTpTargetKey = "";
+    lastTpItemsKey = "";
+    tpState = "idle";
+    tpStatusMessage = "";
+    tpActiveItemId = null;
+  }
+
   async function clearTpSeen() {
     try {
       await invoke("tp_clear_seen");
+      tpVisitedIds = new Set();
+      tpItemErrors = new Map();
+      tpState = "idle";
+      tpStatusMessage = "";
     } catch (err) {
       console.error(err);
     }
   }
-
   // Rust reached an item that isn't fetched yet: expand the list and fetch it
   async function revealIndex(index: number, id: string) {
     if (isDestroyed || !tile.searchId) return;
@@ -202,14 +221,58 @@
 
   onMount(() => {
     let cancelled = false;
-    let off: UnlistenFn | null = null;
+    let offReveal: UnlistenFn | null = null;
+    let offStatus: UnlistenFn | null = null;
+
     listen<{ tile_id: string; index: number; id: string }>("tp-reveal", (e) => {
       if (e.payload.tile_id !== String(tile.id)) return;
       void revealIndex(e.payload.index, e.payload.id);
-    }).then((u) => (cancelled ? u() : (off = u)));
+    }).then((u) => (cancelled ? u() : (offReveal = u)));
+
+    listen<{
+      tile_id: string;
+      status: TpStateKind;
+      message: string;
+      item_id?: string | null;
+    }>("tp-status", (e) => {
+      if (e.payload.tile_id !== String(tile.id)) return;
+      const { status, message, item_id } = e.payload;
+
+      tpState = status;
+      tpStatusMessage = message;
+      tpActiveItemId = item_id ?? null;
+
+      if (tpStatusTimer) clearTimeout(tpStatusTimer);
+
+      if (status === "traveling" && item_id) {
+        tpItemErrors.delete(item_id);
+        tpItemErrors = tpItemErrors;
+      } else if (status === "done") {
+        if (item_id) {
+          tpVisitedIds.add(item_id);
+          tpVisitedIds = tpVisitedIds;
+        }
+        tpStatusTimer = setTimeout(() => {
+          tpState = "idle";
+          tpActiveItemId = null;
+        }, 1800);
+      } else if (status === "error") {
+        if (item_id) {
+          tpItemErrors.set(item_id, message);
+          tpItemErrors = tpItemErrors;
+        }
+        tpStatusTimer = setTimeout(() => {
+          tpState = "idle";
+          tpActiveItemId = null;
+        }, 2500);
+      }
+    }).then((u) => (cancelled ? u() : (offStatus = u)));
+
     return () => {
       cancelled = true;
-      off?.();
+      if (tpStatusTimer) clearTimeout(tpStatusTimer);
+      offReveal?.();
+      offStatus?.();
     };
   });
   // Supports both a Svelte readable/writable store and a plain boolean export
@@ -714,6 +777,12 @@
 
   export async function executeSearch(payload?: any, cacheOk: boolean = false) {
     if (isDestroyed || disabled || tile.disabled) return;
+
+    inFlightIds.clear();
+    inViewRetryCounts.clear();
+    tpVisitedIds = new Set();
+    tpItemErrors = new Map();
+    visibleCount = 0;
 
     lastSearchResponse = null;
     searchErrorMsg = null;
@@ -1627,6 +1696,12 @@
               tileHeight={tile.h}
               displayCurrency={tile.currency || "chaos"}
               displayOptions={tile.displayOptions ?? null}
+              tpTraveling={tpActiveItemId === itemEntry.id &&
+                tpState === "traveling"}
+              tpQueued={tpActiveItemId === itemEntry.id &&
+                tpState === "waiting"}
+              tpVisited={tpVisitedIds.has(itemEntry.id)}
+              tpError={tpItemErrors.get(itemEntry.id) ?? null}
               on:sortvalue={handleRowSortValue}
             />
           {/each}

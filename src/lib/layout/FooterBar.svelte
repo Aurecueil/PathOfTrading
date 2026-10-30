@@ -239,6 +239,37 @@
     </div>
 
     <div class="footer-actions">
+      <div class="social-links">
+        <button
+          type="button"
+          class="social-btn"
+          onclick={() =>
+            invoke("open_external_url", {
+              url: "https://github.com/Aurecueil/PathOfTrading",
+            })}
+        >
+          <img src="/github.svg" alt="GitHub" class="social-icon" />
+        </button>
+        <button
+          type="button"
+          class="social-btn"
+          onclick={() =>
+            invoke("open_external_url", { url: "https://ko-fi.com/aurecueil" })}
+        >
+          <img src="/kofi.svg" alt="Ko-fi" class="social-icon" />
+        </button>
+        <button
+          type="button"
+          class="social-btn"
+          onclick={() =>
+            invoke("open_external_url", {
+              url: "https://discord.gg/bNfbQHrCgf",
+            })}
+        >
+          <img src="/discord.svg" alt="Discord" class="social-icon" />
+        </button>
+      </div>
+
       <div class="ratelimiter-container" bind:this={containerEl}>
         {#if rateLimiterOpen}
           <div
@@ -282,9 +313,6 @@
                         class="rule-row"
                         class:penalized={rPen > 0}
                         class:blocked={rNext > 0}
-                        title="{ruleLabel(
-                          r,
-                        )}: used {r.used}/{r.max}, reserved free {r.reserved_free}, available {r.available}"
                       >
                         <span class="rule-label">{ruleLabel(r)}</span>
                         <div class="bar-pip-track">
@@ -342,14 +370,7 @@
         >
           {#each miniBars as b (b.key)}
             {@const next = remaining(b.op.next_available_ms)}
-            <div
-              class="bar-unit"
-              title="{b.name}{b.crit
-                ? ` · ${ruleLabel(b.crit)}: ${b.crit.available}/${b.crit.max}`
-                : ''} · {next > 0
-                ? `next request in ${formatMs(next)}`
-                : 'ready'}"
-            >
+            <div class="bar-unit">
               <div class="segment-track">
                 {#if b.crit}
                   {@render segs(b.crit)}
@@ -400,7 +421,42 @@
     display: flex;
     align-items: center;
     height: 100%;
-    gap: 0.5rem;
+    gap: 0;
+  }
+
+  .social-links {
+    display: flex;
+    align-items: stretch;
+    height: 100%;
+  }
+
+  .social-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 100%;
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    transition: background-color 0.15s;
+  }
+
+  .social-btn:hover {
+    background-color: #161616;
+  }
+
+  .social-icon {
+    width: 13px;
+    height: 13px;
+    /* Gives SVG icons a light gray color (#aaaaaa) */
+    filter: brightness(0) saturate(100%) invert(70%);
+    transition: filter 0.15s;
+  }
+
+  .social-btn:hover .social-icon {
+    filter: brightness(0) saturate(100%) invert(100%);
   }
 
   .disclaimer {

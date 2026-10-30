@@ -1,6 +1,6 @@
 pub mod colorCodingSettings;
 pub mod statgroup;
-// src-tauri/src/projects.rs
+
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,14 @@ fn default_league() -> String {
 
 fn default_scale() -> f64 {
     1.0
+}
+
+fn default_currency() -> String {
+    "chaos".to_string()
+}
+
+fn default_search_on_load() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,6 +72,12 @@ pub struct SavedSearchTile {
     pub full_payload: Value,
     #[serde(default = "default_mode")]
     pub mode: String,
+    #[serde(default, rename = "displayOptions")]
+    pub display_options: Option<Value>,
+    #[serde(default = "default_currency")]
+    pub currency: String,
+    #[serde(default = "default_search_on_load", rename = "searchOnLoad")]
+    pub search_on_load: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

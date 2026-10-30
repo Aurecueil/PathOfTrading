@@ -62,23 +62,150 @@ export const currentLanguage = writable<string>("EN");
 
 export const authState = writable<boolean>(false);
 export const isDev = writable<boolean>(true);
-export const showTooltips = writable<boolean>(true);
 export { preferDirectExchange, tadedExchangeRatios };
-export const compactMercenaryDisplay = writable<boolean>(false);
-export const tpHotkey = writable<string>("CommandOrControl+Shift+T");
+
+// ---------------------------------------------------------------------------
+// UI-only settings, persisted to disk via webview storage
+// ---------------------------------------------------------------------------
+const UI_SETTINGS_KEY = "pot.uiSettings";
+
+type UiSettings = {
+  displayTiers?: boolean;
+  displayRune?: boolean;
+  canvasBgPath?: string;
+  canvasBgOpacity?: number;
+  showTooltips?: boolean;
+  preferDirectExchange?: boolean;
+  tadedExchangeRatios?: unknown;
+  compactMercenaryDisplay?: boolean;
+  tpHotkey?: string;
+};
+
+function readUiSettings(): UiSettings {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(UI_SETTINGS_KEY);
+    return raw ? (JSON.parse(raw) as UiSettings) : {};
+  } catch {
+    return {};
+  }
+}
+
+const initialUi = readUiSettings();
+
+// Hydrate imported pricing stores if saved values exist
+if (typeof initialUi.preferDirectExchange === "boolean") {
+  preferDirectExchange.set(initialUi.preferDirectExchange);
+}
+if (initialUi.tadedExchangeRatios !== undefined) {
+  tadedExchangeRatios.set(initialUi.tadedExchangeRatios as any);
+}
+
+export const showTooltips = writable<boolean>(
+  typeof initialUi.showTooltips === "boolean" ? initialUi.showTooltips : true,
+);
+export const compactMercenaryDisplay = writable<boolean>(
+  typeof initialUi.compactMercenaryDisplay === "boolean"
+    ? initialUi.compactMercenaryDisplay
+    : false,
+);
+export const tpHotkey = writable<string>(
+  typeof initialUi.tpHotkey === "string" && initialUi.tpHotkey.trim() !== ""
+    ? initialUi.tpHotkey
+    : "CommandOrControl+Shift+T",
+);
+
+// Always display modifier tiers (if on, displayTiers is true)
+export const displayTiers = writable<boolean>(
+  typeof initialUi.displayTiers === "boolean" ? initialUi.displayTiers : false,
+);
+
+// Hide socketable modifiers (if hidden, displayRune is false)
+export const displayRune = writable<boolean>(
+  typeof initialUi.displayRune === "boolean" ? initialUi.displayRune : true,
+);
+
+export const canvasBgPath = writable<string>(
+  typeof initialUi.canvasBgPath === "string" ? initialUi.canvasBgPath : "",
+);
+
+// Static canvas background opacity (0.0 to 1.0)
+export const canvasBgOpacity = writable<number>(
+  typeof initialUi.canvasBgOpacity === "number"
+    ? initialUi.canvasBgOpacity
+    : 0.35,
+);
+
+function persistUiSettings() {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(
+      UI_SETTINGS_KEY,
+      JSON.stringify({
+        displayTiers: get(displayTiers),
+        displayRune: get(displayRune),
+        canvasBgPath: get(canvasBgPath),
+        canvasBgOpacity: get(canvasBgOpacity),
+        showTooltips: get(showTooltips),
+        preferDirectExchange: get(preferDirectExchange),
+        tadedExchangeRatios: get(tadedExchangeRatios),
+        compactMercenaryDisplay: get(compactMercenaryDisplay),
+        tpHotkey: get(tpHotkey),
+      }),
+    );
+  } catch {
+    /* storage unavailable, ignore */
+  }
+}
+
+displayTiers.subscribe(persistUiSettings);
+displayRune.subscribe(persistUiSettings);
+canvasBgPath.subscribe(persistUiSettings);
+canvasBgOpacity.subscribe(persistUiSettings);
+showTooltips.subscribe(persistUiSettings);
+preferDirectExchange.subscribe(persistUiSettings);
+tadedExchangeRatios.subscribe(persistUiSettings);
+compactMercenaryDisplay.subscribe(persistUiSettings);
+tpHotkey.subscribe(persistUiSettings);
+
+// Keep other app windows in sync (the "storage" event only fires in other windows)
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e.key !== UI_SETTINGS_KEY) return;
+    const next = readUiSettings();
+    if (typeof next.displayTiers === "boolean")
+      displayTiers.set(next.displayTiers);
+    if (typeof next.displayRune === "boolean")
+      displayRune.set(next.displayRune);
+    if (typeof next.canvasBgPath === "string")
+      canvasBgPath.set(next.canvasBgPath);
+    if (typeof next.canvasBgOpacity === "number")
+      canvasBgOpacity.set(next.canvasBgOpacity);
+    if (typeof next.showTooltips === "boolean")
+      showTooltips.set(next.showTooltips);
+    if (typeof next.preferDirectExchange === "boolean")
+      preferDirectExchange.set(next.preferDirectExchange);
+    if (next.tadedExchangeRatios !== undefined)
+      tadedExchangeRatios.set(next.tadedExchangeRatios as any);
+    if (typeof next.compactMercenaryDisplay === "boolean")
+      compactMercenaryDisplay.set(next.compactMercenaryDisplay);
+    if (typeof next.tpHotkey === "string") tpHotkey.set(next.tpHotkey);
+  });
+}
 
 export async function updateTpHotkey(newHotkey: string): Promise<void> {
   try {
     // The backend argument name is `accelerator`
     await invoke("tp_set_hotkey", { accelerator: newHotkey });
 
-    // Update store only when backend command succeeds
+    // Update store only when backend command succeeds (triggers localStorage persistence)
     tpHotkey.set(newHotkey);
   } catch (error) {
     console.error("Failed to register TP hotkey:", error);
     throw error;
   }
 }
+
 // Shared Cache Storage bucket with CDN images so "Clear Cache" wipes both
 const CACHE_NAME = "app-cdn-images-v1";
 
@@ -280,10 +407,13 @@ export const mercenarySupportsByHash = derived(
 export async function initUserSettings(): Promise<void> {
   await ensureCrossWindowSync();
 
+  const savedHotkey = get(tpHotkey);
+
   const [settings, lang] = await Promise.allSettled([
     invoke<{ colorCoding: boolean }>("get_user_settings"),
     invoke<string>("get_language"),
     loadStatColorConfigsFromDisk(false),
+    invoke("tp_set_hotkey", { accelerator: savedHotkey }),
   ]);
 
   if (
@@ -295,81 +425,4 @@ export async function initUserSettings(): Promise<void> {
   if (lang.status === "fulfilled" && lang.value) {
     currentLanguage.set(lang.value);
   }
-}
-
-// ---------------------------------------------------------------------------
-// UI-only settings, persisted to disk via webview storage (not stored in Rust)
-// ---------------------------------------------------------------------------
-const UI_SETTINGS_KEY = "pot.uiSettings";
-
-type UiSettings = {
-  displayTiers?: boolean;
-  displayRune?: boolean;
-  canvasBgPath?: string;
-  canvasBgOpacity?: number;
-};
-
-function readUiSettings(): UiSettings {
-  try {
-    const raw = localStorage.getItem(UI_SETTINGS_KEY);
-    return raw ? (JSON.parse(raw) as UiSettings) : {};
-  } catch {
-    return {};
-  }
-}
-
-const initialUi = readUiSettings();
-
-// Always display modifier tiers (if on, displayTiers is true)
-export const displayTiers = writable<boolean>(
-  typeof initialUi.displayTiers === "boolean" ? initialUi.displayTiers : false,
-);
-
-// Hide socketable modifiers (if hidden, displayRune is false)
-export const displayRune = writable<boolean>(
-  typeof initialUi.displayRune === "boolean" ? initialUi.displayRune : true,
-);
-export const canvasBgPath = writable<string>(
-  typeof initialUi.canvasBgPath === "string" ? initialUi.canvasBgPath : "",
-);
-
-// Static canvas background opacity (0.0 to 1.0)
-export const canvasBgOpacity = writable<number>(
-  typeof initialUi.canvasBgOpacity === "number"
-    ? initialUi.canvasBgOpacity
-    : 0.35,
-);
-function persistUiSettings() {
-  try {
-    localStorage.setItem(
-      UI_SETTINGS_KEY,
-      JSON.stringify({
-        displayTiers: get(displayTiers),
-        displayRune: get(displayRune),
-      }),
-    );
-  } catch {
-    /* storage unavailable, ignore */
-  }
-}
-
-displayTiers.subscribe(persistUiSettings);
-displayRune.subscribe(persistUiSettings);
-canvasBgPath.subscribe(persistUiSettings);
-canvasBgOpacity.subscribe(persistUiSettings);
-
-// Keep other app windows in sync (the "storage" event only fires in other windows)
-if (typeof window !== "undefined") {
-  window.addEventListener("storage", (e) => {
-    if (e.key !== UI_SETTINGS_KEY) return;
-    const next = readUiSettings();
-    if (typeof next.displayTiers === "boolean")
-      displayTiers.set(next.displayTiers);
-    if (typeof next.displayRune === "boolean")
-      displayRune.set(next.displayRune);
-    if (typeof next.canvasBgPath === "string")
-      canvasBgPath.set(next.canvasBgPath);
-    if (typeof next.canvasBgOpacity === "number")
-      canvasBgOpacity.set(next.canvasBgOpacity);
-  });
 }

@@ -8,7 +8,6 @@
   import RelativeTime from "./RelativeTime.svelte";
 
   export let listing: ItemListing | undefined;
-  export let sortValue: any = null;
   export let isTraveling: boolean = false;
   export let isQueued: boolean = false;
   export let travelError: string | null = null;
@@ -19,6 +18,7 @@
   export let onTravel: () => void;
   export let convertedPrice: number | null = null;
   export let convertedCurrency: string = "chaos";
+  export let isVisited: boolean = false;
 
   function formatConverted(v: number): string {
     const digits = v < 1 ? 3 : v < 10 ? 2 : v < 100 ? 1 : 0;

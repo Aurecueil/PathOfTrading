@@ -38,13 +38,18 @@
       closeSettings();
     }
   }
+  let isHoldingOpacity = $state(false);
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
 {#if settingsOverlay.open}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="settings-backdrop" onmousedown={handleBackdropMouseDown}>
+  <div
+    class="settings-backdrop"
+    class:settings-backdrop-bg={!isHoldingOpacity}
+    onmousedown={handleBackdropMouseDown}
+  >
     <div
       class="settings-overlay-card settings-page"
       role="dialog"
@@ -89,7 +94,10 @@
 
           <main class="st-content">
             {#if active === "basic"}
-              <BasicTab onStatus={setStatus} />
+              <BasicTab
+                onStatus={setStatus}
+                bind:isDraggingOpacity={isHoldingOpacity}
+              />
             {:else if active === "stat-groups"}
               <StatGroupsTab />
             {:else}
@@ -106,14 +114,15 @@
   .settings-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.75);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 1800; /* above menu dropdowns (1100), below login modal (2000) */
     padding: 24px;
   }
-
+  .settings-backdrop-bg {
+    background: rgba(0, 0, 0, 0.75);
+  }
   .settings-overlay-card {
     /* cancel .settings-page's full-page layout */
     position: relative;

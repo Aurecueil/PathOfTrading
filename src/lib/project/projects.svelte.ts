@@ -180,10 +180,15 @@ export function serializeTileForSave(tile: SearchTile): SavedSearchTile {
     h: tile.h,
     realm: tile.realm || "poe",
     league: tile.league || "Standard",
-    title: tile.displayName?.trim() || tile.title?.trim() || "",
+    title: tile.title?.trim() || "",
     disabled: Boolean(tile.disabled),
     full_payload: payloadClone,
     mode: tile.mode ?? "regular",
+    displayOptions: tile.displayOptions
+      ? JSON.parse(JSON.stringify(tile.displayOptions))
+      : undefined,
+    currency: tile.currency ?? "chaos",
+    searchOnLoad: tile.searchOnLoad ?? true,
   };
 }
 
@@ -321,20 +326,6 @@ export function navigateToProjectsHome() {
 }
 
 export function closeProject(id: string, currentPathname: string = "") {
-  if (id === SETTINGS_TAB_ID) {
-    const idx = openTabs.findIndex((t) => t.id === SETTINGS_TAB_ID);
-    if (idx !== -1) openTabs.splice(idx, 1);
-    if (currentPathname.startsWith("/settings")) {
-      const nextTab = openTabs[idx] ?? openTabs[idx - 1];
-      if (nextTab) {
-        goto(nextTab.isSettings ? "/settings" : `/projects/${nextTab.id}`);
-      } else {
-        goto("/");
-      }
-    }
-    return;
-  }
-
   runWithUnsavedGuard(id, () => {
     const index = openTabs.findIndex((tab) => tab.id === id);
     if (index === -1) return;

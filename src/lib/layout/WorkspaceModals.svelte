@@ -182,13 +182,10 @@
           ✕
         </button>
       </div>
-      <p class="modal-desc">
-        Paste a Base64 + zlib compressed share code below.
-      </p>
 
       {#if workspaceState.importModalMode === "new-project"}
         <label class="modal-label">
-          <span>Project Name (optional)</span>
+          <span>Project Name</span>
           <div class="input-wrapper">
             <input
               type="text"
@@ -217,13 +214,13 @@
       {/if}
 
       <label class="modal-label">
-        <span>Share Code (Zlib + Base64)</span>
+        <span>Code:</span>
         <textarea
           class="modal-textarea"
           class:is-modified={codeInput.trim().length > 0}
           rows="5"
           bind:value={codeInput}
-          placeholder="eJxL..."></textarea>
+          placeholder="paste code here..."></textarea>
       </label>
 
       {#if codeError}

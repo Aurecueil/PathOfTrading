@@ -29,6 +29,14 @@
   export let effectiveStyle: ResolvedDisplayStyle = "full";
   export let tileWidth: number = 600;
   export let tileHeight: number = 400;
+  export let tpTraveling: boolean = false;
+  export let tpQueued: boolean = false;
+  export let tpVisited: boolean = false;
+  export let tpError: string | null = null;
+
+  $: effectiveTraveling = isTraveling || tpTraveling;
+  $: effectiveQueued = isQueued || tpQueued;
+  $: effectiveTravelError = travelError ?? tpError;
 
   const dispatch = createEventDispatcher<{
     sortvalue: { id: string; value: any };
@@ -369,6 +377,7 @@
   <div
     class="item-row mode-{resolvedStyle} r-{rarityKey}"
     class:is-live-entry={isLive}
+    class:is-tp-visited={tpVisited}
     class:is-corrupted={item.corrupted || item.doubleCorrupted}
     class:is-unidentified={item.identified === false}
     data-item-id={id}
@@ -448,12 +457,12 @@
     <div class="col-listing">
       <ItemListing
         {listing}
-        sortValue={effectiveSortValue}
         convertedPrice={displayConvertedPrice}
         convertedCurrency={targetCurrency}
-        {isTraveling}
-        {isQueued}
-        {travelError}
+        isTraveling={effectiveTraveling}
+        isQueued={effectiveQueued}
+        isVisited={tpVisited}
+        travelError={effectiveTravelError}
         {realm}
         {league}
         {searchId}

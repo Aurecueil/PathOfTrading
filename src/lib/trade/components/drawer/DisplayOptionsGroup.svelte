@@ -18,7 +18,7 @@
 
   const dispatch = createEventDispatcher<{ change: void }>();
 
-  let collapsed = false;
+  let collapsed = true;
   let isCurrencyOpen = false;
   let highlightedIndex = -1;
 
@@ -123,7 +123,7 @@
     class="group-toggle"
     on:click={() => (collapsed = !collapsed)}
   >
-    <span>Tile Display</span>
+    <span>Display Options</span>
     <span class="chevron">{collapsed ? "▸" : "▾"}</span>
   </button>
 

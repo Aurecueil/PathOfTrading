@@ -175,6 +175,7 @@ struct TpStatus {
     tile_id: String,
     status: String,
     message: String,
+    item_id: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -208,13 +209,20 @@ pub struct TpController {
     busy: AtomicBool,
 }
 
-fn emit_status(app: &AppHandle, tile_id: &str, status: &str, message: impl Into<String>) {
+fn emit_status(
+    app: &AppHandle,
+    tile_id: &str,
+    status: &str,
+    message: impl Into<String>,
+    item_id: Option<&str>,
+) {
     let _ = app.emit(
         "tp-status",
         TpStatus {
             tile_id: tile_id.to_string(),
             status: status.to_string(),
             message: message.into(),
+            item_id: item_id.map(str::to_string),
         },
     );
 }
@@ -296,7 +304,7 @@ impl TpController {
     async fn run(&self, app: &AppHandle) {
         let active = self.st.lock().await.active.clone();
         let Some(active) = active else {
-            emit_status(app, "", "error", "No tile selected for teleport");
+            emit_status(app, "", "error", "No tile selected for teleport", None);
             return;
         };
         let logged_in = get_poe_auth_status()
@@ -304,7 +312,13 @@ impl TpController {
             .map(|s| s.logged_in)
             .unwrap_or(false);
         if !logged_in {
-            emit_status(app, &active.tile_id, "error", "Log in to use teleport");
+            emit_status(
+                app,
+                &active.tile_id,
+                "error",
+                "Log in to use teleport",
+                None,
+            );
             return;
         }
 
@@ -313,12 +327,16 @@ impl TpController {
             TpMode::Regular | TpMode::Mixed => self.run_list(app, &active).await,
         };
         match res {
-            Ok(msg) => emit_status(app, &active.tile_id, "done", msg),
-            Err(e) => emit_status(app, &active.tile_id, "error", e),
+            Ok((msg, item_id)) => emit_status(app, &active.tile_id, "done", msg, Some(&item_id)),
+            Err((e, item_id)) => emit_status(app, &active.tile_id, "error", e, item_id.as_deref()),
         }
     }
 
-    async fn run_list(&self, app: &AppHandle, a: &TpActive) -> Result<String, String> {
+    async fn run_list(
+        &self,
+        app: &AppHandle,
+        a: &TpActive,
+    ) -> Result<(String, String), (String, Option<String>)> {
         let (ids, seen) = {
             let st = self.st.lock().await;
             let ids = st
@@ -330,7 +348,7 @@ impl TpController {
             (ids, st.seen.clone())
         };
         if ids.is_empty() {
-            return Err("No results to teleport to".into());
+            return Err(("No results to teleport to".into(), None));
         }
 
         for (idx, id) in ids.iter().enumerate() {
@@ -339,11 +357,14 @@ impl TpController {
             }
             let entry = match self.index.get(id) {
                 Some(e) => e,
-                None => self.reveal(app, a, idx, id, &ids).await?,
+                None => self
+                    .reveal(app, a, idx, id, &ids)
+                    .await
+                    .map_err(|e| (e, Some(id.clone())))?,
             };
             match entry {
                 TpEntry::NoToken => {
-                    self.mark_seen(id).await; // nothing to teleport to, don't stop here again
+                    self.mark_seen(id).await;
                     continue;
                 }
                 TpEntry::Token { token, hideout } => {
@@ -356,25 +377,33 @@ impl TpController {
                         } else {
                             "Whispering…"
                         },
+                        Some(id),
                     );
-                    self.travel(app, a, &token).await?;
+                    self.travel(app, a, &token)
+                        .await
+                        .map_err(|e| (e, Some(id.clone())))?;
                     self.mark_seen(id).await;
-                    return Ok(format!(
-                        "{} item #{}",
-                        if hideout {
-                            "Teleported to"
-                        } else {
-                            "Whispered"
-                        },
-                        idx + 1
+                    return Ok((
+                        format!(
+                            "{} item #{}",
+                            if hideout {
+                                "Teleported to"
+                            } else {
+                                "Whispered"
+                            },
+                            idx + 1
+                        ),
+                        id.clone(),
                     ));
                 }
             }
         }
-        Err("No unseen items left (right-click TP to reset)".into())
+        Err((
+            "No unseen items left (right-click TP to reset)".into(),
+            None,
+        ))
     }
 
-    /// Item not fetched yet: ask the UI to load it, fall back to fetching it here.
     async fn reveal(
         &self,
         app: &AppHandle,
@@ -383,7 +412,7 @@ impl TpController {
         id: &str,
         ids: &[String],
     ) -> Result<TpEntry, String> {
-        emit_status(app, &a.tile_id, "waiting", "Loading item…");
+        emit_status(app, &a.tile_id, "waiting", "Loading item…", Some(id));
         let _ = app.emit(
             "tp-reveal",
             TpReveal {
@@ -425,30 +454,33 @@ impl TpController {
             .ok_or_else(|| "Item could not be loaded".to_string())
     }
 
-    async fn run_live(&self, app: &AppHandle, a: &TpActive) -> Result<String, String> {
+    async fn run_live(
+        &self,
+        app: &AppHandle,
+        a: &TpActive,
+    ) -> Result<(String, String), (String, Option<String>)> {
         let code = {
             let st = self.st.lock().await;
             st.live.get(&a.tile_id).and_then(|q| q.back().cloned())
         };
         let Some(code) = code else {
-            return Err("No live items received yet".into());
+            return Err(("No live items received yet".into(), None));
         };
         let code_key = format!("code:{code}");
         if self.st.lock().await.seen.contains(&code_key) {
-            return Err("No new live items".into());
+            return Err(("No new live items".into(), None));
         }
 
-        emit_status(app, &a.tile_id, "waiting", "Waiting for live item…");
+        emit_status(app, &a.tile_id, "waiting", "Waiting for live item…", None);
         let ids = self
             .index
             .wait_code(&code, LIVE_WAIT_TIMEOUT)
             .await
-            .ok_or_else(|| "Live item is still loading, try again".to_string())?;
-        // a code can hold several items: take the first (top) one
+            .ok_or_else(|| ("Live item is still loading, try again".to_string(), None))?;
         let first = ids
             .first()
             .cloned()
-            .ok_or_else(|| "Item is no longer available".to_string())?;
+            .ok_or_else(|| ("Item is no longer available".to_string(), None))?;
 
         match self.index.get(&first) {
             Some(TpEntry::Token { token, hideout }) => {
@@ -461,23 +493,28 @@ impl TpController {
                     } else {
                         "Whispering…"
                     },
+                    Some(&first),
                 );
-                self.travel(app, a, &token).await?;
+                self.travel(app, a, &token)
+                    .await
+                    .map_err(|e| (e, Some(first.clone())))?;
                 self.mark_seen(&first).await;
                 self.mark_seen(&code_key).await;
-                Ok(if hideout {
-                    "Teleported to newest live item".into()
-                } else {
-                    "Whispered newest live item".into()
-                })
+                Ok((
+                    if hideout {
+                        "Teleported to newest live item".into()
+                    } else {
+                        "Whispered newest live item".into()
+                    },
+                    first,
+                ))
             }
             _ => {
                 self.mark_seen(&code_key).await;
-                Err("Newest live item has no teleport token".into())
+                Err(("Newest live item has no teleport token".into(), Some(first)))
             }
         }
     }
-
     async fn mark_seen(&self, key: &str) {
         let mut st = self.st.lock().await;
         if st.seen.len() > MAX_SEEN {
