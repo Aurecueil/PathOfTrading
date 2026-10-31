@@ -17,7 +17,6 @@
   import SearchItemRow from "$lib/searchTile/SearchItemRow.svelte";
   import ItemJsonModal from "$lib/trade/components/item/ItemJsonModal.svelte";
   import { authState, isDev } from "$lib/trade/tradeStore";
-  import { convertCurrency } from "$lib/trade/pricing";
 
   export let tile: SearchTile;
   export let scale: number = 1;
@@ -289,43 +288,7 @@
     jsonModalData = activePayload ?? fallbackPayload ?? {};
     jsonModalOpen = true;
   }
-  function toTargetCurrency(amount: number, currency?: string): number | null {
-    if (!currency) return null;
-    const target = tile.currency || "chaos";
-    if (currency === target) return amount;
-    try {
-      const v = convertCurrency(
-        amount,
-        currency,
-        target,
-        currentLeague,
-        isPoe2 ? "poe2" : "poe",
-      );
-      return Number.isFinite(v) && v !== -9 ? v : null;
-    } catch {
-      return null;
-    }
-  }
-  let lastSortCurrency = tile.currency;
 
-  $: if (tile.currency !== lastSortCurrency) {
-    lastSortCurrency = tile.currency;
-    recomputePriceSortValues();
-  }
-
-  function recomputePriceSortValues() {
-    const { field } = getSortConfig();
-    if (field !== "price") return;
-    for (const e of itemsMap.values()) {
-      if (e.data) e.sortValue = extractSortValue(e.data, field);
-    }
-    if (mode === "mixed") {
-      sortOrderedList();
-    } else {
-      orderedEntries = orderedEntries;
-      displayedItems = displayedItems;
-    }
-  }
   function openFullResponseModal() {
     const fetchedItems = orderedEntries
       .map((e) => e.data)
@@ -497,144 +460,22 @@
     };
   }
 
-  function cleanBracketText(text: string): string {
-    if (!text) return "";
-    return text.replace(/\[([^\]]+)\]/g, (_, inner: string) => {
-      const parts = inner.split("|");
-      return parts[parts.length - 1];
+  let sortQueued = false;
+  function scheduleSort() {
+    if (sortQueued) return;
+    sortQueued = true;
+    queueMicrotask(() => {
+      sortQueued = false;
+      if (!isDestroyed) sortOrderedList();
     });
   }
 
-  function extractModNumericValue(mod: string | ItemMod): number {
-    const desc = cleanBracketText(
-      typeof mod === "string" ? mod : mod.description || "",
-    );
-    const matches = desc.match(/[+-]?\d+(?:\.\d+)?/g);
-    if (!matches || matches.length === 0) return 0;
-    const nums = matches.map(Number).filter((n) => !Number.isNaN(n));
-    if (nums.length === 0) return 0;
-    return nums.reduce((acc, n) => acc + n, 0) / nums.length;
-  }
-
-  function extractSortValue(entry: TradeFetchResult, field: string): any {
-    if (!entry) return null;
-    if (field === "price") {
-      const p = entry.listing?.price;
-      if (!p || typeof p.amount !== "number") return null;
-      return toTargetCurrency(p.amount, p.currency) ?? p.amount;
-    }
-
-    const it = entry.item;
-    const normField = normalizeModHash(field);
-    const lowerField = normField.toLowerCase();
-
-    if (it) {
-      const modMap = new Map<string, number>();
-      const lists: Array<Array<string | ItemMod> | undefined> = [
-        it.implicitMods,
-        it.explicitMods,
-        it.enchantMods,
-        it.runeMods,
-        it.scourgeMods,
-        it.bondedMods,
-        it.crucibleMods,
-        it.veiledMods,
-        it.pseudoMods,
-      ];
-      for (const list of lists) {
-        if (!list) continue;
-        for (const mod of list) {
-          if (typeof mod === "string" || !mod.hash) continue;
-          const h = normalizeModHash(mod.hash);
-          if (!h) continue;
-          modMap.set(h, (modMap.get(h) ?? 0) + extractModNumericValue(mod));
-        }
-      }
-
-      if (
-        lowerField === "weight" ||
-        lowerField === "weight2" ||
-        lowerField === "count"
-      ) {
-        const rawStats = activePayload?.query?.stats ?? activePayload?.stats;
-        if (Array.isArray(rawStats)) {
-          const group = rawStats.find(
-            (g: any) =>
-              g &&
-              !g.disabled &&
-              String(g.type || "").toLowerCase() === lowerField &&
-              Array.isArray(g.filters),
-          );
-          if (group) {
-            if (lowerField === "count") {
-              let c = 0;
-              for (const f of group.filters) {
-                if (!f || f.disabled) continue;
-                if (modMap.has(normalizeModHash(f.id))) c += 1;
-              }
-              return c;
-            } else {
-              let sum = 0;
-              for (const f of group.filters) {
-                if (!f || f.disabled) continue;
-                const h = normalizeModHash(f.id);
-                if (modMap.has(h)) {
-                  const w =
-                    f.value?.weight !== undefined && f.value?.weight !== null
-                      ? Number(f.value.weight)
-                      : 1;
-                  sum += (modMap.get(h) ?? 0) * (Number.isNaN(w) ? 1 : w);
-                }
-              }
-              return sum;
-            }
-          }
-        }
-      }
-
-      if (modMap.has(normField)) {
-        return modMap.get(normField)!;
-      }
-
-      if (it.extended && normField in it.extended) {
-        return (it.extended as any)[normField];
-      }
-    }
-
-    if (field in entry) return (entry as any)[field];
-    if (it && field in it) return (it as any)[field];
-    if (entry.listing && field in entry.listing)
-      return (entry.listing as any)[field];
-    return null;
-  }
-  function normalizeRowSortValue(v: any): any {
-    if (v === null || v === undefined) return undefined; // keep tile's own value
-    if (typeof v === "number" || typeof v === "string") return v;
-
-    if (typeof v === "object") {
-      // price object { amount, currency, type }
-      if ("amount" in v && "currency" in v) {
-        const amt = Number(v.amount);
-        if (!Number.isFinite(amt)) return undefined;
-        return toTargetCurrency(amt, v.currency) ?? amt;
-      }
-      // mod objects etc.: the tile's own extractSortValue already computes
-      // a proper number (summed duplicates, weight/count), so ignore these.
-    }
-    return undefined;
-  }
   function handleRowSortValue(e: CustomEvent<{ id: string; value: any }>) {
     const { id, value } = e.detail;
     const existing = itemsMap.get(id);
-    if (!existing) return;
-
-    const normalized = normalizeRowSortValue(value);
-    if (normalized === undefined || existing.sortValue === normalized) return;
-
-    existing.sortValue = normalized;
-    if (mode === "mixed") {
-      sortOrderedList();
-    }
+    if (!existing || existing.sortValue === value) return;
+    existing.sortValue = value; // overwrite with the row's latest value
+    if (mode === "mixed") scheduleSort();
   }
 
   function sortOrderedList() {
@@ -858,7 +699,7 @@
         bodyElement.scrollTop = 0;
       }
 
-      if (!$authState || mode === "regular" || mode === "mixed") {
+      if (!$authState || mode === "regular") {
         for (const id of tile.results) {
           const entry: DisplayEntry = {
             uid: `reg_${id}_${uidCounter++}`,
@@ -959,17 +800,14 @@
       const parsed: TradeFetchResponse =
         typeof rawData === "string" ? JSON.parse(rawData) : rawData;
       const fetchedResults: TradeFetchResult[] = parsed?.result || [];
-      const { field } = getSortConfig();
 
       for (const itemData of fetchedResults) {
         if (!itemData || !itemData.id) continue;
         const id = itemData.id;
-        const sortVal = extractSortValue(itemData, field);
 
         if (itemsMap.has(id)) {
           const existing = itemsMap.get(id)!;
           existing.data = itemData;
-          existing.sortValue = sortVal;
         } else {
           const newEntry: DisplayEntry = {
             uid: `reg_${id}_${uidCounter++}`,
@@ -977,7 +815,7 @@
             payload: activePayload,
             league: currentLeague,
             data: itemData,
-            sortValue: sortVal,
+            sortValue: null,
             isLive: false,
           };
           itemsMap.set(id, newEntry);
@@ -1061,25 +899,21 @@
 
     if (isDestroyed) return;
 
-    const { field } = getSortConfig();
     const usedPlaceholderUids = new Set<string>();
     let placeholderIdx = 0;
 
     for (const itemData of fetchedResults) {
       if (!itemData || !itemData.id) continue;
       const realId = itemData.id;
-      const sortVal = extractSortValue(itemData, field);
 
       if (itemsMap.has(realId)) {
         const existing = itemsMap.get(realId)!;
         existing.data = itemData;
-        existing.sortValue = sortVal;
         existing.isLive = true;
       } else if (placeholderIdx < placeholders.length) {
         const targetPlaceholder = placeholders[placeholderIdx++];
         targetPlaceholder.id = realId;
         targetPlaceholder.data = itemData;
-        targetPlaceholder.sortValue = sortVal;
         usedPlaceholderUids.add(targetPlaceholder.uid);
         itemsMap.set(realId, targetPlaceholder);
       } else {
@@ -1089,7 +923,7 @@
           payload: activePayload,
           league: currentLeague,
           data: itemData,
-          sortValue: sortVal,
+          sortValue: null,
           isLive: true,
         };
         itemsMap.set(realId, extraEntry);

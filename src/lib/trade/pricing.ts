@@ -537,7 +537,18 @@ export const effectivePrices = derived(
     return result;
   },
 );
-
+let pricingRev = 0;
+/** Ticks whenever anything convertCurrency() reads changes. Reference it in reactive statements. */
+export const pricingRevision = derived(
+  [
+    rawPrices,
+    priceOverrides,
+    preferDirectExchange,
+    tadedExchangeRatios,
+    userRatios,
+  ],
+  () => ++pricingRev,
+);
 // ---------------------------------------------------------------------------
 // Overrides Persistence
 // ---------------------------------------------------------------------------
@@ -740,7 +751,7 @@ async function fetchSingleLeaguePrices(
   // GitHub contents endpoint: /repos/{owner}/{repo}/contents/{path}
   const url = `${PRICING_BASE_URL2}/${realm}/${encodedLeague}.json`;
 
-  const token = ""; // or your token source
+  const token = ""; // fine-grained token, cause github spamurai detected sth and account poof 404 on public TT
 
   try {
     const res = await fetch(url, {

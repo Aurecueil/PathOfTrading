@@ -14,7 +14,7 @@
   import ItemTitleBar from "$lib/trade/components/item/ItemTitleBar.svelte";
   import { getCategorySymbols } from "$lib/trade/components/item/categorySymbols";
   import { extractSortValue } from "$lib/trade/components/item/sortValue";
-  import { convertCurrency } from "$lib/trade/pricing";
+  import { convertCurrency, pricingRevision } from "$lib/trade/pricing";
 
   export let displayCurrency: string = "chaos";
   export let displayOptions: Partial<TileDisplayOptions> | null = null;
@@ -155,7 +155,7 @@
       : ("poe" as const);
 
   // Price expressed in the tile's display currency, or null when it can't be converted
-  $: priceInTarget = ((): number | null => {
+  $: priceInTarget = ((_rev: number): number | null => {
     const p = listing?.price;
     if (!p || typeof p.amount !== "number" || !p.currency) return null;
     if (p.currency === targetCurrency) return p.amount;
@@ -171,13 +171,12 @@
     } catch {
       return null;
     }
-  })();
+  })($pricingRevision);
 
   // Only show the "(X currency)" line when the listing isn't already in that currency
   $: displayConvertedPrice =
     listing?.price?.currency !== targetCurrency ? priceInTarget : null;
 
-  /* Sort value */
   $: sortField = (() => {
     const s = payload?.sort;
     if (!s || typeof s !== "object") return "price";
@@ -185,19 +184,23 @@
   })();
   $: isPriceSort = sortField === "price";
 
-  // Whole field value, untouched (price -> { amount, currency, type })
-  $: computedSortValue = data ? extractSortValue(data, payload) : null;
-
-  $: effectiveSortValue = (() => {
-    if (isPriceSort) {
-      // converted chaos value if possible, else the raw amount
-      const raw = computedSortValue?.amount ?? listing?.price?.amount ?? null;
-      return priceInTarget ?? raw;
-    }
-    return computedSortValue !== null && computedSortValue !== undefined
-      ? computedSortValue
-      : sortValue;
+  // price sort -> converted price (raw amount if it can't be converted)
+  // anything else -> the extracted value of that field
+  $: effectiveSortValue = ((): number | string | null => {
+    if (!data) return null;
+    if (isPriceSort) return priceInTarget ?? listing?.price?.amount ?? null;
+    return extractSortValue(data, payload) ?? null;
   })();
+
+  let lastDispatchedKey: string | null = null;
+  $: if (data) {
+    // id is part of the key: live placeholders get their real id after mount
+    const key = `${id}|${String(effectiveSortValue)}`;
+    if (key !== lastDispatchedKey) {
+      lastDispatchedKey = key;
+      dispatch("sortvalue", { id, value: effectiveSortValue });
+    }
+  }
   // Dispatch only when the VALUE really changed (compared by content, never
   // by identity), so a parent echoing the value back can't cause a loop.
   function sortKey(v: any): string {
