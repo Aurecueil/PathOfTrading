@@ -6,34 +6,57 @@ export type GameRealm = "poe" | "poe2";
 
 export const POE1_TARGETS = [
   "chaos",
-  "exalted",
   "divine",
-  "mirror",
-  "blessed",
-  "chrome",
-  "gcp",
-  "jewellers",
-  "scour",
-  "regret",
-  "fusing",
-  "chance",
-  "alt",
   "alch",
+  "exalted",
+  "alt",
+  "mirror",
+  "chrome",
+  "blessed",
+  "fusing",
+  "jewellers",
   "regal",
   "vaal",
+  "chance",
+  "annul",
+  "aug",
+  "regret",
+  "scour",
+  "transmute",
+  "wisdom",
+  "portal",
+  "scrap",
+  "whetstone",
+  "gcp",
+  "bauble",
+  "offer",
 ] as const;
 
 export const POE2_TARGETS = [
-  "aug",
-  "transmute",
   "exalted",
-  "regal",
-  "chaos",
-  "vaal",
-  "alch",
+  "greater-exalted-orb",
+  "perfect-exalted-orb",
   "divine",
+  "chaos",
+  "greater-chaos-orb",
+  "perfect-chaos-orb",
+  "alch",
   "annul",
+  "regal",
+  "greater-regal-orb",
+  "perfect-regal-orb",
+  "transmute",
+  "greater-orb-of-transmutation",
+  "perfect-orb-of-transmutation",
+  "aug",
+  "greater-orb-of-augmentation",
+  "perfect-orb-of-augmentation",
+  "chance",
+  "vaal",
+  "artificers",
+  "fracturing-orb",
   "mirror",
+  "wisdom",
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -114,11 +137,230 @@ export const lastPriceUpdate = writable<{
   poe: null,
   poe2: null,
 });
+// ---------------------------------------------------------------------------
+// User-set exchange ratios (one override per pair, with buy / sell / vol slots)
+// ---------------------------------------------------------------------------
+export type PairSource = "direct" | "proxy";
+export type RatioMode = "vol" | "buy" | "sell";
 
+export const LIFETIME_OPTIONS = [
+  { id: "1h", label: "Clear after 1 hour", ms: 3_600_000 },
+  { id: "2h", label: "Clear after 2 hours", ms: 2 * 3_600_000 },
+  { id: "6h", label: "Clear after 6 hours", ms: 6 * 3_600_000 },
+  { id: "12h", label: "Clear after 12 hours", ms: 12 * 3_600_000 },
+  { id: "1d", label: "Clear after 1 day", ms: 24 * 3_600_000 },
+  { id: "2d", label: "Clear after 2 days", ms: 48 * 3_600_000 },
+  { id: "4d", label: "Clear after 4 days", ms: 96 * 3_600_000 },
+  { id: "1w", label: "Clear after 1 week", ms: 168 * 3_600_000 },
+  { id: "never", label: "Never", ms: null },
+] as const;
+export type LifetimeId = (typeof LIFETIME_OPTIONS)[number]["id"];
+export const DEFAULT_LIFETIME: LifetimeId = "1d";
+
+/** h/w follow the ExchangeRateEntry convention (canonical `have/want`, have < want). */
+export interface UserRatio {
+  h: number;
+  w: number;
+  lifetime: LifetimeId;
+  /** unix ms when this ratio is cleared; null = never */
+  expires: number | null;
+}
+/** One override per pair, with at most one value per mode */
+export type UserPairRatios = Partial<Record<RatioMode, UserRatio>>;
+/** canonical pair key -> modes */
+export type UserLeagueRatios = Record<string, UserPairRatios>;
+export type UserRatiosStoreMap = Record<
+  GameRealm,
+  Record<string, UserLeagueRatios>
+>;
+
+const USER_RATIOS_KEY = "pot.userExchangeRatios.v2";
+const RATIO_MODES: RatioMode[] = ["vol", "buy", "sell"];
+
+function lifetimeExpiry(id: LifetimeId, from = Date.now()): number | null {
+  const ms = LIFETIME_OPTIONS.find((o) => o.id === id)?.ms ?? null;
+  return ms === null ? null : from + ms;
+}
+
+function isLive(r: UserRatio | undefined, now = Date.now()): r is UserRatio {
+  return !!r && r.h > 0 && r.w > 0 && (r.expires === null || r.expires > now);
+}
+
+function pruneUserRatios(
+  map: UserRatiosStoreMap,
+  now = Date.now(),
+): { next: UserRatiosStoreMap; changed: boolean } {
+  const next = structuredClone(map);
+  let changed = false;
+  for (const realm of ["poe", "poe2"] as const) {
+    for (const [leagueId, pairs] of Object.entries(next[realm])) {
+      for (const [key, modes] of Object.entries(pairs)) {
+        for (const m of RATIO_MODES) {
+          if (modes[m] && !isLive(modes[m], now)) {
+            delete modes[m];
+            changed = true;
+          }
+        }
+        if (Object.keys(modes).length === 0) delete pairs[key];
+      }
+      if (Object.keys(pairs).length === 0) delete next[realm][leagueId];
+    }
+  }
+  return { next, changed };
+}
+
+function loadUserRatios(): UserRatiosStoreMap {
+  const empty: UserRatiosStoreMap = { poe: {}, poe2: {} };
+  if (typeof window === "undefined") return empty;
+  try {
+    const raw = localStorage.getItem(USER_RATIOS_KEY);
+    if (!raw) return empty;
+    const p = JSON.parse(raw);
+    return pruneUserRatios({ poe: p.poe ?? {}, poe2: p.poe2 ?? {} }).next;
+  } catch {
+    return empty;
+  }
+}
+
+export const userRatios = writable<UserRatiosStoreMap>(loadUserRatios());
+
+userRatios.subscribe((data) => {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(USER_RATIOS_KEY, JSON.stringify(data));
+  } catch {
+    /* ignore */
+  }
+});
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e.key === USER_RATIOS_KEY) userRatios.set(loadUserRatios());
+  });
+  // Clear expired ratios while the app is open
+  setInterval(() => {
+    const { next, changed } = pruneUserRatios(get(userRatios));
+    if (changed) userRatios.set(next);
+  }, 15_000);
+}
+
+function mutateUserRatios(fn: (draft: UserRatiosStoreMap) => void) {
+  userRatios.update((s) => {
+    const draft = structuredClone(s);
+    fn(draft);
+    return pruneUserRatios(draft).next;
+  });
+}
+
+/** Pair key + which slot (vol / buy / sell) a `from -> to` row maps to. */
+export function ratioModeFor(from: string, to: string, useTradedVol: boolean) {
+  const { key, flipped } = makePairKey(from, to);
+  const mode: RatioMode = useTradedVol ? "vol" : flipped ? "sell" : "buy";
+  return { key, flipped, mode };
+}
+
+/** Sets "1 `from` = `mult` `to`" as the user ratio. Existing lifetime is kept. */
+export function setUserMultiplier(
+  realm: GameRealm,
+  leagueId: string,
+  from: string,
+  to: string,
+  mult: number,
+  useTradedVol: boolean,
+  lifetime?: LifetimeId,
+): void {
+  if (!leagueId || !Number.isFinite(mult) || mult <= 0) return;
+  const { key, flipped, mode } = ratioModeFor(from, to, useTradedVol);
+  // multiplier = flipped ? h / w : w / h
+  const hw = flipped ? { h: mult, w: 1 } : { h: 1, w: mult };
+  mutateUserRatios((d) => {
+    const league = (d[realm][leagueId] ??= {});
+    const pair = (league[key] ??= {});
+    const lt = lifetime ?? pair[mode]?.lifetime ?? DEFAULT_LIFETIME;
+    pair[mode] = { ...hw, lifetime: lt, expires: lifetimeExpiry(lt) };
+  });
+}
+
+export function clearUserMultiplier(
+  realm: GameRealm,
+  leagueId: string,
+  from: string,
+  to: string,
+  useTradedVol: boolean,
+): void {
+  const { key, mode } = ratioModeFor(from, to, useTradedVol);
+  mutateUserRatios((d) => {
+    delete d[realm][leagueId]?.[key]?.[mode];
+  });
+}
+
+export function setUserLifetime(
+  realm: GameRealm,
+  leagueId: string,
+  from: string,
+  to: string,
+  useTradedVol: boolean,
+  lifetime: LifetimeId,
+): void {
+  const { key, mode } = ratioModeFor(from, to, useTradedVol);
+  mutateUserRatios((d) => {
+    const r = d[realm][leagueId]?.[key]?.[mode];
+    if (r) {
+      r.lifetime = lifetime;
+      r.expires = lifetimeExpiry(lifetime);
+    }
+  });
+}
+
+/**
+ * Multiplier for one displayed row. A user ratio (shared by direct and proxy)
+ * wins over the market entry of the given source.
+ */
+export function getSourceRowMultiplier(
+  maps: LeagueExchangeMaps | undefined,
+  user: UserLeagueRatios | undefined,
+  source: PairSource,
+  from: string,
+  to: string,
+  useTradedVol: boolean,
+): {
+  mult: number | null;
+  custom: UserRatio | null;
+  entry: ExchangeRateEntry | undefined;
+} {
+  const { key, flipped, mode } = ratioModeFor(from, to, useTradedVol);
+  const entry = maps?.[source][key];
+  const custom = user?.[key]?.[mode];
+  if (isLive(custom)) {
+    return {
+      mult: flipped ? custom.h / custom.w : custom.w / custom.h,
+      custom,
+      entry,
+    };
+  }
+  return {
+    mult: entry ? getPairMultiplier(entry, flipped, useTradedVol) : null,
+    custom: null,
+    entry,
+  };
+}
+
+/** Used by conversion: a live user ratio wins over direct/proxy data. */
+function resolveUserMultiplier(
+  user: UserLeagueRatios | undefined,
+  from: string,
+  to: string,
+  useTradedVol: boolean,
+): number | null {
+  if (!user) return null;
+  const { key, flipped, mode } = ratioModeFor(from, to, useTradedVol);
+  const r = user[key]?.[mode];
+  return isLive(r) ? (flipped ? r.h / r.w : r.w / r.h) : null;
+}
 // ---------------------------------------------------------------------------
 // Pair Lookup & Ratio Math
 // ---------------------------------------------------------------------------
-function makePairKey(
+export function makePairKey(
   currA: string,
   currB: string,
 ): { key: string; flipped: boolean } {
@@ -191,6 +433,7 @@ function resolvePairMultiplier(
   toCurr: string,
   preferDirect: boolean,
   useTradedVol: boolean,
+  userPairs?: UserLeagueRatios,
 ): number | null {
   const a = fromCurr.toLowerCase();
   const b = toCurr.toLowerCase();
@@ -198,6 +441,10 @@ function resolvePairMultiplier(
   if (a === b) {
     return leagueMaps.currencies.includes(a) ? 1 : null;
   }
+
+  // User-set ratios take priority over direct and proxy market data
+  const userMult = resolveUserMultiplier(userPairs, a, b, useTradedVol);
+  if (userMult !== null) return userMult;
 
   const selected = selectPairEntry(leagueMaps, a, b, preferDirect);
   if (!selected) return null;
@@ -221,6 +468,7 @@ function buildBaseRatesMap(
   base: string,
   preferDirect: boolean,
   useTradedVol: boolean,
+  userPairs?: UserLeagueRatios,
 ): Record<string, number> {
   const rates: Record<string, number> = {};
   if (leagueMaps.currencies.includes(base)) {
@@ -236,6 +484,7 @@ function buildBaseRatesMap(
       base,
       preferDirect,
       useTradedVol,
+      userPairs,
     );
     if (mult !== null && Number.isFinite(mult) && mult > 0) {
       rates[key] = mult;
@@ -245,8 +494,14 @@ function buildBaseRatesMap(
 }
 
 export const effectivePrices = derived(
-  [rawPrices, priceOverrides, preferDirectExchange, tadedExchangeRatios],
-  ([$raw, $overrides, $preferDirect, $useTradedVol]): PricesStoreMap => {
+  [
+    rawPrices,
+    priceOverrides,
+    preferDirectExchange,
+    tadedExchangeRatios,
+    userRatios,
+  ],
+  ([$raw, $overrides, $preferDirect, $useTradedVol, $user]): PricesStoreMap => {
     const result: PricesStoreMap = { poe: {}, poe2: {} };
 
     for (const realm of ["poe", "poe2"] as const) {
@@ -262,6 +517,7 @@ export const effectivePrices = derived(
           base,
           $preferDirect,
           $useTradedVol,
+          $user[realm]?.[leagueId],
         );
 
         result[realm][leagueId] = {
@@ -453,15 +709,49 @@ function parseLeagueFile(raw: RemoteLeagueFile): LeagueExchangeMaps | null {
   };
 }
 
+// async function fetchSingleLeaguePrices(
+//   realm: GameRealm,
+//   leagueId: string,
+// ): Promise<LeagueExchangeMaps | null> {
+//   const encodedLeague = encodeURIComponent(leagueId);
+//   const url = `${PRICING_BASE_URL}/${realm}/${encodedLeague}.json`;
+//
+//   try {
+//     const res = await fetch(url, { cache: "no-store" });
+//     if (!res.ok) return null;
+//     const data = (await res.json()) as RemoteLeagueFile;
+//     return parseLeagueFile(data);
+//   } catch (err) {
+//     console.warn(`[Pricing] Failed to fetch ${realm}/${leagueId}:`, err);
+//     return null;
+//   }
+// }
+
+///
+/// uwu
+///
+const PRICING_BASE_URL2 =
+  "https://api.github.com/repos/Aurecueil/poe.prices/contents";
 async function fetchSingleLeaguePrices(
   realm: GameRealm,
   leagueId: string,
 ): Promise<LeagueExchangeMaps | null> {
   const encodedLeague = encodeURIComponent(leagueId);
-  const url = `${PRICING_BASE_URL}/${realm}/${encodedLeague}.json`;
+  // GitHub contents endpoint: /repos/{owner}/{repo}/contents/{path}
+  const url = `${PRICING_BASE_URL2}/${realm}/${encodedLeague}.json`;
+
+  const token = ""; // or your token source
 
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url, {
+      cache: "no-store",
+      headers: {
+        Accept: "application/vnd.github.raw+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+
     if (!res.ok) return null;
     const data = (await res.json()) as RemoteLeagueFile;
     return parseLeagueFile(data);
@@ -470,6 +760,9 @@ async function fetchSingleLeaguePrices(
     return null;
   }
 }
+///
+/// uwu
+///
 
 export async function refreshRealmPrices(
   realm: GameRealm,
@@ -640,6 +933,7 @@ export function convertCurrency(
     keyB,
     preferDirect,
     useTradedVol,
+    get(userRatios)[realm]?.[leagueId],
   );
 
   if (mult === null || !Number.isFinite(mult) || mult <= 0) {

@@ -9,8 +9,9 @@
     settingsOverlay,
     closeSettings,
   } from "$lib/settings/settingsState.svelte";
+  import ExchangeTab from "$lib/settings/ExchangeTab.svelte";
 
-  type Category = "basic" | "stat-groups" | "color-coding";
+  type Category = "basic" | "stat-groups" | "color-coding" | "exchange";
   let active = $state<Category>("basic");
 
   let status = $state("");
@@ -25,6 +26,7 @@
     { id: "basic", label: "Basic" },
     { id: "stat-groups", label: "Stat Groups" },
     { id: "color-coding", label: "Color Coding" },
+    { id: "exchange", label: "Exchange" },
   ];
 
   function handleBackdropMouseDown(e: MouseEvent) {
@@ -100,6 +102,8 @@
               />
             {:else if active === "stat-groups"}
               <StatGroupsTab />
+            {:else if active === "exchange"}
+              <ExchangeTab />
             {:else}
               <ColorCodingTab onStatus={setStatus} />
             {/if}

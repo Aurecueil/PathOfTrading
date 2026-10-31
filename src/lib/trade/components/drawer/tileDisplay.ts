@@ -1,5 +1,5 @@
 import type { TileDisplayOptions } from "$lib/types/types";
-
+import { POE1_TARGETS, POE2_TARGETS } from "$lib/trade/pricing";
 export const DEFAULT_CURRENCY = "chaos";
 export const DEFAULT_SEARCH_ON_LOAD = true;
 
