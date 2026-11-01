@@ -1,4 +1,5 @@
 // src/lib/types/types.ts
+import type { Realm } from "$lib/types/leagues";
 export type SearchMode = "regular" | "live" | "mixed";
 export type TileDisplayStyle = "auto" | "full" | "compact" | "minimal";
 export type ResolvedDisplayStyle = "full" | "compact" | "minimal";
@@ -15,7 +16,7 @@ export interface SearchTile {
   y: number;
   w: number;
   h: number;
-  realm: "poe" | "poe2" | string;
+  realm: Realm;
   league?: string;
   title?: string;
   displayName?: string;
@@ -37,7 +38,7 @@ export interface SavedSearchTile {
   y: number;
   w: number;
   h: number;
-  realm: "poe" | "poe2" | string;
+  realm: Realm;
   league: string;
   title: string;
   disabled: boolean;
@@ -77,7 +78,7 @@ export type ProjectItem = SavedSearchTile | CanvasAnnotation;
 export interface SavedProject {
   id: string;
   name: string;
-  realm: "poe" | "poe2" | string;
+  realm: Realm;
   league: string;
   camera: CameraState;
   updated_at?: number;
@@ -87,7 +88,7 @@ export interface SavedProject {
 export interface ProjectIndexEntry {
   id: string;
   name: string;
-  realm: string;
+  realm: Realm;
   league: string;
   updated_at: number;
   tile_count: number;
@@ -96,7 +97,7 @@ export interface ProjectIndexEntry {
 
 export interface ShareCodePayload {
   camera?: CameraState;
-  realm?: string;
+  realm?: Realm;
   league?: string;
   items: ProjectItem[];
 }
@@ -104,7 +105,7 @@ export interface ShareCodePayload {
 export interface FormSubmitData {
   title: string;
   displayName?: string;
-  realm: "poe" | "poe2";
+  realm: Realm;
   league: string;
   payload: any;
   full_payload: any;

@@ -13,9 +13,9 @@
   export let displayOptions: TileDisplayOptions;
   export let currency: string = DEFAULT_CURRENCY;
   export let searchOnLoad: boolean = DEFAULT_SEARCH_ON_LOAD;
-  export let realm: "poe" | "poe2" = "poe";
+  export let realm: Realm = "pc";
   export let staticCatalog: any[] = [];
-
+  import type { Realm } from "$lib/types/leagues";
   const dispatch = createEventDispatcher<{ change: void }>();
 
   let collapsed = true;

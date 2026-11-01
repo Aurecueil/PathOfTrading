@@ -3,6 +3,8 @@
 /**
  * Common enums & unions
  */
+import type { Realm } from "$lib/types/leagues";
+
 export enum FrameType {
   Normal = 0,
   Magic = 1,
@@ -257,7 +259,7 @@ export interface Item {
   h: number;
   icon: string;
   league?: string;
-  realm?: "poe2" | string;
+  realm?: Realm;
 
   // Stash & Socket positions
   x?: number;

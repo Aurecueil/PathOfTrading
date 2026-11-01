@@ -7,9 +7,8 @@
 {#if realm}
   <img
     class="realm-icon"
-    src={realm === "poe2" ? "/poe2.png" : "/poe.png"}
+    src={realm === "poe2" ? "/poe2.png" : "/pc.png"}
     alt={realm}
-    title={realm === "poe2" ? "PoE 2 only" : "PoE 1 only"}
   />
 {/if}
 

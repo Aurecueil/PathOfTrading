@@ -14,12 +14,13 @@
     encodeSharePayloadToCode,
     workspaceState,
   } from "$lib/project/projects.svelte";
-  import { leaguesPoe, leaguesPoe2 } from "$lib/trade/tradeStore";
+  import { leaguesAll } from "$lib/trade/tradeStore";
+  import { REALM_OPTIONS, type League, type Realm } from "$lib/types/leagues";
   import type { ProjectIndexEntry, SavedProject } from "$lib/types/types";
 
   let loading = $state(true);
   let searchQuery = $state("");
-  let newProjectRealm = $state<"poe" | "poe2">("poe");
+  let newProjectRealm = $state<Realm>("pc");
   let newProjectLeague = $state("");
 
   let openHeaderDropdown = $state<"realm" | "league" | null>(null);
@@ -28,23 +29,8 @@
   let editingName = $state("");
   let confirmingDeleteEntry = $state<ProjectIndexEntry | null>(null);
 
-  const REALM_OPTIONS: Array<{ id: "poe" | "poe2"; text: string }> = [
-    { id: "poe", text: "PoE 1" },
-    { id: "poe2", text: "PoE 2" },
-  ];
-
-  // Filter PoE 1 leagues to only ones with realm/realms === "pc"
-  const poe1PcLeagues = $derived(
-    ($leaguesPoe || []).filter((l: any) => {
-      const r = String(l.realm ?? l.realms ?? "").toLowerCase();
-      return r === "pc";
-    }),
-  );
-
-  const poe2Leagues = $derived($leaguesPoe2 || []);
-
-  const availableLeagues = $derived(
-    newProjectRealm === "poe2" ? poe2Leagues : poe1PcLeagues,
+  const availableLeagues = ($leaguesAll || []).filter(
+    (l: League) => l.realm === newProjectRealm,
   );
 
   const activeRealmLabel = $derived(
@@ -61,15 +47,25 @@
       : newProjectLeague || "Standard";
   });
 
-  // Ensure selected league defaults to first available option when switching realm
+  // Sync league selection only when leagues arrive or realm changes
   $effect(() => {
-    if (
-      availableLeagues.length > 0 &&
-      !availableLeagues.some((l: any) => String(l.id) === newProjectLeague)
-    ) {
-      newProjectLeague = String(availableLeagues[0].id);
-    } else if (availableLeagues.length === 0 && !newProjectLeague) {
-      newProjectLeague = "Standard";
+    // Do nothing while leagues are still loading
+    if (availableLeagues.length === 0) return;
+
+    const currentIsValid = availableLeagues.some(
+      (l: any) => String(l.id) === newProjectLeague,
+    );
+
+    // If unselected or invalid for this realm, pick the primary league
+    if (!newProjectLeague || !currentIsValid) {
+      // Optional improvement: prioritize the active challenge league over Standard
+      // (Standard is usually at the bottom or has id === "Standard")
+      const preferred =
+        availableLeagues.find(
+          (l: any) => String(l.id).toLowerCase() !== "standard",
+        ) ?? availableLeagues[0];
+
+      newProjectLeague = String(preferred.id);
     }
   });
 
@@ -337,9 +333,7 @@
               <div class="card-main">
                 <div class="title-row">
                   <img
-                    src={entry.realm?.toLowerCase() === "poe2"
-                      ? "/poe2.png"
-                      : "/poe.png"}
+                    src={`/${entry.realm?.toLowerCase()}.png`}
                     alt={entry.realm || "poe"}
                     class="project-realm-icon"
                   />

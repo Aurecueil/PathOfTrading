@@ -52,6 +52,7 @@
     canvasBgPath,
     canvasBgOpacity,
   } from "$lib/trade/tradeStore";
+  import type { Realm } from "$lib/types/leagues";
 
   function resolveBgUrl(rawPath: string): string {
     const trimmed = rawPath.trim();
@@ -107,7 +108,7 @@
 
   let currentProjectId: string = "";
   let currentProjectName: string = "";
-  let currentProjectRealm: string = "poe";
+  let currentProjectRealm: Realm = "pc";
   let currentProjectLeague: string = "Standard";
   let isHydratingProject: boolean = false;
 
@@ -250,7 +251,7 @@
       loaded = {
         id,
         name: existingTab?.name ?? "",
-        realm: existingTab?.realm || "poe",
+        realm: existingTab?.realm || "pc",
         league: "Standard",
         camera: { scale: 1, offsetX: 0, offsetY: 0 },
         updated_at: Date.now(),
@@ -419,7 +420,7 @@
     return true;
   }
 
-  function handleSetProjectDefaults(realm: string, league: string) {
+  function handleSetProjectDefaults(realm: Realm, league: string) {
     currentProjectRealm = realm;
     currentProjectLeague = league;
     markDirty();
@@ -758,7 +759,7 @@
     x: number;
     y: number;
     targetTileIds: (string | number)[];
-    realm: string;
+    realm: Realm;
     league: string;
   } | null = null;
 
@@ -1278,7 +1279,7 @@
   }
 
   function applyRealmAndLeagueToSelected(
-    e: CustomEvent<{ realm: string; league: string }>,
+    e: CustomEvent<{ realm: Realm; league: string }>,
   ) {
     if (!contextMenu) return;
     saveSnapshot();
@@ -1563,7 +1564,7 @@
         bind:this={drawerRef}
         initialTitle={activeTile.title || ""}
         initialDisplayName={activeTile.displayName || activeTile.title || ""}
-        initialRealm={activeTile.realm === "poe2" ? "poe2" : "poe"}
+        initialRealm={activeTile.realm}
         initialLeague={activeTile.league || currentProjectLeague}
         initialPayload={activeTile.full_payload ?? null}
         initialDisplayOptions={activeTile.displayOptions ?? null}

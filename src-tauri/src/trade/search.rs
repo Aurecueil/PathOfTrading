@@ -11,7 +11,14 @@ pub async fn search_items_trade(
     let client = Client::new();
     let endpoint = crate::trade::get_endpoint();
     let trade_path = if realm == "poe2" { "trade2" } else { "trade" };
-    let url = format!("{endpoint}/api/{trade_path}/search/{league}");
+    let poe_platform = if realm == "xbox" {
+        "xbox/"
+    } else if realm == "sony" {
+        "sony/"
+    } else {
+        ""
+    };
+    let url = format!("{endpoint}/api/{trade_path}/search/{poe_platform}{league}");
 
     let poe_token =
         load_secret("poetoken")?.ok_or_else(|| "Missing 'poetoken' secret".to_string())?;

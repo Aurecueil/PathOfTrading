@@ -1,8 +1,7 @@
 // src/lib/trade/pricing.ts
 import { writable, get, derived, type Readable } from "svelte/store";
 import type { League } from "$lib/types/leagues";
-
-export type GameRealm = "poe" | "poe2";
+import type { Realm } from "$lib/types/leagues";
 
 export const POE1_TARGETS = [
   "chaos",
@@ -102,12 +101,12 @@ export interface LeaguePriceData extends LeagueExchangeMaps {
 }
 
 export type RawPricesStoreMap = Record<
-  GameRealm,
+  Realm,
   Record<string, LeagueExchangeMaps>
 >;
-export type PricesStoreMap = Record<GameRealm, Record<string, LeaguePriceData>>;
+export type PricesStoreMap = Record<Realm, Record<string, LeaguePriceData>>;
 export type OverridesStoreMap = Record<
-  GameRealm,
+  Realm,
   Record<string, Record<string, number>>
 >;
 
@@ -116,26 +115,33 @@ const PRICING_BASE_URL =
   "https://raw.githubusercontent.com/Aurecueil/poe.prices/main";
 
 // Store references injected from tradeStore.ts to avoid circular imports
-let poeLeaguesStore: Readable<League[]> | null = null;
-let poe2LeaguesStore: Readable<League[]> | null = null;
-
+let leaguesStore: Readable<League[]> | null = null;
 // ---------------------------------------------------------------------------
 // Stores
 // ---------------------------------------------------------------------------
 export const preferDirectExchange = writable<boolean>(false);
 export const tadedExchangeRatios = writable<boolean>(false);
 
-export const rawPrices = writable<RawPricesStoreMap>({ poe: {}, poe2: {} });
+export const rawPrices = writable<RawPricesStoreMap>({
+  pc: {},
+  poe2: {},
+  xbox: {},
+  sony: {},
+});
 export const priceOverrides = writable<OverridesStoreMap>(
   loadOverridesFromStorage(),
 );
 export const isRefreshingPrices = writable<boolean>(false);
 export const lastPriceUpdate = writable<{
-  poe: number | null;
+  pc: number | null;
   poe2: number | null;
+  xbox: number | null;
+  sony: number | null;
 }>({
-  poe: null,
+  pc: null,
   poe2: null,
+  xbox: null,
+  sony: null,
 });
 // ---------------------------------------------------------------------------
 // User-set exchange ratios (one override per pair, with buy / sell / vol slots)
@@ -170,7 +176,7 @@ export type UserPairRatios = Partial<Record<RatioMode, UserRatio>>;
 /** canonical pair key -> modes */
 export type UserLeagueRatios = Record<string, UserPairRatios>;
 export type UserRatiosStoreMap = Record<
-  GameRealm,
+  Realm,
   Record<string, UserLeagueRatios>
 >;
 
@@ -192,7 +198,7 @@ function pruneUserRatios(
 ): { next: UserRatiosStoreMap; changed: boolean } {
   const next = structuredClone(map);
   let changed = false;
-  for (const realm of ["poe", "poe2"] as const) {
+  for (const realm of ["pc", "poe2", "xbox", "sony"] as const) {
     for (const [leagueId, pairs] of Object.entries(next[realm])) {
       for (const [key, modes] of Object.entries(pairs)) {
         for (const m of RATIO_MODES) {
@@ -210,13 +216,18 @@ function pruneUserRatios(
 }
 
 function loadUserRatios(): UserRatiosStoreMap {
-  const empty: UserRatiosStoreMap = { poe: {}, poe2: {} };
+  const empty: UserRatiosStoreMap = { pc: {}, poe2: {}, xbox: {}, sony: {} };
   if (typeof window === "undefined") return empty;
   try {
     const raw = localStorage.getItem(USER_RATIOS_KEY);
     if (!raw) return empty;
     const p = JSON.parse(raw);
-    return pruneUserRatios({ poe: p.poe ?? {}, poe2: p.poe2 ?? {} }).next;
+    return pruneUserRatios({
+      pc: p.pc ?? {},
+      poe2: p.poe2 ?? {},
+      xbox: p.xbox ?? {},
+      sony: p.sony ?? {},
+    }).next;
   } catch {
     return empty;
   }
@@ -261,7 +272,7 @@ export function ratioModeFor(from: string, to: string, useTradedVol: boolean) {
 
 /** Sets "1 `from` = `mult` `to`" as the user ratio. Existing lifetime is kept. */
 export function setUserMultiplier(
-  realm: GameRealm,
+  realm: Realm,
   leagueId: string,
   from: string,
   to: string,
@@ -282,7 +293,7 @@ export function setUserMultiplier(
 }
 
 export function clearUserMultiplier(
-  realm: GameRealm,
+  realm: Realm,
   leagueId: string,
   from: string,
   to: string,
@@ -295,7 +306,7 @@ export function clearUserMultiplier(
 }
 
 export function setUserLifetime(
-  realm: GameRealm,
+  realm: Realm,
   leagueId: string,
   from: string,
   to: string,
@@ -457,7 +468,7 @@ function resolvePairMultiplier(
   return mult !== null && mult > 0 ? mult : null;
 }
 
-function getDefaultBase(realm: GameRealm, currencies: string[]): string {
+function getDefaultBase(realm: Realm, currencies: string[]): string {
   if (currencies.includes("chaos")) return "chaos";
   if (realm === "poe2" && currencies.includes("exalted")) return "exalted";
   return currencies[0] ?? "chaos";
@@ -502,9 +513,9 @@ export const effectivePrices = derived(
     userRatios,
   ],
   ([$raw, $overrides, $preferDirect, $useTradedVol, $user]): PricesStoreMap => {
-    const result: PricesStoreMap = { poe: {}, poe2: {} };
+    const result: PricesStoreMap = { pc: {}, poe2: {}, xbox: {}, sony: {} };
 
-    for (const realm of ["poe", "poe2"] as const) {
+    for (const realm of ["pc", "poe2", "xbox", "sony"] as const) {
       // Only include leagues that actually have a fetched JSON file from GitHub
       for (const [leagueId, rawLeague] of Object.entries($raw[realm] || {})) {
         if (!rawLeague) continue;
@@ -553,17 +564,20 @@ export const pricingRevision = derived(
 // Overrides Persistence
 // ---------------------------------------------------------------------------
 function loadOverridesFromStorage(): OverridesStoreMap {
-  if (typeof window === "undefined") return { poe: {}, poe2: {} };
+  if (typeof window === "undefined")
+    return { pc: {}, poe2: {}, xbox: {}, sony: {} };
   try {
     const raw = localStorage.getItem(OVERRIDES_STORAGE_KEY);
-    if (!raw) return { poe: {}, poe2: {} };
+    if (!raw) return { pc: {}, poe2: {}, xbox: {}, sony: {} };
     const parsed = JSON.parse(raw);
     return {
-      poe: parsed.poe ?? {},
+      pc: parsed.poe ?? {},
       poe2: parsed.poe2 ?? {},
+      xbox: parsed.xbox ?? {},
+      sony: parsed.sony ?? {},
     };
   } catch {
-    return { poe: {}, poe2: {} };
+    return { pc: {}, poe2: {}, xbox: {}, sony: {} };
   }
 }
 
@@ -587,7 +601,7 @@ if (typeof window !== "undefined") {
 }
 
 export function setCurrencyOverride(
-  realm: GameRealm,
+  realm: Realm,
   leagueId: string,
   currency: string,
   value: number | null,
@@ -608,7 +622,7 @@ export function setCurrencyOverride(
   });
 }
 
-export function clearLeagueOverrides(realm: GameRealm, leagueId: string): void {
+export function clearLeagueOverrides(realm: Realm, leagueId: string): void {
   priceOverrides.update((state) => {
     const next = { ...state, [realm]: { ...state[realm] } };
     delete next[realm][leagueId];
@@ -617,51 +631,40 @@ export function clearLeagueOverrides(realm: GameRealm, leagueId: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// League Filtering & Deduplication (Includes Ruthless Leagues)
+// League Filtering & Deduplication
 // ---------------------------------------------------------------------------
-function getLeagueRealmValue(league: League): string {
-  const anyLeague = league as unknown as Record<string, unknown>;
-  const raw = anyLeague.realms ?? anyLeague.realm;
+const ALL_REALMS = ["pc", "poe2", "xbox", "sony"] as const;
 
-  if (typeof raw === "string") return raw.toLowerCase();
-  if (Array.isArray(raw) && raw.length > 0) return String(raw[0]).toLowerCase();
-  return "";
+/** League.realm (API value) -> Realm used by the pricing files */
+const LEAGUE_REALM_MAP: Record<string, Realm> = {
+  pc: "pc",
+  xbox: "xbox",
+  sony: "sony",
+  poe2: "poe2",
+};
+
+export function leagueToRealm(league: League): Realm | null {
+  return LEAGUE_REALM_MAP[league?.realm?.toLowerCase()] ?? null;
 }
 
-export function isSupportedPoe1League(league: League): boolean {
-  const realm = getLeagueRealmValue(league);
-  // Allow all PC realm leagues, including Ruthless leagues
-  if (realm && realm !== "pc") return false;
-  return true;
-}
-
+/** Leagues of one realm from a merged list, deduplicated by id. */
 export function getValidLeagues(
   leagues: League[] | undefined | null,
-  realm: GameRealm,
+  realm: Realm,
 ): League[] {
   if (!Array.isArray(leagues) || leagues.length === 0) return [];
 
-  const filtered =
-    realm === "poe"
-      ? leagues.filter(isSupportedPoe1League)
-      : leagues.filter((l) => {
-          const r = getLeagueRealmValue(l);
-          return !r || r === "pc" || r === "poe2";
-        });
-
-  // Deduplicate by league.id so Svelte {#each} blocks never hit duplicate keys
   const seen = new Set<string>();
   const unique: League[] = [];
 
-  for (const league of filtered) {
-    if (!league?.id || seen.has(league.id)) continue;
+  for (const league of leagues) {
+    if (!league?.id || leagueToRealm(league) !== realm) continue;
+    if (seen.has(league.id)) continue;
     seen.add(league.id);
     unique.push(league);
   }
-
   return unique;
 }
-
 // ---------------------------------------------------------------------------
 // Fetching & Minute-Aligned Scheduler
 // ---------------------------------------------------------------------------
@@ -744,7 +747,7 @@ function parseLeagueFile(raw: RemoteLeagueFile): LeagueExchangeMaps | null {
 const PRICING_BASE_URL2 =
   "https://api.github.com/repos/Aurecueil/poe.prices/contents";
 async function fetchSingleLeaguePrices(
-  realm: GameRealm,
+  realm: Realm,
   leagueId: string,
 ): Promise<LeagueExchangeMaps | null> {
   const encodedLeague = encodeURIComponent(leagueId);
@@ -775,113 +778,108 @@ async function fetchSingleLeaguePrices(
 /// uwu
 ///
 
-export async function refreshRealmPrices(
-  realm: GameRealm,
-  overrideLeagues?: League[],
-): Promise<void> {
-  const rawList =
-    overrideLeagues ??
-    (realm === "poe"
-      ? poeLeaguesStore
-        ? get(poeLeaguesStore)
-        : []
-      : poe2LeaguesStore
-        ? get(poe2LeaguesStore)
-        : []);
+let refreshInFlight: Promise<void> | null = null;
 
-  const targetLeagues = getValidLeagues(rawList, realm);
-  if (targetLeagues.length === 0) return;
+/** Fetches price files for every league of every realm in one go. */
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-  isRefreshingPrices.set(true);
-  try {
-    const results = await Promise.allSettled(
-      targetLeagues.map(async (l) => ({
-        id: l.id,
-        data: await fetchSingleLeaguePrices(realm, l.id),
-      })),
-    );
+export function refreshAllPrices(overrideLeagues?: League[]): Promise<void> {
+  if (refreshInFlight) return refreshInFlight;
 
-    rawPrices.update((current) => {
-      const nextRealmMap = { ...current[realm] };
-      for (const res of results) {
-        if (res.status === "fulfilled" && res.value.data) {
-          nextRealmMap[res.value.id] = res.value.data;
+  const all = overrideLeagues ?? (leaguesStore ? get(leaguesStore) : []);
+  const targets = ALL_REALMS.flatMap((realm) =>
+    getValidLeagues(all, realm).map((l) => ({ realm, id: l.id })),
+  );
+  if (targets.length === 0) return Promise.resolve();
+
+  refreshInFlight = (async () => {
+    isRefreshingPrices.set(true);
+    try {
+      const results = await Promise.allSettled(
+        targets.map(async (t, i) => {
+          await sleep(i * 500);
+          return {
+            ...t,
+            data: await fetchSingleLeaguePrices(t.realm, t.id),
+          };
+        }),
+      );
+
+      const touched = new Set<Realm>();
+      rawPrices.update((current) => {
+        const next: RawPricesStoreMap = {
+          pc: { ...current.pc },
+          poe2: { ...current.poe2 },
+          xbox: { ...current.xbox },
+          sony: { ...current.sony },
+        };
+        for (const res of results) {
+          if (res.status === "fulfilled" && res.value.data) {
+            next[res.value.realm][res.value.id] = res.value.data;
+            touched.add(res.value.realm);
+          }
         }
-      }
-      return { ...current, [realm]: nextRealmMap };
-    });
+        return next;
+      });
 
-    lastPriceUpdate.update((u) => ({ ...u, [realm]: Date.now() }));
-  } finally {
-    isRefreshingPrices.set(false);
-  }
+      const ts = Date.now();
+      lastPriceUpdate.update((u) => {
+        const n = { ...u };
+        for (const r of touched) n[r] = ts;
+        return n;
+      });
+    } finally {
+      isRefreshingPrices.set(false);
+      refreshInFlight = null;
+    }
+  })();
+
+  return refreshInFlight;
 }
 
-let poe1Timer: ReturnType<typeof setTimeout> | null = null;
-let poe2Timer: ReturnType<typeof setTimeout> | null = null;
+let updateTimer: ReturnType<typeof setTimeout> | null = null;
 let schedulerInitialized = false;
+const UPDATE_MINUTE = 4; // GitHub files are updated hourly; fetch at :04
 
-function getMsUntilNextMinuteMark(targetMinutes: number[]): number {
+function getMsUntilNextUpdate(): number {
   const now = new Date();
-  const currentMin = now.getMinutes();
-  const currentSec = now.getSeconds();
-  const currentMs = now.getMilliseconds();
-
-  const nextMin = targetMinutes.find((m) => m > currentMin);
-  const minsToAdd =
-    nextMin !== undefined
-      ? nextMin - currentMin
-      : 60 - currentMin + targetMinutes[0];
-
-  return minsToAdd * 60_000 - currentSec * 1000 - currentMs + 2000;
+  let minsToAdd = UPDATE_MINUTE - now.getMinutes();
+  if (minsToAdd <= 0) minsToAdd += 60;
+  return (
+    minsToAdd * 60_000 - now.getSeconds() * 1000 - now.getMilliseconds() + 2000
+  );
 }
 
-function scheduleRealmUpdate(realm: GameRealm, targetMinutes: number[]) {
-  const delay = getMsUntilNextMinuteMark(targetMinutes);
-
-  const timer = setTimeout(async () => {
-    await refreshRealmPrices(realm);
-    scheduleRealmUpdate(realm, targetMinutes);
-  }, delay);
-
-  if (realm === "poe") {
-    if (poe1Timer) clearTimeout(poe1Timer);
-    poe1Timer = timer;
-  } else {
-    if (poe2Timer) clearTimeout(poe2Timer);
-    poe2Timer = timer;
-  }
+function scheduleUpdate() {
+  if (updateTimer) clearTimeout(updateTimer);
+  updateTimer = setTimeout(async () => {
+    await refreshAllPrices();
+    scheduleUpdate();
+  }, getMsUntilNextUpdate());
 }
 
 /**
- * Connects the league stores and starts the pricing fetch + cron schedules.
+ * Connects the merged league store (poe1 pc/xbox/sony + poe2) and starts
+ * the pricing fetch + hourly schedule.
  */
-export function registerPricingStores(
-  poeStore: Readable<League[]>,
-  poe2Store: Readable<League[]>,
-): void {
-  poeLeaguesStore = poeStore;
-  poe2LeaguesStore = poe2Store;
+export function registerPricingStores(leagues: Readable<League[]>): void {
+  leaguesStore = leagues;
 
   if (schedulerInitialized) return;
   schedulerInitialized = true;
 
-  // Automatically fetch as soon as leagues populate
-  poeStore.subscribe((leagues) => {
-    if (leagues.length > 0 && Object.keys(get(rawPrices).poe).length === 0) {
-      refreshRealmPrices("poe", leagues);
-    }
+  // Fetch as soon as leagues populate for any realm that has no data yet
+  leagues.subscribe((list) => {
+    if (list.length === 0) return;
+    const raw = get(rawPrices);
+    const needsFetch = ALL_REALMS.some(
+      (r) =>
+        getValidLeagues(list, r).length > 0 && Object.keys(raw[r]).length === 0,
+    );
+    if (needsFetch) refreshAllPrices(list);
   });
 
-  poe2Store.subscribe((leagues) => {
-    if (leagues.length > 0 && Object.keys(get(rawPrices).poe2).length === 0) {
-      refreshRealmPrices("poe2", leagues);
-    }
-  });
-
-  // Refetch every hour at :04
-  scheduleRealmUpdate("poe", [4]);
-  scheduleRealmUpdate("poe2", [4]);
+  scheduleUpdate();
 }
 
 // ---------------------------------------------------------------------------
@@ -892,7 +890,7 @@ export function convertCurrency(
   currencyA: string,
   currencyB: string,
   leagueId: string,
-  realm: GameRealm,
+  realm: Realm,
 ): number {
   if (!Number.isFinite(amount)) return -9;
 

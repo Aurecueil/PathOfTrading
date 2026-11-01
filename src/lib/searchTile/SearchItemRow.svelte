@@ -15,6 +15,7 @@
   import { getCategorySymbols } from "$lib/trade/components/item/categorySymbols";
   import { extractSortValue } from "$lib/trade/components/item/sortValue";
   import { convertCurrency, pricingRevision } from "$lib/trade/pricing";
+  import type { Realm } from "$lib/types/leagues";
 
   export let displayCurrency: string = "chaos";
   export let displayOptions: Partial<TileDisplayOptions> | null = null;
@@ -24,7 +25,7 @@
   export let data: TradeFetchResult | null = null;
   export let sortValue: any = null;
   export let isLive: boolean = false;
-  export let realm: string = "poe";
+  export let realm: Realm = "pc";
   export let searchId: string = "";
   export let effectiveStyle: ResolvedDisplayStyle = "full";
   export let tileWidth: number = 600;
@@ -149,10 +150,7 @@
   const CONVERT_FAILED = -9;
   $: targetCurrency = displayCurrency || "chaos";
 
-  $: gameRealm =
-    (item?.realm || realm || "").toLowerCase() === "poe2"
-      ? ("poe2" as const)
-      : ("poe" as const);
+  $: gameRealm = item?.realm || realm || "pc";
 
   // Price expressed in the tile's display currency, or null when it can't be converted
   $: priceInTarget = ((_rev: number): number | null => {

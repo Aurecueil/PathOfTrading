@@ -12,6 +12,7 @@ import {
 import type { ItemEntry, ItemCategory } from "$lib/types/baseItem";
 import type { FilterGroup, FilterEntry } from "$lib/types/filters";
 import type { StatGroup } from "$lib/types/stats";
+export type Realm = "pc" | "poe2" | "xbox" | "sony";
 
 export interface StatGroupPayloadState {
   id: string;
@@ -65,29 +66,26 @@ export function trimTrailingEmptyGroup<
 /* -------------------------------------------------------------------------- */
 /* Item reference code: "<realm>:<language>:<index>"                          */
 /* -------------------------------------------------------------------------- */
-
 export interface ItemRef {
-  realm: "poe" | "poe2";
+  realm: Realm;
   language: string;
   index: number;
 }
-
 export function formatItemRef(ref: ItemRef): string {
   return `${ref.realm}:${ref.language}:${ref.index}`;
 }
 
 export function parseItemRef(code: unknown): ItemRef | null {
   if (!code) return null;
+  const validRealms = new Set(["poe", "poe2", "xbox", "sony"]);
+
   if (typeof code === "object") {
     const obj = code as Record<string, any>;
-    const realm = normalizeRealm(obj.realm);
+    const rawRealm = String(obj.realm ?? "").toLowerCase();
+    const realm = normalizeRealm(rawRealm);
     const language = String(obj.language ?? "");
     const index = Number(obj.index);
-    if (
-      (obj.realm === "poe" || obj.realm === "poe2") &&
-      Number.isInteger(index) &&
-      index >= 0
-    ) {
+    if (validRealms.has(rawRealm) && Number.isInteger(index) && index >= 0) {
       return { realm, language, index };
     }
     return null;
@@ -96,16 +94,25 @@ export function parseItemRef(code: unknown): ItemRef | null {
   const first = code.indexOf(":");
   const last = code.lastIndexOf(":");
   if (first <= 0 || last <= first) return null;
-  const realm = code.slice(0, first);
+
+  const rawRealm = code.slice(0, first).toLowerCase();
   const language = code.slice(first + 1, last);
   const index = Number(code.slice(last + 1));
-  if (realm !== "poe" && realm !== "poe2") return null;
+
+  if (!validRealms.has(rawRealm)) return null;
   if (!Number.isInteger(index) || index < 0) return null;
-  return { realm, language, index };
+  return { realm: normalizeRealm(rawRealm), language, index };
+}
+function toBaseRealm(realm: string | undefined | null): "poe" | "poe2" {
+  return String(realm ?? "").toLowerCase() === "poe2" ? "poe2" : "poe";
 }
 
-function normalizeRealm(realm: string | undefined | null): "poe" | "poe2" {
-  return String(realm ?? "").toLowerCase() === "poe2" ? "poe2" : "poe";
+function normalizeRealm(realm: string | undefined | null): Realm {
+  const r = String(realm ?? "").toLowerCase();
+  if (r === "poe2") return "poe2";
+  if (r === "xbox") return "xbox";
+  if (r === "sony") return "sony";
+  return "pc";
 }
 
 export function getCurrentLanguage(): string {
@@ -114,7 +121,7 @@ export function getCurrentLanguage(): string {
 
 export function getRealmItemEntries(realm: string): ItemEntry[] {
   const cats = extractStoreArray<ItemCategory>(
-    normalizeRealm(realm) === "poe2" ? get(itemsPoe2) : get(itemsPoe),
+    toBaseRealm(realm) === "poe2" ? get(itemsPoe2) : get(itemsPoe),
   );
   return cats.flatMap((cat) => cat.entries || []);
 }
@@ -191,6 +198,7 @@ export function migrateItemRef(
   if (!fullPayload || typeof fullPayload !== "object") return unchanged;
 
   const targetRealm = normalizeRealm(realm);
+  const targetBase = toBaseRealm(targetRealm);
   const entries = getRealmItemEntries(targetRealm);
   if (entries.length === 0) return unchanged;
 
@@ -216,6 +224,9 @@ export function migrateItemRef(
     }
     return { payload: next, changed: true };
   }
+
+  // Same catalog pool (poe / xbox / sony are interchangeable index pools)
+  const isSameCatalog = toBaseRealm(ref.realm) === targetBase;
 
   if (ref.realm === targetRealm && ref.language === language) {
     let idx = findEntryIndexByQuery(entries, next.query);
@@ -258,7 +269,7 @@ export function migrateItemRef(
   let entry: ItemEntry | null = null;
   let index = -1;
 
-  if (ref.realm === targetRealm && ref.language !== language) {
+  if (isSameCatalog && ref.language !== language) {
     index = ref.index;
     entry = index >= 0 && index < entries.length ? entries[index] : null;
 
@@ -269,7 +280,7 @@ export function migrateItemRef(
     ) {
       return unchanged;
     }
-  } else if (ref.realm !== targetRealm && ref.language === language) {
+  } else if (!isSameCatalog && ref.language === language) {
     const name = next.query.name;
     if (name) {
       index = entries.findIndex(
@@ -277,6 +288,10 @@ export function migrateItemRef(
       );
       entry = index >= 0 ? entries[index] : null;
     }
+  } else if (isSameCatalog && ref.language === language) {
+    // Platform change within PoE 1 family (e.g. poe -> xbox/sony)
+    index = ref.index;
+    entry = index >= 0 && index < entries.length ? entries[index] : null;
   } else {
     const sourceEntries = getRealmItemEntries(ref.realm);
     if (sourceEntries.length === 0) return unchanged;
@@ -308,7 +323,6 @@ export function migrateItemRef(
 
   return { payload: next, changed: true };
 }
-
 function buildFilterDefinitionsMap(
   groups: FilterGroup[],
 ): Map<string, Map<string, FilterEntry>> {
@@ -333,9 +347,10 @@ function buildFilterDefinitionsMap(
 
 export function buildRegularPayload(
   fullPayload: any,
-  realm: "poe" | "poe2" | string = "poe",
+  realm: Realm = "pc",
 ): any {
   const normalizedRealm = normalizeRealm(realm);
+  const baseRealm = toBaseRealm(normalizedRealm);
 
   const resolved = migrateItemRef(fullPayload, normalizedRealm).payload;
   const base = resolved ? JSON.parse(JSON.stringify(resolved)) : {};
@@ -358,7 +373,7 @@ export function buildRegularPayload(
   }
 
   const realmFilterGroups = extractStoreArray<FilterGroup>(
-    normalizedRealm === "poe2" ? get(filtersPoe2) : get(filtersPoe),
+    baseRealm === "poe2" ? get(filtersPoe2) : get(filtersPoe),
   );
   const validRealmGroupFilterMap =
     realmFilterGroups.length > 0
@@ -366,7 +381,7 @@ export function buildRegularPayload(
       : null;
 
   const realmStatCatalog = extractStoreArray<StatGroup>(
-    normalizedRealm === "poe2" ? get(statsPoe2) : get(statsPoe),
+    baseRealm === "poe2" ? get(statsPoe2) : get(statsPoe),
   );
   const validRealmStatIds =
     realmStatCatalog.length > 0
@@ -389,9 +404,8 @@ export function buildRegularPayload(
 
     const gType = g.type || "and";
     const isPoe2Restricted =
-      normalizedRealm === "poe2" &&
-      (gType === "crucible" || gType === "mercenary");
-    // Only collapse state or realm restriction disables the group
+      baseRealm === "poe2" && (gType === "crucible" || gType === "mercenary");
+
     const isGroupDisabled = Boolean(
       g.collapsed !== undefined
         ? g.collapsed || isPoe2Restricted
@@ -563,7 +577,7 @@ export function buildRegularPayload(
 export function buildPayloads(params: {
   initialPayload: any;
   statGroups: StatGroupPayloadState[];
-  realm: "poe" | "poe2";
+  realm: Realm;
   statusOption: string;
   selectedItem: ItemEntry | null;
   filterValues: Record<string, Record<string, any>>;
@@ -596,11 +610,10 @@ export function buildPayloads(params: {
   // 1. Build fullStats (keep all groups & filters; do NOT sticky-lock group.disabled)
   const fullStats: any[] = [];
   const fullGroupIndexMap = new Map<string, number>();
-
+  const baseRealm = toBaseRealm(realm);
   for (const g of statGroups) {
     const isPoe2Restricted =
-      realm === "poe2" && (g.type === "crucible" || g.type === "mercenary");
-    // Fix: only derive disabled from collapsed or realm restriction so uncollapsing re-enables it
+      baseRealm === "poe2" && (g.type === "crucible" || g.type === "mercenary");
     const isGroupDisabled = Boolean(g.collapsed || isPoe2Restricted);
 
     const valObj: any = {};

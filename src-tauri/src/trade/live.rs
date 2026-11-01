@@ -40,6 +40,7 @@ pub async fn start_live_search(
     tile_id: String,
     realm: String,
     query_id: String,
+    league: String,
 ) -> Result<(), String> {
     // 1. Cancel previous live socket for this tile if one exists
     let mut sessions = state.0.lock().await;
@@ -57,14 +58,16 @@ pub async fn start_live_search(
     } else {
         "trade"
     };
-    let league = if realm.to_lowercase() == "poe2" {
-        "Forbidden%20Rites"
+    let poe_platform = if realm == "xbox" {
+        "xbox/"
+    } else if realm == "sony" {
+        "sony/"
     } else {
-        "Allflame"
+        ""
     };
 
     let host = "www.pathofexile.com";
-    let ws_url = format!("wss://{host}/api/{trade_path}/live/{league}/{query_id}");
+    let ws_url = format!("wss://{host}/api/{trade_path}/live/{poe_platform}{league}/{query_id}");
 
     let poe_token =
         load_secret("poetoken")?.ok_or_else(|| "Missing 'poetoken' secret".to_string())?;

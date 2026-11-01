@@ -1,36 +1,32 @@
 <!-- src/lib/TileContextMenu.svelte -->
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
-  import { leaguesPoe, leaguesPoe2 } from "$lib/trade/tradeStore";
+  import { leaguesAll } from "$lib/trade/tradeStore";
+  import { type Realm, type League, REALM_OPTIONS } from "$lib/types/leagues";
 
   export let x: number;
   export let y: number;
   export let targetCount: number = 1;
   export let allDisabled: boolean = false;
-  export let realm: string = "poe";
+  export let realm: Realm = "pc";
   export let league: string = "";
 
   const dispatch = createEventDispatcher<{
     toggledisable: void;
-    applyrealmleague: { realm: string; league: string };
+    applyrealmleague: { realm: Realm; league: string };
   }>();
 
-  // Filter PoE 1 leagues to only ones with realm/realms === "pc"
-  $: poe1PcLeagues = ($leaguesPoe || []).filter((l: any) => {
-    const r = String(l.realm ?? l.realms ?? "").toLowerCase();
-    return r === "pc";
-  });
+  // Filter leagues for the currently selected realm
+  $: availableLeagues = ($leaguesAll || []).filter(
+    (l: League) => l.realm === realm,
+  );
 
-  $: poe2Leagues = $leaguesPoe2 || [];
-
-  $: availableLeagues = realm === "poe2" ? poe2Leagues : poe1PcLeagues;
-
-  // Ensure selected league defaults to first available option when switching realm
+  // Default selected league to the first available option when changing realms or when invalid
   $: if (
     availableLeagues.length > 0 &&
-    !availableLeagues.some((l) => String(l.id) === league)
+    !availableLeagues.some((l) => l.id === league)
   ) {
-    league = String(availableLeagues[0].id);
+    league = availableLeagues[0].id;
   }
 </script>
 
@@ -59,8 +55,9 @@
     <label>
       <span>Realm</span>
       <select bind:value={realm}>
-        <option value="poe">PoE 1</option>
-        <option value="poe2">PoE 2</option>
+        {#each REALM_OPTIONS as opt (opt.id)}
+          <option value={opt.id}>{opt.text}</option>
+        {/each}
       </select>
     </label>
 
@@ -69,7 +66,7 @@
       {#if availableLeagues.length > 0}
         <select bind:value={league}>
           {#each availableLeagues as lg (lg.id)}
-            <option value={String(lg.id)}>{lg.text || lg.id}</option>
+            <option value={lg.id}>{lg.text || lg.id}</option>
           {/each}
         </select>
       {:else}

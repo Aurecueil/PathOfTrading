@@ -5,10 +5,9 @@
   import type { UnlistenFn } from "@tauri-apps/api/event";
   import {
     initItemData,
-    leaguesPoe,
+    leaguesAll,
     initUserSettings,
-    loadStatColorConfigsFromDisk,
-    updateTpHotkey,
+    initLeaguesData,
   } from "$lib/trade/tradeStore";
   import {
     workspaceState,
@@ -25,6 +24,7 @@
   import WorkspaceModals from "$lib/layout/WorkspaceModals.svelte";
   import FooterBar from "$lib/layout/FooterBar.svelte";
   import type { Snippet } from "svelte";
+  import type { League } from "$lib/types/leagues";
 
   let { children }: { children: Snippet } = $props();
 
@@ -108,23 +108,27 @@
     Boolean($page.url.pathname.startsWith("/projects/")),
   );
 
-  const poe1PcLeagues = $derived(
-    ($leaguesPoe || []).filter((l: any) => {
-      const r = String(l.realm ?? l.realms ?? "").toLowerCase();
-      return r === "pc";
-    }),
+  const poe1PcLeagues = ($leaguesAll || []).filter(
+    (l: League) => l.realm === "pc",
   );
 
   onMount(async () => {
+    // 1. Critical Priority Phase: Load settings & leagues concurrently
     try {
-      initItemData();
-      initUserSettings();
-      updateTpHotkey("CommandOrControl+Shift+T");
-      loadStatColorConfigsFromDisk();
+      await Promise.all([
+        initUserSettings(), // already handles stat colors & registers saved hotkey
+        initLeaguesData(), // populates league dropdowns & pricing stores immediately
+      ]);
     } catch (error) {
-      console.error("Failed to initialize item data:", error);
+      console.error("Failed to load initial settings or leagues:", error);
     }
 
+    // 2. Background Phase: Heavy datasets fire without blocking UI responsiveness
+    initItemData().catch((err) => {
+      console.error("Failed to initialize heavy item/mod data:", err);
+    });
+
+    // 3. Platform setup & update checks
     try {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       const appWindow = getCurrentWindow();
@@ -169,7 +173,7 @@
         poe1PcLeagues.length > 0 ? String(poe1PcLeagues[0].id) : "Standard";
       const created = await createNewProject({
         name: "",
-        realm: "poe",
+        realm: "pc",
         league: defaultLeague,
       });
       openProject({

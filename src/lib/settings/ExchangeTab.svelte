@@ -7,8 +7,7 @@
     tadedExchangeRatios,
     rawPrices,
     userRatios,
-    leaguesPoe,
-    leaguesPoe2,
+    leaguesAll,
     staticsPoe,
     staticsPoe2,
     getValidLeagues,
@@ -19,11 +18,11 @@
     setUserLifetime,
     POE1_TARGETS,
     POE2_TARGETS,
-    type GameRealm,
     type PairSource,
     type LifetimeId,
     type UserRatio,
   } from "$lib/trade/tradeStore";
+  import type { Realm, League } from "$lib/types/leagues";
   import ComboSelect from "$lib/settings/ComboSelect.svelte";
 
   type RowModel = {
@@ -46,12 +45,14 @@
     rows: RowModel[];
   };
 
-  const REALMS: { id: GameRealm; label: string }[] = [
-    { id: "poe", label: "Path of Exile" },
+  const REALMS: { id: Realm; label: string }[] = [
+    { id: "pc", label: "Path of Exile" },
+    { id: "xbox", label: "PoE (xbox)" },
+    { id: "sony", label: "PoE (sony)" },
     { id: "poe2", label: "Path of Exile 2" },
   ];
 
-  let realm = $state<GameRealm>("poe");
+  let realm = $state<Realm>("pc");
   let leagueSel = $state("");
   let currencySel = $state("chaos");
   let now = $state(Date.now());
@@ -61,7 +62,10 @@
     return () => clearInterval(t);
   });
 
-  const leagues = $derived(realm === "poe" ? $leaguesPoe : $leaguesPoe2);
+  // const leagues = $derived(realm === "poe2" ? $leaguesPoe2 : $leaguesPoe);
+  const leagues = $derived(
+    ($leaguesAll || []).filter((l: League) => l.realm === realm),
+  );
   const statics = $derived(realm === "poe2" ? $staticsPoe2 : $staticsPoe);
 
   // Leagues come from the league stores; price files are optional
@@ -77,7 +81,7 @@
   );
 
   const currencies = $derived<string[]>(
-    realm === "poe" ? [...POE1_TARGETS] : [...POE2_TARGETS],
+    realm === "poe2" ? [...POE2_TARGETS] : [...POE1_TARGETS],
   );
   const currency = $derived(
     currencies.includes(currencySel)
@@ -249,7 +253,7 @@
       options={realmOptions}
       value={realm}
       minWidth={150}
-      onSelect={(r) => (realm = r as GameRealm)}
+      onSelect={(r) => (realm = r as Realm)}
     />
   </div>
 

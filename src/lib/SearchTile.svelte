@@ -339,7 +339,11 @@
   $: currentLeague = tile.league || activePayload?.league || "";
 
   $: isPoe2 = tile.realm?.toLowerCase() === "poe2";
-  $: realmIconSrc = isPoe2 ? "/poe2.png" : "/poe.png";
+  $: realmIconSrc = tile?.realm
+    ? `/${encodeURIComponent(tile.realm.toLowerCase())}.png`
+    : isPoe2
+      ? "/static/poe2.png"
+      : "/static/poe.png";
   $: defaultRealmTitle = isPoe2 ? "PoE2 Trade" : "PoE Trade";
 
   $: displayTitle =
@@ -1348,8 +1352,9 @@
         alt={tile.realm}
         on:error={(e) => {
           const img = e.currentTarget as HTMLImageElement;
-          if (!img.src.includes("/static/")) {
-            img.src = isPoe2 ? "/static/poe2.png" : "/static/poe.png";
+          const fallback = isPoe2 ? "/static/poe2.png" : "/static/poe.png";
+          if (!img.src.endsWith(fallback)) {
+            img.src = fallback;
           }
         }}
       />

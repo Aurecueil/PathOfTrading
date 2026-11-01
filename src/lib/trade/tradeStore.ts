@@ -42,12 +42,16 @@ export const filtersPoe = writable<FilterGroup[]>([]);
 export const filtersPoe2 = writable<FilterGroup[]>([]);
 export const statsPoe = writable<StatGroup[]>([]);
 export const statsPoe2 = writable<StatGroup[]>([]);
-export const leaguesPoe = writable<League[]>([]);
-export const leaguesPoe2 = writable<League[]>([]);
 export const staticsPoe = writable<StaticCategory[]>([]);
 export const staticsPoe2 = writable<StaticCategory[]>([]);
+const leaguesPoe = writable<League[]>([]);
+const leaguesPoe2 = writable<League[]>([]);
+export const leaguesAll = derived(
+  [leaguesPoe, leaguesPoe2],
+  ([$leaguesPoe, $leaguesPoe2]) => [...$leaguesPoe, ...$leaguesPoe2],
+);
 
-registerPricingStores(leaguesPoe, leaguesPoe2);
+registerPricingStores(leaguesAll);
 
 // PoE 1 Exclusive Mercenary Stores
 export const mercenarySkills = writable<MercenarySkillsMap>({});
@@ -270,28 +274,72 @@ async function fetchCachedJson<T>(url: string): Promise<T> {
 
   return (await response.json()) as T;
 }
+export const isLeaguesLoading = writable<boolean>(false);
+export const leaguesError = writable<string | null>(null);
 
+/**
+ * Loads PoE & PoE2 leagues first to unblock critical UI flows immediately.
+ */
+export async function initLeaguesData(): Promise<void> {
+  isLeaguesLoading.set(true);
+  leaguesError.set(null);
+
+  try {
+    const [poeLeaguesResult, poe2LeaguesResult] = await Promise.allSettled([
+      invoke<LeagueData>("load_league_data", { realm: "pc" }),
+      invoke<LeagueData>("load_league_data", { realm: "poe2" }),
+    ]);
+
+    const errors: string[] = [];
+
+    if (poeLeaguesResult.status === "fulfilled") {
+      leaguesPoe.set(poeLeaguesResult.value.result);
+    } else {
+      errors.push(`PoE Leagues: ${poeLeaguesResult.reason}`);
+    }
+
+    if (poe2LeaguesResult.status === "fulfilled") {
+      leaguesPoe2.set(poe2LeaguesResult.value.result);
+    } else {
+      errors.push(`PoE2 Leagues: ${poe2LeaguesResult.reason}`);
+    }
+
+    if (errors.length > 0) {
+      leaguesError.set(errors.join(" | "));
+    }
+  } catch (err) {
+    leaguesError.set(typeof err === "string" ? err : "Failed to load leagues");
+  } finally {
+    isLeaguesLoading.set(false);
+  }
+}
 export async function initItemData(): Promise<void> {
   isLoading.set(true);
   loadError.set(null);
 
   try {
-    // Resolve active language so RePoE URLs match the selected language
-    let lang = get(currentLanguage);
-    try {
-      const backendLang = await invoke<string>("get_language");
-      if (backendLang) {
-        lang = backendLang;
-        currentLanguage.set(backendLang);
-      }
-    } catch {
-      // Fallback to currentLanguage store value
-    }
+    // 1. Fetch language concurrently with assets instead of awaiting it first
+    const langPromise = invoke<string>("get_language")
+      .then((backendLang) => {
+        if (backendLang) currentLanguage.set(backendLang);
+        return backendLang;
+      })
+      .catch(() => get(currentLanguage));
 
-    const skillsUrl = getRepoeUrl("mercenary_skills.min.json", lang);
-    const supportsUrl = getRepoeUrl("mercenary_supports.min.json", lang);
-    const keywordsUrl = getPoe2KeywordsUrl();
+    // 2. Resolve URLs dynamically inside fetch promises
+    const mercSkillsPromise = langPromise.then((lang) =>
+      fetchCachedJson<MercenarySkillsMap>(
+        getRepoeUrl("mercenary_skills.min.json", lang),
+      ),
+    );
+    const mercSupportsPromise = langPromise.then((lang) =>
+      fetchCachedJson<MercenarySupportsMap>(
+        getRepoeUrl("mercenary_supports.min.json", lang),
+      ),
+    );
+    const keywordsPromise = fetchCachedJson<KeywordsMap>(getPoe2KeywordsUrl());
 
+    // 3. Fire remaining heavy IPCs (Leagues are excluded)
     const [
       poeItems,
       poe2Items,
@@ -299,27 +347,23 @@ export async function initItemData(): Promise<void> {
       poe2Filters,
       poeStats,
       poe2Stats,
-      PoeLeague,
-      poe2Leagues,
       poeStatics,
       poe2Statics,
       mercSkills,
       mercSupports,
       keywordsData,
     ] = await Promise.allSettled([
-      invoke<ItemDataResponse>("load_item_data", { realm: "poe" }),
+      invoke<ItemDataResponse>("load_item_data", { realm: "pc" }),
       invoke<ItemDataResponse>("load_item_data", { realm: "poe2" }),
-      invoke<FilterDataResponse>("load_filters_data", { realm: "poe" }),
+      invoke<FilterDataResponse>("load_filters_data", { realm: "pc" }),
       invoke<FilterDataResponse>("load_filters_data", { realm: "poe2" }),
-      invoke<StatsDataResponse>("load_stats_data", { realm: "poe" }),
+      invoke<StatsDataResponse>("load_stats_data", { realm: "pc" }),
       invoke<StatsDataResponse>("load_stats_data", { realm: "poe2" }),
-      invoke<LeagueData>("load_league_data", { realm: "poe" }),
-      invoke<LeagueData>("load_league_data", { realm: "poe2" }),
-      invoke<StaticDataResponse>("load_static_data", { realm: "poe" }),
+      invoke<StaticDataResponse>("load_static_data", { realm: "pc" }),
       invoke<StaticDataResponse>("load_static_data", { realm: "poe2" }),
-      fetchCachedJson<MercenarySkillsMap>(skillsUrl),
-      fetchCachedJson<MercenarySupportsMap>(supportsUrl),
-      fetchCachedJson<KeywordsMap>(keywordsUrl),
+      mercSkillsPromise,
+      mercSupportsPromise,
+      keywordsPromise,
     ]);
 
     const errors: string[] = [];
@@ -343,14 +387,6 @@ export async function initItemData(): Promise<void> {
 
     if (poe2Stats.status === "fulfilled") statsPoe2.set(poe2Stats.value.result);
     else errors.push(`PoE2 Stats: ${poe2Stats.reason}`);
-
-    if (PoeLeague.status === "fulfilled")
-      leaguesPoe.set(PoeLeague.value.result);
-    else errors.push(`PoE Leagues: ${PoeLeague.reason}`);
-
-    if (poe2Leagues.status === "fulfilled")
-      leaguesPoe2.set(poe2Leagues.value.result);
-    else errors.push(`PoE2 Leagues: ${poe2Leagues.reason}`);
 
     if (poeStatics.status === "fulfilled")
       staticsPoe.set(poeStatics.value.result);
@@ -380,7 +416,6 @@ export async function initItemData(): Promise<void> {
     isLoading.set(false);
   }
 }
-
 export const mercenarySkillsByHash = derived(mercenarySkills, ($skills) => {
   const map = new Map<number, dataMercenarySkill>();
   for (const skill of Object.values($skills)) {

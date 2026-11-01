@@ -16,7 +16,7 @@ fn default_mode() -> String {
 }
 
 fn default_realm() -> String {
-    "poe".to_string()
+    "pc".to_string()
 }
 
 fn default_league() -> String {

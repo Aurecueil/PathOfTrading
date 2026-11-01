@@ -39,7 +39,7 @@ pub async fn fetch_items_trade(
     };
 
     let trade_path = if realm == "poe2" { "trade2" } else { "trade" };
-    let mut url = format!("{endpoint}/api/{trade_path}/fetch/{ids}?query={id}");
+    let mut url = format!("{endpoint}/api/{trade_path}/fetch/{ids}?query={id}&realm={realm}");
 
     for pseudo in pseudos {
         let p = pseudo.trim();

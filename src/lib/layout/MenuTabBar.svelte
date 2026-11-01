@@ -18,7 +18,8 @@
     showToast,
     openExternalUrl,
   } from "$lib/project/projects.svelte";
-  import { leaguesPoe, leaguesPoe2 } from "$lib/trade/tradeStore";
+  import { leaguesAll } from "$lib/trade/tradeStore";
+  import type { League, Realm } from "$lib/types/leagues";
   import SettingsOverlay from "$lib/settings/SettingsOverlay.svelte";
   import { openSettings } from "$lib/settings/settingsState.svelte";
   import { authState } from "$lib/trade/tradeStore";
@@ -44,20 +45,11 @@
     Boolean(currentPathname.startsWith("/projects/")),
   );
 
-  // Filter PoE 1 leagues to PC realm
-  const poe1PcLeagues = $derived(
-    ($leaguesPoe || []).filter((l: any) => {
-      const r = String(l.realm ?? l.realms ?? "").toLowerCase();
-      return r === "pc";
-    }),
-  );
-
-  const poe2Leagues = $derived($leaguesPoe2 || []);
-
   const availableProjectLeagues = $derived(
-    workspaceState.activeProjectRealm === "poe2" ? poe2Leagues : poe1PcLeagues,
+    ($leaguesAll || []).filter(
+      (l: League) => l.realm === workspaceState.activeProjectRealm,
+    ),
   );
-
   // "Proceed & Login" is locked for a few seconds each time the notice opens
   $effect(() => {
     if (!loginModalOpen) return;
@@ -217,8 +209,10 @@
     }
   }
 
-  function handleMenuRealmChange(nextRealm: "poe" | "poe2") {
-    const list = nextRealm === "poe2" ? poe2Leagues : poe1PcLeagues;
+  function handleMenuRealmChange(nextRealm: "pc" | "poe2" | "xbox" | "sony") {
+    const list = ($leaguesAll || []).filter(
+      (l: League) => l.realm === nextRealm,
+    );
     let nextLeague = workspaceState.activeProjectLeague;
     if (
       list.length > 0 &&
@@ -237,10 +231,12 @@
   async function handleNewProjectMenu() {
     closeFileMenu();
     const defaultLeague =
-      poe1PcLeagues.length > 0 ? String(poe1PcLeagues[0].id) : "Standard";
+      availableProjectLeagues.length > 0
+        ? String(availableProjectLeagues[0].id)
+        : "Standard";
     const created = await createNewProject({
       name: "",
-      realm: "poe",
+      realm: "pc",
       league: defaultLeague,
     });
     openProject({
@@ -299,7 +295,7 @@
 
   function handleTabClick(
     e: MouseEvent,
-    tab: { id: string; name: string; realm?: string },
+    tab: { id: string; name: string; realm: Realm },
   ) {
     e.preventDefault();
     if (workspaceState.activeProjectId === tab.id && isInsideProject) return;
@@ -372,10 +368,26 @@
                 <button
                   type="button"
                   class="realm-opt"
-                  class:selected={workspaceState.activeProjectRealm !== "poe2"}
-                  onclick={() => handleMenuRealmChange("poe")}
+                  class:selected={workspaceState.activeProjectRealm === "pc"}
+                  onclick={() => handleMenuRealmChange("pc")}
                 >
-                  PoE 1
+                  PoE
+                </button>
+                <button
+                  type="button"
+                  class="realm-opt"
+                  class:selected={workspaceState.activeProjectRealm === "xbox"}
+                  onclick={() => handleMenuRealmChange("xbox")}
+                >
+                  PoE (xbox)
+                </button>
+                <button
+                  type="button"
+                  class="realm-opt"
+                  class:selected={workspaceState.activeProjectRealm === "sony"}
+                  onclick={() => handleMenuRealmChange("sony")}
+                >
+                  PoE (sony)
                 </button>
                 <button
                   type="button"
@@ -466,8 +478,8 @@
       >
         <a href={`/projects/${tab.id}`} onclick={(e) => handleTabClick(e, tab)}>
           <img
-            src={tab.realm?.toLowerCase() === "poe2" ? "/poe2.png" : "/poe.png"}
-            alt={tab.realm || "poe"}
+            src={`/${encodeURIComponent(tab.realm.toLowerCase())}.png`}
+            alt={tab.realm || "pc"}
             class="tab-realm-icon"
           />
           <span>{tab.name?.trim() || "New Project"}</span>

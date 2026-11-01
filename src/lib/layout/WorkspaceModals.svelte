@@ -50,7 +50,7 @@
       } else {
         const created = await createNewProject({
           name: newProjectNameInput.trim(),
-          realm: decoded.realm || "poe",
+          realm: decoded.realm || "pc",
           league: decoded.league || "Standard",
           camera: decoded.camera,
           initialItems: decoded.items,

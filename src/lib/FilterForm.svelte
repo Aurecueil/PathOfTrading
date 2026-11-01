@@ -27,8 +27,7 @@
     filtersPoe2,
     statsPoe,
     statsPoe2,
-    leaguesPoe,
-    leaguesPoe2,
+    leaguesAll,
     staticsPoe,
     staticsPoe2,
     currentLanguage,
@@ -39,7 +38,8 @@
   import type { SortOptionItem } from "$lib/types/types";
   import type { FilterGroup as FilterGroupType } from "$lib/types/filters";
   import type { StatGroup as StatGroupType } from "$lib/types/stats";
-  import type { League } from "$lib/types/leagues";
+  import type { League, Realm } from "$lib/types/leagues";
+  import { REALM_OPTIONS } from "$lib/types/leagues";
 
   import DisplayOptionsGroup from "$lib/trade/components/drawer/DisplayOptionsGroup.svelte";
   import {
@@ -63,13 +63,13 @@
 
   export let initialTitle: string = "";
   export let initialDisplayName: string = "";
-  export let initialRealm: "poe" | "poe2" = "poe";
+  export let initialRealm: Realm = "pc";
   export let initialLeague: string = "";
   export let initialPayload: any = null;
 
   let title: string = initialTitle;
-  let realm: "poe" | "poe2" = initialRealm;
-  let previousRealm: "poe" | "poe2" = realm;
+  let realm: Realm = initialRealm;
+  let previousRealm: Realm = realm;
   let previousLanguage: string = $currentLanguage || "EN";
   let previousLeague: string = initialLeague || initialPayload?.league || "";
   let league: string = initialLeague || initialPayload?.league || "";
@@ -113,13 +113,7 @@
   let hasHydrated: boolean = false;
   let itemHydrated: boolean = false;
   let isReadyForAutoSave: boolean = false;
-
   let itemComboboxRef: ItemSearchCombobox;
-
-  const REALM_OPTIONS: Array<{ id: "poe" | "poe2"; text: string }> = [
-    { id: "poe", text: "PoE 1" },
-    { id: "poe2", text: "PoE 2" },
-  ];
 
   const dispatch = createEventDispatcher<{
     close: void;
@@ -154,20 +148,14 @@
     if (Array.isArray(storeVal.result)) return storeVal.result;
     return [];
   }
-
   onMount(() => {
     const isPoeEmpty =
-      !$leaguesPoe?.length ||
-      !$itemsPoe?.length ||
-      !$filtersPoe?.length ||
-      !$statsPoe?.length;
+      !$itemsPoe?.length || !$filtersPoe?.length || !$statsPoe?.length;
     const isPoe2Empty =
-      !$leaguesPoe2?.length ||
-      !$itemsPoe2?.length ||
-      !$filtersPoe2?.length ||
-      !$statsPoe2?.length;
+      !$itemsPoe2?.length || !$filtersPoe2?.length || !$statsPoe2?.length;
+    const isLeaguesEmpty = !$leaguesAll?.length;
 
-    if (!$isLoading && (isPoeEmpty || isPoe2Empty)) {
+    if (!$isLoading && (isPoeEmpty || isPoe2Empty || isLeaguesEmpty)) {
       initItemData();
     }
   });
@@ -184,17 +172,12 @@
   $: currentStaticCatalog = extractArray<any>(
     realm === "poe2" ? $staticsPoe2 : $staticsPoe,
   );
-  $: rawLeagues = extractArray<League>(
-    realm === "poe2" ? $leaguesPoe2 : $leaguesPoe,
-  );
 
-  $: availableLeagues = rawLeagues.filter((l) => {
-    if (realm === "poe") {
-      const r = (l.realm || (l as any).realm || "").toString().toLowerCase();
-      return r === "pc";
-    }
-    return true;
-  });
+  $: rawLeagues = extractArray<League>($leaguesAll);
+
+  $: availableLeagues = rawLeagues.filter(
+    (l) => (l.realm ?? "").toString().toLowerCase() === realm,
+  );
 
   $: if (availableLeagues.length > 0) {
     const exists = availableLeagues.some((l) => l.id.toString() === league);
@@ -833,7 +816,7 @@
   }
 
   $: activeRealmLabel =
-    REALM_OPTIONS.find((r) => r.id === realm)?.text || "PoE 1";
+    REALM_OPTIONS.find((r) => r.id === realm)?.text || "PoE";
   $: activeLeagueLabel =
     availableLeagues.find((l) => l.id.toString() === league)?.text ||
     league ||
@@ -1028,7 +1011,7 @@
           bind:statGroups
           bind:isAddGroupMenuOpen
           {currentStatCatalog}
-          {realm}
+          realm={realm === "poe2" ? "poe2" : "poe"}
           on:deleteGroup={(e) => {
             statGroups = statGroups.filter((g) => g.id !== e.detail);
             if (sortKey === `group:${e.detail}`) sortKey = "filter:price";

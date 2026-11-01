@@ -11,13 +11,14 @@ import type {
   SearchTile,
   ShareCodePayload,
 } from "$lib/types/types";
+import type { Realm } from "$lib/types/leagues";
 
 export const SETTINGS_TAB_ID = "__settings__";
 
 export interface ProjectTab {
   id: string;
   name: string;
-  realm?: string;
+  realm: Realm;
   dirty?: boolean;
   isSettings?: boolean;
 }
@@ -74,7 +75,7 @@ export function showToast(msg: string) {
 
 export const workspaceState = $state<{
   activeProjectId: string | null;
-  activeProjectRealm: string;
+  activeProjectRealm: Realm;
   activeProjectLeague: string;
   unsavedPrompt: UnsavedPromptState | null;
   namePrompt: NamePromptState | null;
@@ -83,7 +84,7 @@ export const workspaceState = $state<{
   toastMessage: string | null;
 }>({
   activeProjectId: null,
-  activeProjectRealm: "poe",
+  activeProjectRealm: "pc",
   activeProjectLeague: "Standard",
   unsavedPrompt: null,
   namePrompt: null,
@@ -119,14 +120,14 @@ let activeImportElementsHandler: ((items: ProjectItem[]) => void) | null = null;
 let activeExportPayloadHandler: (
   onlySelected: boolean,
 ) => ShareCodePayload | null = () => null;
-let activeSetDefaultsHandler: ((realm: string, league: string) => void) | null =
+let activeSetDefaultsHandler: ((realm: Realm, league: string) => void) | null =
   null;
 
 export function registerCanvasHandlers(handlers: {
   save: () => Promise<boolean>;
   importElements: (items: ProjectItem[]) => void;
   exportPayload: (onlySelected: boolean) => ShareCodePayload;
-  setProjectDefaults: (realm: string, league: string) => void;
+  setProjectDefaults: (realm: Realm, league: string) => void;
 }) {
   activeSaveHandler = handlers.save;
   activeImportElementsHandler = handlers.importElements;
@@ -141,7 +142,7 @@ export function unregisterCanvasHandlers() {
   activeSetDefaultsHandler = null;
 }
 
-export function updateActiveProjectDefaults(realm: string, league: string) {
+export function updateActiveProjectDefaults(realm: Realm, league: string) {
   workspaceState.activeProjectRealm = realm;
   workspaceState.activeProjectLeague = league;
   const activeTab = openTabs.find(
@@ -269,7 +270,7 @@ export function runWithUnsavedGuard(
 export function openProject(project: {
   id: string;
   name: string;
-  realm?: string;
+  realm: Realm;
 }) {
   const proceed = () => {
     const existing = openTabs.find((tab) => tab.id === project.id);
@@ -277,7 +278,7 @@ export function openProject(project: {
       openTabs.push({
         id: project.id,
         name: project.name,
-        realm: project.realm || "poe",
+        realm: project.realm || "pc",
         dirty: false,
       });
     } else {
@@ -291,27 +292,6 @@ export function openProject(project: {
     workspaceState.activeProjectId &&
     workspaceState.activeProjectId !== project.id
   ) {
-    runWithUnsavedGuard(workspaceState.activeProjectId, proceed);
-  } else {
-    proceed();
-  }
-}
-
-export function openSettingsTab() {
-  const proceed = () => {
-    if (!openTabs.some((t) => t.id === SETTINGS_TAB_ID)) {
-      openTabs.push({
-        id: SETTINGS_TAB_ID,
-        name: "Settings",
-        dirty: false,
-        isSettings: true,
-      });
-    }
-    workspaceState.activeProjectId = null;
-    goto("/settings");
-  };
-
-  if (workspaceState.activeProjectId) {
     runWithUnsavedGuard(workspaceState.activeProjectId, proceed);
   } else {
     proceed();
@@ -542,7 +522,7 @@ export async function deleteProjectFromBackend(id: string): Promise<void> {
 
 export async function createNewProject(options: {
   name?: string;
-  realm?: string;
+  realm: Realm;
   league?: string;
   camera?: CameraState;
   initialItems?: ProjectItem[];

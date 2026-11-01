@@ -41,9 +41,11 @@
     preset.groups.reduce((n, g) => n + (g.filters?.length ?? 0), 0),
   );
   const logoSrc = $derived(
-    preset.game === "poe" || preset.game === "poe2"
-      ? `${base}/${preset.game}.png`
-      : null,
+    preset.game === "poe"
+      ? `${base}/pc.png`
+      : preset.game === "poe2"
+        ? `${base}/poe2.png`
+        : null,
   );
   const logoAlt = $derived(preset.game === "poe2" ? "PoE 2" : "PoE 1");
 
