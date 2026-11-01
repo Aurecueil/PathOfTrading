@@ -633,7 +633,7 @@ export function clearLeagueOverrides(realm: Realm, leagueId: string): void {
 // ---------------------------------------------------------------------------
 // League Filtering & Deduplication
 // ---------------------------------------------------------------------------
-const ALL_REALMS = ["pc", "poe2", "xbox", "sony"] as const;
+const ALL_REALMS = ["pc", "xbox", "sony", "poe2"] as const;
 
 /** League.realm (API value) -> Realm used by the pricing files */
 const LEAGUE_REALM_MAP: Record<string, Realm> = {
@@ -754,7 +754,8 @@ async function fetchSingleLeaguePrices(
   // GitHub contents endpoint: /repos/{owner}/{repo}/contents/{path}
   const url = `${PRICING_BASE_URL2}/${realm}/${encodedLeague}.json`;
 
-  const token = ""; // fine-grained token, cause github spamurai detected sth and account poof 404 on public TT
+  const token =
+    "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"; // fine-grained token, cause github spamurai detected sth and account poof 404 on public TT
 
   try {
     const res = await fetch(url, {

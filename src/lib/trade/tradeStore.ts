@@ -44,14 +44,7 @@ export const statsPoe = writable<StatGroup[]>([]);
 export const statsPoe2 = writable<StatGroup[]>([]);
 export const staticsPoe = writable<StaticCategory[]>([]);
 export const staticsPoe2 = writable<StaticCategory[]>([]);
-const leaguesPoe = writable<League[]>([]);
-const leaguesPoe2 = writable<League[]>([]);
-export const leaguesAll = derived(
-  [leaguesPoe, leaguesPoe2],
-  ([$leaguesPoe, $leaguesPoe2]) => [...$leaguesPoe, ...$leaguesPoe2],
-);
-
-registerPricingStores(leaguesAll);
+export const leaguesAll = writable<League[]>([]);
 
 // PoE 1 Exclusive Mercenary Stores
 export const mercenarySkills = writable<MercenarySkillsMap>({});
@@ -291,18 +284,22 @@ export async function initLeaguesData(): Promise<void> {
     ]);
 
     const errors: string[] = [];
+    const combinedLeagues: League[] = [];
 
     if (poeLeaguesResult.status === "fulfilled") {
-      leaguesPoe.set(poeLeaguesResult.value.result);
+      combinedLeagues.push(...poeLeaguesResult.value.result);
     } else {
       errors.push(`PoE Leagues: ${poeLeaguesResult.reason}`);
     }
 
     if (poe2LeaguesResult.status === "fulfilled") {
-      leaguesPoe2.set(poe2LeaguesResult.value.result);
+      combinedLeagues.push(...poe2LeaguesResult.value.result);
     } else {
       errors.push(`PoE2 Leagues: ${poe2LeaguesResult.reason}`);
     }
+
+    // Single atomic update containing both PoE 1 and PoE 2 leagues
+    leaguesAll.set(combinedLeagues);
 
     if (errors.length > 0) {
       leaguesError.set(errors.join(" | "));
@@ -312,6 +309,7 @@ export async function initLeaguesData(): Promise<void> {
   } finally {
     isLeaguesLoading.set(false);
   }
+  registerPricingStores(leaguesAll);
 }
 export async function initItemData(): Promise<void> {
   isLoading.set(true);

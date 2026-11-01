@@ -29,8 +29,8 @@
   let editingName = $state("");
   let confirmingDeleteEntry = $state<ProjectIndexEntry | null>(null);
 
-  const availableLeagues = ($leaguesAll || []).filter(
-    (l: League) => l.realm === newProjectRealm,
+  const availableLeagues = $derived(
+    ($leaguesAll || []).filter((l: League) => l.realm === newProjectRealm),
   );
 
   const activeRealmLabel = $derived(
