@@ -12,17 +12,35 @@ build:windows:
     - saas-windows-medium-amd64
   rules:
     # Trigger only on version tags like v1.0.0
-    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+/'
+    - if: "$CI_COMMIT_TAG =~ /^v[0-9]+/"
   cache:
     key: "${CI_COMMIT_REF_SLUG}-build-cache"
     paths:
       - .pnpm-store/
       - target/
   before_script:
-    # 1. Install Node.js (v22), Rust, and pnpm if not present on runner image
+    # 1. Install Node.js (v22) and refresh PATH
     - choco install nodejs --version=22.14.0 -y
-    - choco install rust -y
-    - npm install -g pnpm@latest
+
+    # 2. Install Rustup / MSVC toolchain (better compatibility with Tauri on Windows)
+    - |
+      if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+        Invoke-WebRequest -Uri "https://win.rustup.rs/x86_64" -OutFile "rustup-init.exe"
+        .\rustup-init.exe -y --default-toolchain stable-x86_64-pc-windows-msvc
+        Remove-Item "rustup-init.exe"
+      }
+
+    # 3. Enable pnpm using Node's built-in corepack (no separate npm install needed)
+    - corepack enable
+    - corepack prepare pnpm@latest --activate
+
+    # 4. Refresh PowerShell environment PATH from Machine and User registry
+    - |
+      $env:PATH = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User") + ";$env:USERPROFILE\.cargo\bin"
+
+    # 5. Verify CLI tools and configure store
+    - cargo --version
+    - pnpm --version
     - pnpm config set store-dir "$PNPM_HOME"
   script:
     # 2. Install dependencies
@@ -51,7 +69,7 @@ publish-release:
   stage: release
   image: registry.gitlab.com/gitlab-org/release-cli:latest
   rules:
-    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+/'
+    - if: "$CI_COMMIT_TAG =~ /^v[0-9]+/"
   needs:
     - job: build:windows
       artifacts: true
