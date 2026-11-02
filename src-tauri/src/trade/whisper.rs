@@ -31,7 +31,8 @@ pub async fn whisper(
     let referer_url = format!("{endpoint}/{trade_path}/search/{league}/{searchId}");
 
     let payload = json!({
-        "token": token
+        "token": token,
+        "continue": true
     });
 
     let res = client

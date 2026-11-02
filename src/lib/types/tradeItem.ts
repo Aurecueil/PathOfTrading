@@ -412,6 +412,7 @@ export interface TradeFetchResult {
   id: string;
   listing?: ItemListing;
   item: Item;
+  gone?: boolean;
 }
 
 export interface TradeFetchResponse {
