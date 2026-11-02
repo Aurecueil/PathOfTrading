@@ -1,0 +1,68 @@
+stages:
+  - build
+  - release
+
+variables:
+  PNPM_HOME: "$CI_PROJECT_DIR\\.pnpm-store"
+
+build:windows:
+  stage: build
+  # GitLab SaaS Windows runner (or your custom Windows runner tag)
+  tags:
+    - saas-windows-medium-amd64
+  rules:
+    # Trigger only on version tags like v1.0.0
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+/'
+  cache:
+    key: "${CI_COMMIT_REF_SLUG}-build-cache"
+    paths:
+      - .pnpm-store/
+      - target/
+  before_script:
+    # 1. Install Node.js (v22), Rust, and pnpm if not present on runner image
+    - choco install nodejs --version=22.14.0 -y
+    - choco install rust -y
+    - npm install -g pnpm@latest
+    - pnpm config set store-dir "$PNPM_HOME"
+  script:
+    # 2. Install dependencies
+    - pnpm install --frozen-lockfile
+    # 3. Build Tauri bundle
+    # Pass signing secrets (configured in GitLab CI/CD Variables)
+    - $env:TAURI_SIGNING_PRIVATE_KEY="$TAURI_SIGNING_PRIVATE_KEY"
+    - $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+    - pnpm tauri build
+    # 4. Upload built artifacts to GitLab Package Registry for permanent hosting
+    # Locates the generated .exe or .msi installer in target/release/bundle
+    - |
+      $Installer = Get-ChildItem -Path "src-tauri\target\release\bundle\msi\*.msi", "src-tauri\target\release\bundle\nsis\*.exe" | Select-Object -First 1
+      Invoke-RestMethod -Headers @{ "JOB-TOKEN" = "$CI_JOB_TOKEN" } `
+        -InFile $Installer.FullName `
+        -Uri "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/path-of-trading/${CI_COMMIT_TAG}/$($Installer.Name)" `
+        -Method Put
+      echo "PACKAGE_FILE_NAME=$($Installer.Name)" >> build.env
+  artifacts:
+    reports:
+      dotenv: build.env
+    paths:
+      - src-tauri/target/release/bundle/
+
+publish-release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+/'
+  needs:
+    - job: build:windows
+      artifacts: true
+  script:
+    - echo "Publishing release for $CI_COMMIT_TAG"
+  release:
+    name: "Path of Trading $CI_COMMIT_TAG"
+    tag_name: "$CI_COMMIT_TAG"
+    description: "Release for $CI_COMMIT_TAG"
+    assets:
+      links:
+        - name: "$PACKAGE_FILE_NAME"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/path-of-trading/${CI_COMMIT_TAG}/${PACKAGE_FILE_NAME}"
+          link_type: "package"
