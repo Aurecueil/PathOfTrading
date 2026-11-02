@@ -1,5 +1,5 @@
 <h1>
-  <img src="https://gitlab.com/aurecueil/pathoftrading/-/blob/f75fe1fb38652d1ca9eed56795bcc62484fffaac/static/favicon.png?raw=true" width="36" height="36" style="vertical-align: middle; margin-right: 10px;" />
+  <img src="https://gitlab.com/aurecueil/pathoftrading/-/raw/f75fe1fb38652d1ca9eed56795bcc62484fffaac/static/favicon.png?raw=true" width="36" height="36" style="vertical-align: middle; margin-right: 10px;" />
   Path of Trading
 </h1>
 
@@ -7,12 +7,12 @@
 
 <p align="center">
   <a href="#">
-    <img src="https://gitlab.com/aurecueil/pathoftrading/-/blob/f75fe1fb38652d1ca9eed56795bcc62484fffaac/.supplementary/static/mainpage.png" width="800" >
+    <img src="https://gitlab.com/aurecueil/pathoftrading/-/raw/f75fe1fb38652d1ca9eed56795bcc62484fffaac/.supplementary/static/mainpage.png" width="800" >
   </a>
 </p>
 <p align="center">
   <a href="#">
-    <img src="https://gitlab.com/aurecueil/pathoftrading/-/blob/f75fe1fb38652d1ca9eed56795bcc62484fffaac/.supplementary/static/proj.png" width="800" >
+    <img src="https://gitlab.com/aurecueil/pathoftrading/-/raw/f75fe1fb38652d1ca9eed56795bcc62484fffaac/.supplementary/static/proj.png" width="800" >
   </a>
 </p>
 
