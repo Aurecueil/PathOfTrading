@@ -33,7 +33,8 @@
   - always goes top-bottom
 - preset blocks for stat groups
 - share projects via code
-- 
+- auto-ignores "are u sure u want to telport to hidoeout? some bot has alreay snipped it so dont waste your time" when trying to teleport to hideout to buy an item
+
 ## Download / Install
 - [Latest Release Page](https://gitlab.com/aurecueil/pathoftrading/-/releases/permalink/latest)
 - [Click Here to Download setup.exe](https://gitlab.com/api/v4/projects/88416718/packages/generic/path-of-trading/v0.5.0/Path-of-Trading_0.5.0_x64-setup.exe)
