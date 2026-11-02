@@ -1,5 +1,5 @@
 <h1>
-  <img src="https://github.com/Aurecueil/PathOfTrading/blob/main/static/favicon.png?raw=true" width="36" height="36" style="vertical-align: middle; margin-right: 10px;" />
+  <img src="https://gitlab.com/Aurecueil/PathOfTrading/blob/main/static/favicon.png?raw=true" width="36" height="36" style="vertical-align: middle; margin-right: 10px;" />
   Path of Trading
 </h1>
 
@@ -7,12 +7,12 @@
 
 <p align="center">
   <a href="#">
-    <img src="https://github.com/Aurecueil/PathOfTrading/blob/main/.supplementary/static/mainpage.png" width="800" >
+    <img src="https://gitlab.com/Aurecueil/PathOfTrading/blob/main/.supplementary/static/mainpage.png" width="800" >
   </a>
 </p>
 <p align="center">
   <a href="#">
-    <img src="https://github.com/Aurecueil/PathOfTrading/blob/main/.supplementary/static/proj.png" width="800" >
+    <img src="https://gitlab.com/Aurecueil/PathOfTrading/blob/main/.supplementary/static/proj.png" width="800" >
   </a>
 </p>
 
@@ -34,7 +34,7 @@
 - preset blocks for stat groups
 - share projects via code
 - 
-## [Download](https://github.com/Aurecueil/PathOfTrading/releases/download/0.5.0/Path.of.Trading_0.5.0_x64-setup.exe)
+## [Download](https://gitlab.com/Aurecueil/PathOfTrading/releases/download/0.5.0/Path.of.Trading_0.5.0_x64-setup.exe)
 
 ## Updates
 
@@ -46,7 +46,7 @@ uhhh future me will do this
 
 # Acknowledgments
 
-- _[RePoE](https://github.com/brather1ng/RePoE)_
+- _[RePoE](https://gitlab.com/brather1ng/RePoE)_
 
 ## Third-Party Notice
 
