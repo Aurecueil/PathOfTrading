@@ -538,7 +538,7 @@ tau-build-windows:
     - ensure_tauri_cli
     - ensure_sccache
     - install_frontend_deps
-  script:
+ script:
     - |
       set -eo pipefail
       cd "${TAU_PROJECT_DIR:-.}"
@@ -565,6 +565,20 @@ tau-build-windows:
         esc_cmd=${TAU_WINDOWS_SIGN_COMMAND//\\/\\\\}
         esc_cmd=${esc_cmd//\"/\\\"}
         win_bundle="${win_bundle},\"windows\":{\"signCommand\":\"${esc_cmd}\"}"
+      fi
+      real_makensis=$(command -v makensis)
+      if [[ ! -f "${real_makensis}.real" ]]; then
+        mv "$real_makensis" "${real_makensis}.real"
+        cat << 'EOF' > "$real_makensis"
+      #!/usr/bin/env bash
+      for f in "$@"; do
+        if [[ "$f" == *.nsi && -f "$f" ]]; then
+          sed -i 's|Win\\RestartManager.nsh|Win/RestartManager.nsh|g' "$f"
+        fi
+      done
+      exec "$0.real" "$@"
+      EOF
+        chmod +x "$real_makensis"
       fi
       $(tauri_cmd) build --ci --runner cargo-xwin --target "${TAU_WINDOWS_TARGET}" --config "{\"bundle\":{${win_bundle}}${win_build_cfg}}" ${TAU_BUILD_ARGS}
   cache:
