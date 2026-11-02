@@ -3,7 +3,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { page } from "$app/stores";
-  import { onMount, onDestroy, tick } from "svelte";
+  import { onMount, onDestroy, tick, setContext } from "svelte";
   import Tile from "$lib/SearchTile.svelte";
   import FilterDrawer from "$lib/FilterForm.svelte";
   import CanvasToolbar from "$lib/viewport/CanvasToolbar.svelte";
@@ -763,6 +763,26 @@
     league: string;
   } | null = null;
 
+  let worldEl: HTMLDivElement;
+
+  // Visible area of the viewport, in world coordinates
+  function getVisibleWorldBounds() {
+    const w = viewportEl?.clientWidth ?? window.innerWidth;
+    const h = viewportEl?.clientHeight ?? window.innerHeight;
+    return {
+      minX: -offsetX / scale,
+      minY: -offsetY / scale,
+      maxX: (w - offsetX) / scale,
+      maxY: (h - offsetY) / scale,
+    };
+  }
+
+  setContext("canvasWorld", {
+    getWorld: () => worldEl ?? null,
+    screenToWorld,
+    getVisibleWorldBounds,
+  });
+
   let viewportEl: HTMLDivElement;
 
   function getViewportCoords(clientX: number, clientY: number) {
@@ -1462,7 +1482,8 @@
 
   <div
     class="world"
-    style:transform="translate3d({offsetX}px, {offsetY}px, 0) scale({scale})"
+    bind:this={worldEl}
+    style:transform="translate({offsetX}px, {offsetY}px) scale({scale})"
   >
     {#each annotations as item (item.id)}
       {#if item.kind === "arrow" || item.kind === "box" || item.kind === "circle"}
@@ -1676,7 +1697,6 @@
     transform-origin: 0 0;
     width: 1px;
     height: 1px;
-    will-change: transform;
   }
 
   .marquee-box {
@@ -1689,7 +1709,5 @@
     border-radius: 0px;
     pointer-events: none;
     z-index: 90;
-    will-change: transform, width, height;
-    backface-visibility: hidden;
   }
 </style>

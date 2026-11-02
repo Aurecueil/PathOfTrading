@@ -16,7 +16,7 @@
   } from "$lib/types/tradeItem";
   import SearchItemRow from "$lib/searchTile/SearchItemRow.svelte";
   import ItemJsonModal from "$lib/trade/components/item/ItemJsonModal.svelte";
-  import { authState, isDev } from "$lib/trade/tradeStore";
+  import { authState, isDev, leagueToRealm } from "$lib/trade/tradeStore";
 
   export let tile: SearchTile;
   export let scale: number = 1;
@@ -1109,11 +1109,12 @@
           }
         },
       );
-
+      console.log(tile.league);
       await invoke("start_live_search", {
         tileId: String(tile.id),
         realm: tile.realm,
         queryId: tile.searchId,
+        league: tile.league,
       });
 
       if (!isDestroyed) {

@@ -65,10 +65,11 @@ pub async fn start_live_search(
     } else {
         ""
     };
+    let encoded_league = league.replace(' ', "%20"); //if they dont include any ascii or weird stuff to encode we are safe,
 
     let host = "www.pathofexile.com";
-    let ws_url = format!("wss://{host}/api/{trade_path}/live/{poe_platform}{league}/{query_id}");
-
+    let ws_url =
+        format!("wss://{host}/api/{trade_path}/live/{poe_platform}{encoded_league}/{query_id}");
     let poe_token =
         load_secret("poetoken")?.ok_or_else(|| "Missing 'poetoken' secret".to_string())?;
     let poesessid =

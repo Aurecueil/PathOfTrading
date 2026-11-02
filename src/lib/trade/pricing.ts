@@ -23,6 +23,7 @@ export const POE1_TARGETS = [
   "scour",
   "transmute",
   "wisdom",
+  "fracturing-orb",
   "portal",
   "scrap",
   "whetstone",
@@ -59,7 +60,7 @@ export const POE2_TARGETS = [
 ] as const;
 
 // ---------------------------------------------------------------------------
-// Schema Types (matching Aurecueil/poe.prices output)
+// Schema Types (matching R2 output on data.aurecueil.uk)
 // ---------------------------------------------------------------------------
 export interface HWPair {
   h: number;
@@ -74,14 +75,52 @@ export interface ExchangeRateEntry {
   buy: HWPair;
   sell: HWPair;
   vol: HWPair;
-  traded_volume?: number;
   timestamp?: number;
 }
 
-export interface RemoteLeagueFile {
-  timestamp: number;
-  currencies: string[];
-  rates: ExchangeRateEntry[];
+/**
+ * [have, want, via, ts, buyH, buyW, sellH, sellW, volH, volW, traded]
+ */
+export type R2Row = [
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+];
+
+export interface R2LeagueData {
+  t: number;
+  c: string[];
+  r: R2Row[];
+}
+
+export interface R2GameFile {
+  v: 1;
+  updated: number;
+  leagues: Record<string, R2LeagueData>;
+}
+
+export interface R2FileInfo {
+  path: string;
+  updated: number;
+  leagues: Record<string, number>;
+}
+
+export interface R2GameIndex {
+  current: R2FileInfo;
+  archive: R2FileInfo;
+}
+
+export interface R2IndexFile {
+  v: 1;
+  updated: number;
+  games: Record<string, R2GameIndex>;
 }
 
 /** Map of canonical pair key (`"have/want"` where `have < want`) -> ExchangeRateEntry */
@@ -111,11 +150,21 @@ export type OverridesStoreMap = Record<
 >;
 
 const OVERRIDES_STORAGE_KEY = "pot.currencyOverrides";
-const PRICING_BASE_URL =
-  "https://raw.githubusercontent.com/Aurecueil/poe.prices/main";
+const PRICING_BASE_URL = "https://data.aurecueil.uk";
 
 // Store references injected from tradeStore.ts to avoid circular imports
 let leaguesStore: Readable<League[]> | null = null;
+let leaguesUnsubscribe: (() => void) | null = null;
+
+// Tracks subscribed realms and the `updated` unix timestamp of each realm's current.json
+const subscribedRealms = new Set<Realm>();
+const realmRemoteUpdated: Record<Realm, number | null> = {
+  pc: null,
+  poe2: null,
+  xbox: null,
+  sony: null,
+};
+
 // ---------------------------------------------------------------------------
 // Stores
 // ---------------------------------------------------------------------------
@@ -143,6 +192,7 @@ export const lastPriceUpdate = writable<{
   xbox: null,
   sony: null,
 });
+
 // ---------------------------------------------------------------------------
 // User-set exchange ratios (one override per pair, with buy / sell / vol slots)
 // ---------------------------------------------------------------------------
@@ -368,6 +418,7 @@ function resolveUserMultiplier(
   const r = user[key]?.[mode];
   return isLive(r) ? (flipped ? r.h / r.w : r.w / r.h) : null;
 }
+
 // ---------------------------------------------------------------------------
 // Pair Lookup & Ratio Math
 // ---------------------------------------------------------------------------
@@ -436,7 +487,7 @@ export function getPairMultiplier(
 /**
  * Resolves the conversion multiplier from `fromCurr` -> `toCurr` strictly from
  * the league's `direct` and `proxy` maps. Returns `null` if the pair does not
- * exist in the GitHub JSON file.
+ * exist in the R2 JSON file.
  */
 function resolvePairMultiplier(
   leagueMaps: LeagueExchangeMaps,
@@ -516,7 +567,6 @@ export const effectivePrices = derived(
     const result: PricesStoreMap = { pc: {}, poe2: {}, xbox: {}, sony: {} };
 
     for (const realm of ["pc", "poe2", "xbox", "sony"] as const) {
-      // Only include leagues that actually have a fetched JSON file from GitHub
       for (const [leagueId, rawLeague] of Object.entries($raw[realm] || {})) {
         if (!rawLeague) continue;
 
@@ -548,6 +598,7 @@ export const effectivePrices = derived(
     return result;
   },
 );
+
 let pricingRev = 0;
 /** Ticks whenever anything convertCurrency() reads changes. Reference it in reactive statements. */
 export const pricingRevision = derived(
@@ -560,6 +611,7 @@ export const pricingRevision = derived(
   ],
   () => ++pricingRev,
 );
+
 // ---------------------------------------------------------------------------
 // Overrides Persistence
 // ---------------------------------------------------------------------------
@@ -571,7 +623,7 @@ function loadOverridesFromStorage(): OverridesStoreMap {
     if (!raw) return { pc: {}, poe2: {}, xbox: {}, sony: {} };
     const parsed = JSON.parse(raw);
     return {
-      pc: parsed.poe ?? {},
+      pc: parsed.pc ?? parsed.poe ?? {},
       poe2: parsed.poe2 ?? {},
       xbox: parsed.xbox ?? {},
       sony: parsed.sony ?? {},
@@ -633,7 +685,7 @@ export function clearLeagueOverrides(realm: Realm, leagueId: string): void {
 // ---------------------------------------------------------------------------
 // League Filtering & Deduplication
 // ---------------------------------------------------------------------------
-const ALL_REALMS = ["pc", "xbox", "sony", "poe2"] as const;
+const ALL_REALMS = ["poe2", "pc", "xbox", "sony"] as const;
 
 /** League.realm (API value) -> Realm used by the pricing files */
 const LEAGUE_REALM_MAP: Record<string, Realm> = {
@@ -665,145 +717,142 @@ export function getValidLeagues(
   }
   return unique;
 }
+
 // ---------------------------------------------------------------------------
-// Fetching & Minute-Aligned Scheduler
+// R2 Parsing, Fetching & Minute-Aligned Scheduler
 // ---------------------------------------------------------------------------
-function parseLeagueFile(raw: RemoteLeagueFile): LeagueExchangeMaps | null {
-  if (!raw || !Array.isArray(raw.rates)) return null;
+function parseR2League(raw: R2LeagueData): LeagueExchangeMaps | null {
+  if (!raw || !Array.isArray(raw.c) || !Array.isArray(raw.r)) return null;
 
   const direct: ExchangePairMap = {};
   const proxy: ExchangePairMap = {};
-  const currencySet = new Set<string>(
-    Array.isArray(raw.currencies)
-      ? raw.currencies.map((c) => c.toLowerCase())
-      : [],
-  );
+  const currencies = raw.c.map((c) => c.toLowerCase());
+  const currencySet = new Set<string>(currencies);
 
-  for (const r of raw.rates) {
-    if (!r || typeof r.have !== "string" || typeof r.want !== "string")
-      continue;
+  for (const row of raw.r) {
+    if (!Array.isArray(row) || row.length < 10) continue;
+    const [hi, wi, viaIdx, ts, buyH, buyW, sellH, sellW, volH, volW] = row;
 
-    const have = r.have.toLowerCase();
-    const want = r.want.toLowerCase();
-    currencySet.add(have);
-    currencySet.add(want);
+    const haveRaw = currencies[hi];
+    const wantRaw = currencies[wi];
+    if (!haveRaw || !wantRaw) continue;
 
-    const flipped = have > want;
-    const key = flipped ? `${want}/${have}` : `${have}/${want}`;
-    const normalized: ExchangeRateEntry = flipped
-      ? {
-          ...r,
-          have: want,
-          want: have,
-          buy: { h: r.sell.w, w: r.sell.h },
-          sell: { h: r.buy.w, w: r.buy.h },
-          vol: { h: r.vol.w, w: r.vol.h },
-        }
-      : {
-          ...r,
-          have,
-          want,
-        };
+    const via = viaIdx >= 0 ? currencies[viaIdx] : undefined;
+    const isProxy = viaIdx >= 0;
 
-    if (r.type === "direct") {
-      direct[key] = normalized;
-    } else if (r.type === "proxy") {
-      proxy[key] = normalized;
+    const flipped = haveRaw > wantRaw;
+    const have = flipped ? wantRaw : haveRaw;
+    const want = flipped ? haveRaw : wantRaw;
+    const key = `${have}/${want}`;
+
+    const entry: ExchangeRateEntry = {
+      have,
+      want,
+      type: isProxy ? "proxy" : "direct",
+      ...(via ? { via } : {}),
+      buy: flipped ? { h: sellW, w: sellH } : { h: buyH, w: buyW },
+      sell: flipped ? { h: buyW, w: buyH } : { h: sellH, w: sellW },
+      vol: flipped ? { h: volW, w: volH } : { h: volH, w: volW },
+      timestamp: ts,
+    };
+
+    if (isProxy) {
+      proxy[key] = entry;
+    } else {
+      direct[key] = entry;
     }
   }
 
   return {
     timestamp:
-      typeof raw.timestamp === "number"
-        ? raw.timestamp
-        : Math.floor(Date.now() / 1000),
+      typeof raw.t === "number" ? raw.t : Math.floor(Date.now() / 1000),
     currencies: Array.from(currencySet).sort(),
     direct,
     proxy,
   };
 }
 
-// async function fetchSingleLeaguePrices(
-//   realm: GameRealm,
-//   leagueId: string,
-// ): Promise<LeagueExchangeMaps | null> {
-//   const encodedLeague = encodeURIComponent(leagueId);
-//   const url = `${PRICING_BASE_URL}/${realm}/${encodedLeague}.json`;
-//
-//   try {
-//     const res = await fetch(url, { cache: "no-store" });
-//     if (!res.ok) return null;
-//     const data = (await res.json()) as RemoteLeagueFile;
-//     return parseLeagueFile(data);
-//   } catch (err) {
-//     console.warn(`[Pricing] Failed to fetch ${realm}/${leagueId}:`, err);
-//     return null;
-//   }
-// }
+function parseR2GameFile(
+  file: R2GameFile,
+): Record<string, LeagueExchangeMaps> | null {
+  if (!file || typeof file.leagues !== "object" || !file.leagues) return null;
+  const out: Record<string, LeagueExchangeMaps> = {};
+  for (const [leagueId, leagueData] of Object.entries(file.leagues)) {
+    const parsed = parseR2League(leagueData);
+    if (parsed) out[leagueId] = parsed;
+  }
+  return out;
+}
 
-///
-/// uwu
-///
-const PRICING_BASE_URL2 =
-  "https://api.github.com/repos/Aurecueil/poe.prices/contents";
-async function fetchSingleLeaguePrices(
-  realm: Realm,
-  leagueId: string,
-): Promise<LeagueExchangeMaps | null> {
-  const encodedLeague = encodeURIComponent(leagueId);
-  // GitHub contents endpoint: /repos/{owner}/{repo}/contents/{path}
-  const url = `${PRICING_BASE_URL2}/${realm}/${encodedLeague}.json`;
-
-  const token =
-    "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"; // fine-grained token, cause github spamurai detected sth and account poof 404 on public TT
-
+async function fetchIndexFile(): Promise<R2IndexFile | null> {
   try {
-    const res = await fetch(url, {
-      cache: "no-store",
-      headers: {
-        Accept: "application/vnd.github.raw+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    });
-
+    const res = await fetch(`${PRICING_BASE_URL}/index.json?_=${Date.now()}`);
     if (!res.ok) return null;
-    const data = (await res.json()) as RemoteLeagueFile;
-    return parseLeagueFile(data);
+    return (await res.json()) as R2IndexFile;
   } catch (err) {
-    console.warn(`[Pricing] Failed to fetch ${realm}/${leagueId}:`, err);
+    console.warn("[Pricing] Failed to fetch index.json:", err);
     return null;
   }
 }
-///
-/// uwu
-///
+
+async function fetchRealmCurrentFile(realm: Realm): Promise<R2GameFile | null> {
+  try {
+    const res = await fetch(
+      `${PRICING_BASE_URL}/${realm}/current.json?_=${Date.now()}`,
+    );
+    if (!res.ok) return null;
+    return (await res.json()) as R2GameFile;
+  } catch (err) {
+    console.warn(`[Pricing] Failed to fetch ${realm}/current.json:`, err);
+    return null;
+  }
+}
 
 let refreshInFlight: Promise<void> | null = null;
 
-/** Fetches price files for every league of every realm in one go. */
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-export function refreshAllPrices(overrideLeagues?: League[]): Promise<void> {
-  if (refreshInFlight) return refreshInFlight;
-
-  const all = overrideLeagues ?? (leaguesStore ? get(leaguesStore) : []);
-  const targets = ALL_REALMS.flatMap((realm) =>
-    getValidLeagues(all, realm).map((l) => ({ realm, id: l.id })),
+/**
+ * Fetches `current.json` from R2 for the target realms (defaults to all subscribed realms).
+ * When `onlyIfChanged` is true (used by the hourly scheduler), checks `index.json` first
+ * and skips fetching any `current.json` whose `updated` timestamp has not changed.
+ */
+export function refreshAllPrices(
+  _overrideLeagues?: League[],
+  options?: { realms?: Realm[]; onlyIfChanged?: boolean },
+): Promise<void> {
+  const targetRealms = (options?.realms ?? Array.from(subscribedRealms)).filter(
+    (r) => subscribedRealms.has(r),
   );
-  if (targets.length === 0) return Promise.resolve();
 
-  refreshInFlight = (async () => {
+  if (targetRealms.length === 0) return Promise.resolve();
+
+  const run = async () => {
     isRefreshingPrices.set(true);
     try {
+      let realmsToFetch = [...targetRealms];
+
+      if (options?.onlyIfChanged) {
+        const index = await fetchIndexFile();
+        if (index?.games) {
+          realmsToFetch = targetRealms.filter((realm) => {
+            const remoteUpdated = index.games[realm]?.current?.updated;
+            const localUpdated = realmRemoteUpdated[realm];
+            // Fetch if we have never fetched this realm or if remote timestamp is newer/different
+            return (
+              localUpdated === null ||
+              typeof remoteUpdated !== "number" ||
+              remoteUpdated !== localUpdated
+            );
+          });
+        }
+      }
+
+      if (realmsToFetch.length === 0) return;
+
       const results = await Promise.allSettled(
-        targets.map(async (t, i) => {
-          await sleep(i * 500);
-          return {
-            ...t,
-            data: await fetchSingleLeaguePrices(t.realm, t.id),
-          };
-        }),
+        realmsToFetch.map(async (realm) => ({
+          realm,
+          file: await fetchRealmCurrentFile(realm),
+        })),
       );
 
       const touched = new Set<Realm>();
@@ -814,33 +863,47 @@ export function refreshAllPrices(overrideLeagues?: League[]): Promise<void> {
           xbox: { ...current.xbox },
           sony: { ...current.sony },
         };
+
         for (const res of results) {
-          if (res.status === "fulfilled" && res.value.data) {
-            next[res.value.realm][res.value.id] = res.value.data;
-            touched.add(res.value.realm);
+          if (res.status === "fulfilled" && res.value.file) {
+            const { realm, file } = res.value;
+            const parsedLeagues = parseR2GameFile(file);
+            if (parsedLeagues) {
+              next[realm] = parsedLeagues;
+              realmRemoteUpdated[realm] = file.updated;
+              touched.add(realm);
+            }
           }
         }
+
         return next;
       });
 
-      const ts = Date.now();
-      lastPriceUpdate.update((u) => {
-        const n = { ...u };
-        for (const r of touched) n[r] = ts;
-        return n;
-      });
+      if (touched.size > 0) {
+        const ts = Date.now();
+        lastPriceUpdate.update((u) => {
+          const n = { ...u };
+          for (const r of touched) n[r] = ts;
+          return n;
+        });
+      }
     } finally {
       isRefreshingPrices.set(false);
-      refreshInFlight = null;
     }
-  })();
+  };
 
-  return refreshInFlight;
+  const nextPromise = refreshInFlight ? refreshInFlight.then(run, run) : run();
+  const tracked = nextPromise.finally(() => {
+    if (refreshInFlight === tracked) refreshInFlight = null;
+  });
+  refreshInFlight = tracked;
+
+  return tracked;
 }
 
 let updateTimer: ReturnType<typeof setTimeout> | null = null;
 let schedulerInitialized = false;
-const UPDATE_MINUTE = 4; // GitHub files are updated hourly; fetch at :04
+const UPDATE_MINUTE = 4; // R2 worker cron runs at :02; client checks at :04
 
 function getMsUntilNextUpdate(): number {
   const now = new Date();
@@ -854,33 +917,59 @@ function getMsUntilNextUpdate(): number {
 function scheduleUpdate() {
   if (updateTimer) clearTimeout(updateTimer);
   updateTimer = setTimeout(async () => {
-    await refreshAllPrices();
+    await refreshAllPrices(undefined, { onlyIfChanged: true });
     scheduleUpdate();
   }, getMsUntilNextUpdate());
 }
 
 /**
- * Connects the merged league store (poe1 pc/xbox/sony + poe2) and starts
- * the pricing fetch + hourly schedule.
+ * Connects the merged league store and subscribes to the specified realms.
+ * Can be called multiple times; realms that are already subscribed are ignored.
  */
-export function registerPricingStores(leagues: Readable<League[]>): void {
-  leaguesStore = leagues;
+export function registerPricingStores(
+  leagues: Readable<League[]>,
+  realms: Realm[] = [...ALL_REALMS],
+): void {
+  const newlyAdded: Realm[] = [];
+  for (const r of realms) {
+    if (ALL_REALMS.includes(r) && !subscribedRealms.has(r)) {
+      subscribedRealms.add(r);
+      newlyAdded.push(r);
+    }
+  }
 
-  if (schedulerInitialized) return;
-  schedulerInitialized = true;
+  if (leaguesStore !== leagues) {
+    leaguesStore = leagues;
+    leaguesUnsubscribe?.();
+    leaguesUnsubscribe = leagues.subscribe((list) => {
+      if (list.length === 0) return;
+      const raw = get(rawPrices);
+      const missingRealms = Array.from(subscribedRealms).filter(
+        (r) =>
+          realmRemoteUpdated[r] === null &&
+          Object.keys(raw[r]).length === 0 &&
+          getValidLeagues(list, r).length > 0,
+      );
+      if (missingRealms.length > 0) {
+        refreshAllPrices(list, { realms: missingRealms });
+      }
+    });
+  }
 
-  // Fetch as soon as leagues populate for any realm that has no data yet
-  leagues.subscribe((list) => {
-    if (list.length === 0) return;
+  if (newlyAdded.length > 0) {
     const raw = get(rawPrices);
-    const needsFetch = ALL_REALMS.some(
-      (r) =>
-        getValidLeagues(list, r).length > 0 && Object.keys(raw[r]).length === 0,
+    const toFetchNow = newlyAdded.filter(
+      (r) => realmRemoteUpdated[r] === null && Object.keys(raw[r]).length === 0,
     );
-    if (needsFetch) refreshAllPrices(list);
-  });
+    if (toFetchNow.length > 0) {
+      refreshAllPrices(undefined, { realms: toFetchNow });
+    }
+  }
 
-  scheduleUpdate();
+  if (!schedulerInitialized) {
+    schedulerInitialized = true;
+    scheduleUpdate();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -895,7 +984,7 @@ export function convertCurrency(
 ): number {
   if (!Number.isFinite(amount)) return -9;
 
-  // Require that a JSON file was actually fetched from GitHub for this league
+  // Require that a JSON file was actually fetched from R2 for this league
   const rawLeague = get(rawPrices)[realm]?.[leagueId];
   if (!rawLeague) return -9;
 
@@ -934,7 +1023,7 @@ export function convertCurrency(
     return Math.round(rawConverted * 10) / 10;
   }
 
-  // 2. Otherwise, require an explicit pair entry (`direct` or `proxy`) in the GitHub JSON
+  // 2. Otherwise, require an explicit pair entry (`direct` or `proxy`) in the R2 JSON
   const preferDirect = get(preferDirectExchange);
   const useTradedVol = get(tadedExchangeRatios);
   const mult = resolvePairMultiplier(

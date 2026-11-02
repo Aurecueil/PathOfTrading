@@ -2,6 +2,7 @@
 <script lang="ts">
   import KeywordText from "./KeywordText.svelte";
   import { cleanBracketText } from "./statsUtils";
+  import { getContext } from "svelte";
 
   export let term: string = "";
   export let definition: string = "";
@@ -41,50 +42,79 @@
     };
   }
 
-  $: pos = (() => {
-    if (typeof window === "undefined") {
-      return { left: x, top: y };
+  const canvas = getContext<{ getWorld: () => HTMLElement | null } | undefined>(
+    "canvasWorld",
+  );
+
+  // Convert a client (screen) point into world coordinates, plus the visible
+  // world-space bounds of the viewport so we can clamp inside it.
+  function toWorldSpace(cx: number, cy: number) {
+    const world = canvas?.getWorld();
+    const vp = world?.parentElement;
+    if (!world || !vp) {
+      // Not inside a canvas: fall back to plain screen space
+      return {
+        x: cx,
+        y: cy,
+        minX: 0,
+        minY: 0,
+        maxX: window.innerWidth,
+        maxY: window.innerHeight,
+      };
     }
+    const wr = world.getBoundingClientRect(); // world is 1x1px, so width === scale
+    const vr = vp.getBoundingClientRect();
+    const s = wr.width || 1;
+    return {
+      x: (cx - wr.left) / s,
+      y: (cy - wr.top) / s,
+      minX: (vr.left - wr.left) / s,
+      minY: (vr.top - wr.top) / s,
+      maxX: (vr.right - wr.left) / s,
+      maxY: (vr.bottom - wr.top) / s,
+    };
+  }
 
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+  // Only recomputed when x/y change (new hover), NOT on zoom/pan,
+  // so the tooltip stays anchored in the world like any other element.
+  $: anchor = toWorldSpace(x, y);
+
+  $: maxH = anchor.maxY - anchor.minY - PAD * 2;
+
+  $: pos = (() => {
+    const { x: ax, y: ay, minX, minY, maxX, maxY } = anchor;
     const w = tipW || TIP_W;
-    const h = tipH || 140;
+    const h = Math.min(tipH || 140, maxH);
 
-    const spaceAbove = y - OFFSET - PAD;
-    const spaceBelow = vh - y - OFFSET - PAD;
+    const spaceAbove = ay - OFFSET - PAD - minY;
+    const spaceBelow = maxY - ay - OFFSET - PAD;
 
     let left: number;
     let top: number;
 
     if (h <= spaceAbove) {
-      // 1. Default: Above mouse, horizontally centered on mouse X
-      top = y - OFFSET - h;
-      left = Math.max(PAD, Math.min(x - w / 2, vw - w - PAD));
+      top = ay - OFFSET - h;
+      left = Math.max(minX + PAD, Math.min(ax - w / 2, maxX - w - PAD));
     } else if (h <= spaceBelow) {
-      // 2. Fallback: Below mouse, horizontally centered on mouse X
-      top = y + OFFSET;
-      left = Math.max(PAD, Math.min(x - w / 2, vw - w - PAD));
+      top = ay + OFFSET;
+      left = Math.max(minX + PAD, Math.min(ax - w / 2, maxX - w - PAD));
     } else {
-      // 3. Really tall tooltip: Left of mouse (or right if not enough space on left),
-      //    vertically centered on mouse Y
-      const spaceLeft = x - OFFSET - PAD;
-      const spaceRight = vw - x - OFFSET - PAD;
-
+      const spaceLeft = ax - OFFSET - PAD - minX;
+      const spaceRight = maxX - ax - OFFSET - PAD;
       if (w <= spaceLeft || spaceLeft >= spaceRight) {
-        left = Math.max(PAD, x - OFFSET - w);
+        left = Math.max(minX + PAD, ax - OFFSET - w);
       } else {
-        left = Math.min(vw - w - PAD, x + OFFSET);
+        left = Math.min(maxX - w - PAD, ax + OFFSET);
       }
-
-      top = Math.max(PAD, Math.min(y - h / 2, vh - h - PAD));
+      top = Math.max(minY + PAD, Math.min(ay - h / 2, maxY - h - PAD));
     }
 
     return { left, top };
   })();
 
   function portal(node: HTMLElement) {
-    document.body.appendChild(node);
+    const target = canvas?.getWorld() ?? document.body;
+    target.appendChild(node);
     return {
       destroy() {
         node.remove();
