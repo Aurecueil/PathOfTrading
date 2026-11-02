@@ -143,8 +143,8 @@ variables:
   TAU_PACKAGE_MANAGER: $[[ inputs.package-manager ]]
   TAU_TAURI_VERSION: $[[ inputs.tauri-version ]]
   TAU_PROJECT_DIR: $[[ inputs.project-dir ]]
-  TAU_BUILD_DISABLED: $[[ inputs.build-disabled ]]
-  TAU_LINUX_DISABLED: $[[ inputs.linux-disabled ]]
+  TAU_BUILD_DISABLED: "$[[ inputs.build-disabled ]]"
+  TAU_BUILD_ARGS: "$[[ inputs.build-args ]]"
   TAU_BUILD_ARGS: $[[ inputs.build-args ]]
   TAU_DEV_PROFILE: $[[ inputs.dev-profile ]]
   TAU_INSTALL_ARGS: $[[ inputs.install-args ]]
@@ -538,7 +538,7 @@ tau-build-windows:
     - ensure_tauri_cli
     - ensure_sccache
     - install_frontend_deps
- script:
+  script:
     - |
       set -eo pipefail
       cd "${TAU_PROJECT_DIR:-.}"
@@ -580,6 +580,10 @@ tau-build-windows:
       EOF
         chmod +x "$real_makensis"
       fi
+
+      makensis.real -VERSION 2>/dev/null || "${real_makensis}.real" -VERSION || true
+      ls /usr/share/nsis/Include/Win/ || find / -name RestartManager.nsh 2>/dev/null || true
+
       $(tauri_cmd) build --ci --runner cargo-xwin --target "${TAU_WINDOWS_TARGET}" --config "{\"bundle\":{${win_bundle}}${win_build_cfg}}" ${TAU_BUILD_ARGS}
   cache:
     - !reference [.tau-cache, dependencies]
@@ -591,8 +595,8 @@ tau-build-windows:
   artifacts:
     paths:
       - "${TAU_PROJECT_DIR:-.}/src-tauri/target/${TAU_WINDOWS_TARGET}/release/*.exe"
-      - "${TAU_PROJECT_DIR:-.}/src-tauri/target/${TAU_WINDOWS_TARGET}/release/bundle/nsis/*-setup.exe"
-      - "${TAU_PROJECT_DIR:-.}/src-tauri/target/${TAU_WINDOWS_TARGET}/release/bundle/nsis/*-setup.exe.sig"
+      - "$[[ inputs.project-dir ]]/src-tauri/target/$[[ inputs.windows-target ]]/release/bundle/nsis/*-setup.exe"
+      - "$[[ inputs.project-dir ]]/src-tauri/target/$[[ inputs.windows-target ]]/release/bundle/nsis/*-setup.exe.sig"
     expire_in: $[[ inputs.artifacts-expire-in ]]
 
 # ---- Publish Release to GitLab Releases & Package Registry ----
