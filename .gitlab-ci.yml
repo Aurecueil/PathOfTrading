@@ -1,86 +1,649 @@
+spec:
+  inputs:
+    image:
+      description: "The Docker image used to run Tauri builds."
+      default: $TBC_DEFAULT_TAU_IMAGE
+    package-manager:
+      description: "The package manager used by your project"
+      options:
+        - auto
+        - npm
+        - yarn
+        - pnpm
+        - deno
+        - bun
+        - cargo
+      default: pnpm
+    tauri-version:
+      description: Tauri CLI version constraint
+      default: "^2"
+    project-dir:
+      description: Tauri project root directory (where src-tauri/ lives)
+      default: .
+    build-disabled:
+      description: "Disable ALL Tauri builds"
+      type: boolean
+      default: false
+    linux-disabled:
+      description: "Disable the Linux desktop build (tau-build)."
+      type: boolean
+      default: true
+    build-args:
+      description: Additional arguments passed to `tauri build`
+      default: ""
+    dev-profile:
+      description: "Cargo profile for non-delivery builds"
+      type: string
+      options:
+        - debug
+        - release
+      default: release
+    bundle-on-mr:
+      description: "Always produce installable bundles"
+      type: boolean
+      default: false
+    changes-only-mode:
+      description: "Skip build/test jobs on branch pipelines when no Tauri-related file changed"
+      type: boolean
+      default: true
+    install-args:
+      description: "Extra arguments for frontend dependency installation"
+      default: ""
+    frontend-dist:
+      description: "Directory holding a pre-built frontend"
+      default: ""
+    app-version:
+      description: "Application version stamped into the build"
+      default: ""
+    linux-bundles:
+      description: "Comma-separated Linux bundle formats: deb, rpm, appimage"
+      default: deb,appimage
+    test-disabled:
+      description: "Disable Test"
+      type: boolean
+      default: true
+    test-cmd:
+      description: Test command to execute
+      default: cargo test
+    lint-enabled:
+      description: "Enable Rust lint"
+      type: boolean
+      default: false
+    lint-args:
+      description: "Arguments appended to `cargo clippy`"
+      default: "-D warnings"
+    windows-enabled:
+      description: "Enable Windows Cross-Compilation"
+      type: boolean
+      default: true
+    windows-target:
+      description: Windows Rust target triple
+      options:
+        - x86_64-pc-windows-msvc
+        - i686-pc-windows-msvc
+        - aarch64-pc-windows-msvc
+      default: x86_64-pc-windows-msvc
+    windows-bundles:
+      description: "Comma-separated Windows installer formats to cross-build from Linux on delivery"
+      default: "nsis"
+    windows-sign-command:
+      description: "Tauri `bundle.windows.signCommand` used to Authenticode-sign the cross-built Windows installers"
+      default: ""
+    windows-sign-install:
+      description: "Shell command run before the Windows build to install signing tool"
+      default: ""
+    windows-azure-trusted-signing:
+      description: "Built-in Authenticode signing of the Windows bundles with Azure Trusted Signing"
+      type: boolean
+      default: false
+    windows-ats-jsign-version:
+      description: "jsign release used by the built-in Azure Trusted Signing support."
+      default: "7.4"
+    skip-system-deps:
+      description: Skip system dependency installation
+      type: boolean
+      default: true
+    system-packages:
+      description: "Extra Debian/Ubuntu packages installed with apt"
+      default: ""
+    build-cpu-request:
+      default: ""
+    build-cpu-limit:
+      default: ""
+    build-memory-request:
+      default: ""
+    build-memory-limit:
+      default: ""
+    cargo-build-jobs:
+      default: ""
+    desktop-release-enabled:
+      description: "Enable the desktop GitLab Release job (tau-publish)"
+      type: boolean
+      default: true
+    desktop-release-package-name:
+      description: "Generic package name under which desktop bundles are uploaded"
+      default: "path-of-trading"
+    artifacts-expire-in:
+      description: Artifacts expiration duration
+      default: 30 days
+---
+# Trigger pipeline ONLY on v* tags (matching GitHub Actions `on: push: tags: ["v*"]`)
+workflow:
+  rules:
+    - if: "$CI_COMMIT_TAG =~ /^v/"
+      when: always
+    - when: never
+
+# =============================================================================
+# Variables mapping
+# =============================================================================
+variables:
+  TBC_DEFAULT_TAU_IMAGE: "registry.gitlab.com/to-be-continuous/tauri/tauri-ci:latest"
+  TAU_IMAGE: $[[ inputs.image ]]
+  TAU_PACKAGE_MANAGER: $[[ inputs.package-manager ]]
+  TAU_TAURI_VERSION: $[[ inputs.tauri-version ]]
+  TAU_PROJECT_DIR: $[[ inputs.project-dir ]]
+  TAU_BUILD_DISABLED: $[[ inputs.build-disabled ]]
+  TAU_LINUX_DISABLED: $[[ inputs.linux-disabled ]]
+  TAU_BUILD_ARGS: $[[ inputs.build-args ]]
+  TAU_DEV_PROFILE: $[[ inputs.dev-profile ]]
+  TAU_INSTALL_ARGS: $[[ inputs.install-args ]]
+  TAU_FRONTEND_DIST: $[[ inputs.frontend-dist ]]
+  TAU_APP_VERSION: $[[ inputs.app-version ]]
+  TAU_LINUX_BUNDLES: $[[ inputs.linux-bundles ]]
+  TAU_BUNDLE_ON_MR: $[[ inputs.bundle-on-mr ]]
+  TAU_CHANGES_ONLY_MODE: $[[ inputs.changes-only-mode ]]
+  TAU_ARTIFACTS_EXPIRE_IN: $[[ inputs.artifacts-expire-in ]]
+  SCCACHE_DIR: "${CI_PROJECT_DIR}/.sccache"
+  SCCACHE_CACHE_SIZE: "2G"
+  CARGO_INCREMENTAL: "0"
+  npm_config_cache: "${CI_PROJECT_DIR}/.cache/npm"
+  BUN_INSTALL_CACHE_DIR: "${CI_PROJECT_DIR}/.cache/bun"
+  DENO_DIR: "${CI_PROJECT_DIR}/.cache/deno"
+  FF_USE_FASTZIP: "true"
+  CACHE_COMPRESSION_LEVEL: "fastest"
+  ARTIFACT_COMPRESSION_LEVEL: "fastest"
+  TAU_TEST_DISABLED: $[[ inputs.test-disabled ]]
+  TAU_TEST_CMD: $[[ inputs.test-cmd ]]
+  TAU_LINT_ENABLED: $[[ inputs.lint-enabled ]]
+  TAU_LINT_ARGS: $[[ inputs.lint-args ]]
+  TAU_WINDOWS_ENABLED: $[[ inputs.windows-enabled ]]
+  TAU_WINDOWS_TARGET: $[[ inputs.windows-target ]]
+  XWIN_CACHE_DIR: "${CI_PROJECT_DIR}/.xwin-cache"
+  XWIN_ARCH: "x86_64"
+  TAU_SKIP_SYSTEM_DEPS: $[[ inputs.skip-system-deps ]]
+  TAU_SYSTEM_PACKAGES: $[[ inputs.system-packages ]]
+  TAU_BUILD_CPU_REQUEST: $[[ inputs.build-cpu-request ]]
+  TAU_BUILD_CPU_LIMIT: $[[ inputs.build-cpu-limit ]]
+  TAU_BUILD_MEMORY_REQUEST: $[[ inputs.build-memory-request ]]
+  TAU_BUILD_MEMORY_LIMIT: $[[ inputs.build-memory-limit ]]
+  TAU_CARGO_BUILD_JOBS: $[[ inputs.cargo-build-jobs ]]
+  CARGO_HOME: ${CI_PROJECT_DIR}/.cargo
+  TAU_WINDOWS_BUNDLES: $[[ inputs.windows-bundles ]]
+  TAU_WINDOWS_SIGN_COMMAND: $[[ inputs.windows-sign-command ]]
+  TAU_WINDOWS_SIGN_INSTALL: $[[ inputs.windows-sign-install ]]
+  TAU_WINDOWS_AZURE_TRUSTED_SIGNING: $[[ inputs.windows-azure-trusted-signing ]]
+  TAU_WINDOWS_ATS_JSIGN_VERSION: $[[ inputs.windows-ats-jsign-version ]]
+  TAU_DESKTOP_RELEASE_ENABLED: $[[ inputs.desktop-release-enabled ]]
+  TAU_DESKTOP_RELEASE_PACKAGE_NAME: $[[ inputs.desktop-release-package-name ]]
+  PROD_REF: ""
+  INTEG_REF: ""
+  RELEASE_REF: /^v[0-9]+/
+  TRACE: ""
+
 stages:
   - build
-  - release
+  - publish
 
-variables:
-  PNPM_HOME: "$CI_PROJECT_DIR\\.pnpm-store"
+# =============================================================================
+# Shared scripts
+# =============================================================================
+.tau-scripts: &tau-scripts |
+  set -eo pipefail
 
-build:windows:
-  stage: build
-  # GitLab SaaS Windows runner (or your custom Windows runner tag)
-  tags:
-    - saas-windows-medium-amd64
-  rules:
-    # Trigger only on version tags like v1.0.0
-    - if: "$CI_COMMIT_TAG =~ /^v[0-9]+/"
-  cache:
-    key: "${CI_COMMIT_REF_SLUG}-build-cache"
-    paths:
-      - .pnpm-store/
-      - target/
+  function log_info() {
+    echo -e "[\e[1;94mINFO\e[0m] $*"
+  }
+
+  function log_warn() {
+    echo -e "[\e[1;93mWARN\e[0m] $*"
+  }
+
+  function log_error() {
+    echo -e "[\e[1;91mERROR\e[0m] $*"
+  }
+
+  function as_content() {
+    file_or_content=$1
+    if [[ -f "${file_or_content}" ]]; then
+      cat "${file_or_content}"
+    else
+      echo "${file_or_content}"
+    fi
+  }
+
+  function install_ca_certs() {
+    certs=$1
+    if [[ -z "$certs" ]]; then return; fi
+    if as_content "$certs" >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null; then
+      log_info "CA certificates imported in \e[33;1m/etc/ssl/certs/ca-certificates.crt\e[0m"
+    fi
+  }
+
+  function unscope_variables() {
+    _scoped_vars=$(env | awk -F '=' "/^scoped__[a-zA-Z0-9_]+=/ {print \$1}" | sort)
+    if [[ -z "$_scoped_vars" ]]; then return; fi
+    for _scoped_var in $_scoped_vars; do
+      _fields=${_scoped_var//__/:}
+      _condition=$(echo "$_fields" | cut -d: -f3)
+      case "$_condition" in
+      if) _not="";;
+      ifnot) _not=1;;
+      *) continue;;
+      esac
+      _target_var=$(echo "$_fields" | cut -d: -f2)
+      _cond_var=$(echo "$_fields" | cut -d: -f4)
+      _cond_val=$(eval echo "\$${_cond_var}")
+      _test_op=$(echo "$_fields" | cut -d: -f5)
+      case "$_test_op" in
+      defined)
+        if [[ -z "$_not" ]] && [[ -z "$_cond_val" ]]; then continue;
+        elif [[ "$_not" ]] && [[ "$_cond_val" ]]; then continue;
+        fi
+        ;;
+      *) continue;;
+      esac
+      _val=$(eval echo "\$${_scoped_var}")
+      export "${_target_var}"="${_val}"
+    done
+  }
+
+  function eval_secret() {
+    name=$1
+    value=$(eval echo "\$${name}")
+    mkdir -p /tmp
+    case "$value" in
+    @b64@*)
+      decoded=$(mktemp)
+      if echo "$value" | cut -c6- | base64 -d > "${decoded}" 2>/dev/null; then
+        export ${name}="$(cat ${decoded})"
+      fi
+      ;;
+    esac
+  }
+
+  function eval_all_secrets() {
+    encoded_vars=$(env | awk -F '=' '$1 !~ /(^|_ENV_)scoped__/ && $2 ~ /^@(b64|url)@/ {print $1}')
+    for var in $encoded_vars; do
+      eval_secret "$var"
+    done
+  }
+
+  function retry() {
+    local max="${1:-3}"; shift
+    local n=1
+    until "$@"; do
+      local rc=$?
+      if [[ $n -ge $max ]]; then
+        log_error "Command failed after $max attempts (last rc=$rc): $*"
+        return "$rc"
+      fi
+      log_warn "Command failed (attempt $n/$max, rc=$rc), retrying in $((n*5))s..."
+      sleep $((n*5))
+      n=$((n+1))
+    done
+  }
+
+  function detect_package_manager() {
+    case "${TAU_PACKAGE_MANAGER:-auto}" in
+    auto) ;;
+    npm|yarn|pnpm|deno|bun|cargo)
+      log_info "--- Package manager explicitly declared: ${TAU_PACKAGE_MANAGER}"
+      return
+      ;;
+    esac
+    export TAU_PACKAGE_MANAGER="pnpm"
+  }
+
+  function ensure_cargo_bin_path() {
+    local _bin="${CARGO_HOME:-${HOME}/.cargo}/bin"
+    case ":${PATH}:" in
+    *":${_bin}:"*) ;;
+    *) export PATH="${_bin}:${PATH}" ;;
+    esac
+  }
+
+  function ensure_rust_targets() {
+    local _installed _missing=""
+    _installed=$(rustup target list --installed 2>/dev/null || true)
+    for _t in "$@"; do
+      if ! echo "${_installed}" | grep -qx "${_t}"; then
+        _missing="${_missing} ${_t}"
+      fi
+    done
+    if [[ -n "${_missing}" ]]; then
+      log_info "Installing Rust target(s):${_missing}"
+      retry 3 rustup target add ${_missing}
+    fi
+  }
+
+  function ensure_rust() {
+    ensure_cargo_bin_path
+    if command -v rustc > /dev/null 2>&1; then
+      if rustc --version > /dev/null 2>&1; then
+        log_info "Rust already installed: $(rustc --version)"
+      else
+        rustup default stable
+      fi
+      return
+    fi
+    export RUSTUP_HOME="${RUSTUP_HOME:-${CARGO_HOME:-${HOME}/.cargo}}"
+    retry 3 sh -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal"
+    source "${CARGO_HOME:-${HOME}/.cargo}/env"
+    ensure_cargo_bin_path
+  }
+
+  function configure_cargo_build_jobs() {
+    local jobs="${TAU_CARGO_BUILD_JOBS:-}"
+    if [[ -n "${jobs}" ]]; then
+      export CARGO_BUILD_JOBS="${jobs}"
+    fi
+  }
+
+  function install_tauri_system_deps() {
+    if [[ "${TAU_SKIP_SYSTEM_DEPS}" == "true" ]]; then
+      log_info "Skipping system dependency installation (skip-system-deps=true)"
+      return
+    fi
+    export DEBIAN_FRONTEND=noninteractive
+    retry 3 apt-get update -qq
+    retry 3 apt-get install -y -qq --no-install-recommends \
+      ca-certificates curl build-essential pkg-config libwebkit2gtk-4.1-dev \
+      libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf file xdg-utils rpm
+  }
+
+  function ensure_cargo_binstall() {
+    if command -v cargo-binstall > /dev/null 2>&1; then return; fi
+    retry 3 sh -c "curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash"
+    ensure_cargo_bin_path
+  }
+
+  function install_windows_cross_deps() {
+    log_info "Installing Windows cross-compilation dependencies..."
+    if [[ "${TAU_SKIP_SYSTEM_DEPS:-false}" != "true" ]]; then
+      export DEBIAN_FRONTEND=noninteractive
+      retry 3 apt-get update -qq
+      retry 3 apt-get install -y -qq --no-install-recommends clang llvm nsis cmake ninja-build
+    fi
+    ensure_rust_targets "${TAU_WINDOWS_TARGET}"
+    if ! command -v cargo-xwin > /dev/null 2>&1; then
+      ensure_cargo_binstall
+      retry 2 cargo binstall cargo-xwin --no-confirm --log-level info || cargo install --locked cargo-xwin
+    fi
+    if [[ -d /opt/xwin-cache/xwin && ! -d "${XWIN_CACHE_DIR}/xwin" ]]; then
+      log_info "Seeding xwin cache from image (/opt/xwin-cache -> ${XWIN_CACHE_DIR})..."
+      mkdir -p "${XWIN_CACHE_DIR}"
+      cp -r /opt/xwin-cache/xwin "${XWIN_CACHE_DIR}/xwin"
+    fi
+    log_info "Windows cross-compilation dependencies installed"
+  }
+
+  function install_frontend_deps() {
+    _project_dir="${TAU_PROJECT_DIR:-.}"
+    cd "${_project_dir}"
+    if ! command -v pnpm > /dev/null 2>&1; then
+      retry 3 npm install -g pnpm
+    fi
+    log_info "Installing frontend dependencies with pnpm..."
+    pnpm install --store-dir "${CI_PROJECT_DIR}/.cache/pnpm" ${TAU_INSTALL_ARGS}
+    cd "${CI_PROJECT_DIR}"
+  }
+
+  function frontend_prebuilt() {
+    [[ -n "${TAU_FRONTEND_DIST:-}" ]] || return 1
+    _dist="${TAU_PROJECT_DIR:-.}/${TAU_FRONTEND_DIST}"
+    [[ -d "${_dist}" ]] && [[ -n "$(ls -A "${_dist}" 2>/dev/null)" ]]
+  }
+
+  function resolve_app_version() {
+    if [[ -n "${TAU_APP_VERSION:-}" ]]; then
+      echo "${TAU_APP_VERSION}"
+    fi
+  }
+
+  function tauri_config_overrides() {
+    _overrides=""
+    if frontend_prebuilt; then
+      _overrides='"build":{"beforeBuildCommand":""}'
+    fi
+    _version=$(resolve_app_version)
+    if [[ -n "${_version}" ]]; then
+      _overrides="${_overrides:+${_overrides},}\"version\":\"${_version}\""
+    fi
+    echo "${_overrides}"
+  }
+
+  function tauri_cmd() {
+    echo "pnpm tauri"
+  }
+
+  function ensure_tauri_cli() {
+    return 0
+  }
+
+  function ensure_sccache() {
+    if [[ "${TAU_SCCACHE_DISABLED:-false}" == "true" ]]; then
+      unset RUSTC_WRAPPER
+      return
+    fi
+    if ! command -v sccache > /dev/null 2>&1; then
+      ensure_cargo_binstall
+      retry 2 cargo binstall sccache --no-confirm --log-level info || true
+      ensure_cargo_bin_path
+    fi
+    local _sccache_path
+    if ! _sccache_path="$(command -v sccache 2>/dev/null)"; then
+      unset RUSTC_WRAPPER
+      return
+    fi
+    export RUSTC_WRAPPER="${_sccache_path}"
+    mkdir -p "${SCCACHE_DIR}"
+    log_info "sccache enabled: $(sccache --version), cache dir: ${SCCACHE_DIR}"
+  }
+
+  function sccache_stats() {
+    if command -v sccache > /dev/null 2>&1; then
+      sccache --show-stats || true
+    fi
+  }
+
+  function setup_azure_trusted_signing() {
+    if [[ "${TAU_WINDOWS_AZURE_TRUSTED_SIGNING:-false}" != "true" ]]; then
+      return
+    fi
+  }
+
+  function is_delivery() {
+    if [[ -n "${CI_COMMIT_TAG:-}" ]]; then
+      return 0
+    fi
+    return 1
+  }
+
+# =============================================================================
+# Base job & Cache
+# =============================================================================
+.tau-init:
   before_script:
-    # 1. Install Node.js (v22) and refresh PATH
-    - choco install nodejs --version=22.14.0 -y
-
-    # 2. Install Rustup / MSVC toolchain (better compatibility with Tauri on Windows)
+    - *tau-scripts
+    - install_ca_certs "${CUSTOM_CA_CERTS:-}"
+    - unscope_variables
+    - eval_all_secrets
     - |
-      if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
-        Invoke-WebRequest -Uri "https://win.rustup.rs/x86_64" -OutFile "rustup-init.exe"
-        .\rustup-init.exe -y --default-toolchain stable-x86_64-pc-windows-msvc
-        Remove-Item "rustup-init.exe"
-      }
+      if [ -n "$TRACE" ]; then
+        set -x
+      fi
 
-    # 3. Enable pnpm using Node's built-in corepack (no separate npm install needed)
-    - corepack enable
-    - corepack prepare pnpm@latest --activate
-
-    # 4. Refresh PowerShell environment PATH from Machine and User registry
-    - |
-      $env:PATH = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User") + ";$env:USERPROFILE\.cargo\bin"
-
-    # 5. Verify CLI tools and configure store
-    - cargo --version
-    - pnpm --version
-    - pnpm config set store-dir "$PNPM_HOME"
-  script:
-    # 2. Install dependencies
-    - pnpm install --frozen-lockfile
-    # 3. Build Tauri bundle
-    # Pass signing secrets (configured in GitLab CI/CD Variables)
-    - $env:TAURI_SIGNING_PRIVATE_KEY="$TAURI_SIGNING_PRIVATE_KEY"
-    - $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
-    - pnpm tauri build
-    # 4. Upload built artifacts to GitLab Package Registry for permanent hosting
-    # Locates the generated .exe or .msi installer in target/release/bundle
-    - |
-      $Installer = Get-ChildItem -Path "src-tauri\target\release\bundle\msi\*.msi", "src-tauri\target\release\bundle\nsis\*.exe" | Select-Object -First 1
-      Invoke-RestMethod -Headers @{ "JOB-TOKEN" = "$CI_JOB_TOKEN" } `
-        -InFile $Installer.FullName `
-        -Uri "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/path-of-trading/${CI_COMMIT_TAG}/$($Installer.Name)" `
-        -Method Put
-      echo "PACKAGE_FILE_NAME=$($Installer.Name)" >> build.env
-  artifacts:
-    reports:
-      dotenv: build.env
+.tau-cache:
+  dependencies:
+    key: "tau-dependencies"
     paths:
-      - src-tauri/target/release/bundle/
+      - .cargo/registry/cache/
+      - .cargo/registry/index/
+      - .cargo/git/db/
+      - .cache/
+    policy: pull-push
+  sccache:
+    key: "${CI_JOB_NAME}-sccache"
+    paths:
+      - .sccache/
+    policy: pull-push
 
-publish-release:
-  stage: release
-  image: registry.gitlab.com/gitlab-org/release-cli:latest
+.tau-base:
+  image: $TAU_IMAGE
+  variables:
+    CARGO_TARGET_DIR: "${CI_PROJECT_DIR}/${TAU_PROJECT_DIR}/src-tauri/target"
+  interruptible: true
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - api_failure
+      - scheduler_failure
+  after_script:
+    - *tau-scripts
+    - sccache_stats
+
+# =============================================================================
+# Jobs
+# =============================================================================
+
+# ---- Build Windows (cross-compile from Linux container) ----
+tau-build-windows:
+  extends: .tau-base
+  stage: build
   rules:
-    - if: "$CI_COMMIT_TAG =~ /^v[0-9]+/"
-  needs:
-    - job: build:windows
-      artifacts: true
+    - if: '$TAU_WINDOWS_ENABLED != "true"'
+      when: never
+    - if: '$TAU_BUILD_DISABLED == "true"'
+      when: never
+    - if: "$CI_COMMIT_TAG =~ $RELEASE_REF"
+  before_script:
+    - !reference [.tau-init, before_script]
+    - install_tauri_system_deps
+    - ensure_rust
+    - configure_cargo_build_jobs
+    - install_windows_cross_deps
+    - detect_package_manager
+    - ensure_tauri_cli
+    - ensure_sccache
+    - install_frontend_deps
   script:
-    - echo "Publishing release for $CI_COMMIT_TAG"
-  release:
-    name: "Path of Trading $CI_COMMIT_TAG"
-    tag_name: "$CI_COMMIT_TAG"
-    description: "Release for $CI_COMMIT_TAG"
-    assets:
-      links:
-        - name: "$PACKAGE_FILE_NAME"
-          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/path-of-trading/${CI_COMMIT_TAG}/${PACKAGE_FILE_NAME}"
-          link_type: "package"
+    - |
+      set -eo pipefail
+      cd "${TAU_PROJECT_DIR:-.}"
+      config_arg=""
+      win_build_cfg=""
+      win_overrides=$(tauri_config_overrides)
+      if [[ -n "${win_overrides}" ]]; then
+        config_arg="--config {${win_overrides}}"
+        win_build_cfg=",${win_overrides}"
+      fi
+      log_info "Cross-building Windows bundles (${TAU_WINDOWS_BUNDLES}) for ${TAU_WINDOWS_TARGET}..."
+      if [[ "${TAU_WINDOWS_BUNDLES}" =~ nsis ]] && ! command -v makensis >/dev/null 2>&1; then
+        export DEBIAN_FRONTEND=noninteractive
+        retry 3 apt-get update -qq
+        retry 3 apt-get install -y -qq --no-install-recommends nsis
+      fi
+      if [[ -n "${TAU_WINDOWS_SIGN_INSTALL}" ]]; then
+        eval "${TAU_WINDOWS_SIGN_INSTALL}"
+      fi
+      setup_azure_trusted_signing
+      win_targets="\"${TAU_WINDOWS_BUNDLES//,/\",\"}\""
+      win_bundle="\"targets\":[${win_targets}]"
+      if [[ -n "${TAU_WINDOWS_SIGN_COMMAND}" ]]; then
+        esc_cmd=${TAU_WINDOWS_SIGN_COMMAND//\\/\\\\}
+        esc_cmd=${esc_cmd//\"/\\\"}
+        win_bundle="${win_bundle},\"windows\":{\"signCommand\":\"${esc_cmd}\"}"
+      fi
+      $(tauri_cmd) build --ci --runner cargo-xwin --target "${TAU_WINDOWS_TARGET}" --config "{\"bundle\":{${win_bundle}}${win_build_cfg}}" ${TAU_BUILD_ARGS}
+  cache:
+    - !reference [.tau-cache, dependencies]
+    - key: "${CI_JOB_NAME}-sccache"
+      paths:
+        - .sccache/
+        - .xwin-cache/
+      policy: pull-push
+  artifacts:
+    paths:
+      - "${TAU_PROJECT_DIR:-.}/src-tauri/target/${TAU_WINDOWS_TARGET}/release/*.exe"
+      - "${TAU_PROJECT_DIR:-.}/src-tauri/target/${TAU_WINDOWS_TARGET}/release/bundle/nsis/*-setup.exe"
+      - "${TAU_PROJECT_DIR:-.}/src-tauri/target/${TAU_WINDOWS_TARGET}/release/bundle/nsis/*-setup.exe.sig"
+    expire_in: $[[ inputs.artifacts-expire-in ]]
+
+# ---- Publish Release to GitLab Releases & Package Registry ----
+tau-publish:
+  image: registry.hub.docker.com/library/alpine:3
+  stage: publish
+  variables:
+    TAU_RELEASES_API: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases"
+    TAU_PKG_REGISTRY: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${TAU_DESKTOP_RELEASE_PACKAGE_NAME}/${CI_COMMIT_TAG}"
+  needs:
+    - job: tau-build-windows
+      artifacts: true
+  rules:
+    - if: '$TAU_DESKTOP_RELEASE_ENABLED != "true"'
+      when: never
+    - if: "$CI_COMMIT_TAG =~ $RELEASE_REF"
+  before_script:
+    - apk add --no-cache curl findutils
+  script:
+    - |
+      set -eu
+      set -o pipefail
+      api() {
+        curl --fail --silent --show-error --output /dev/null \
+          --retry 3 --retry-delay 5 --retry-all-errors \
+          --header "JOB-TOKEN: ${CI_JOB_TOKEN}" "$@"
+      }
+      bundles=$(find "${TAU_PROJECT_DIR:-.}/src-tauri/target" -type f \( \
+        -name "*-setup.exe" -o -name "*-setup.exe.sig" \
+        -o -name "*.msi" -o -name "*.msi.sig" \) 2>/dev/null | sort)
+      if [ -z "$bundles" ]; then
+        echo "No Windows bundle artifacts found - nothing to publish" >&2
+        exit 1
+      fi
+      # Strip leading 'v' from tag if present so 'v__VERSION__' never becomes 'vv0.5.0'
+      VERSION_CLEAN="${CI_COMMIT_TAG#v}"
+      if curl --fail --silent --output /dev/null \
+          --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+          "${TAU_RELEASES_API}/${CI_COMMIT_TAG}"; then
+        echo "release ${CI_COMMIT_TAG} already exists: keeping its notes, attaching assets"
+      else
+        echo "creating release Path of Trading v${VERSION_CLEAN}"
+        api --request POST \
+          --data-urlencode "tag_name=${CI_COMMIT_TAG}" \
+          --data-urlencode "ref=${CI_COMMIT_SHA}" \
+          --data-urlencode "name=Path of Trading v${VERSION_CLEAN}" \
+          --data-urlencode "description=Body." \
+          "${TAU_RELEASES_API}"
+      fi
+      existing_links=$(curl --fail --silent --retry 3 \
+        --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+        "${TAU_RELEASES_API}/${CI_COMMIT_TAG}/assets/links?per_page=100" 2>/dev/null || echo "")
+      echo "$bundles" | while IFS= read -r f; do
+        name="$(basename "$f")"
+        case "$existing_links" in
+        *"\"name\":\"${name}\""*)
+          echo "asset link $name already attached, skipping"
+          continue
+          ;;
+        esac
+        echo "uploading $name"
+        api --upload-file "$f" "${TAU_PKG_REGISTRY}/${name}"
+        api --request POST \
+          --data-urlencode "name=${name}" \
+          --data-urlencode "url=${TAU_PKG_REGISTRY}/${name}" \
+          --data "link_type=package" \
+          "${TAU_RELEASES_API}/${CI_COMMIT_TAG}/assets/links"
+      done
