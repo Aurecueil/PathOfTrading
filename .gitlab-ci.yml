@@ -542,6 +542,11 @@ tau-build-windows:
     - |
       set -eo pipefail
       cd "${TAU_PROJECT_DIR:-.}"
+      makensis -VERSION || true
+      ls -la /usr/share/nsis/Include/ || true
+      ls -la /usr/share/nsis/Include/Win/ || true
+      find / -iname 'RestartManager.nsh' 2>/dev/null || true
+      exit 0
       config_arg=""
       win_build_cfg=""
       win_overrides=$(tauri_config_overrides)
