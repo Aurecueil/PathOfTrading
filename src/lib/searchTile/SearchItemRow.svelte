@@ -16,6 +16,13 @@
   import { extractSortValue } from "$lib/trade/components/item/sortValue";
   import { convertCurrency, pricingRevision } from "$lib/trade/pricing";
   import type { Realm } from "$lib/types/leagues";
+  import StyledTitleBar from "$lib/trade/components/item/StyledTitleBar.svelte";
+  import {
+    DEFAULT_STYLE,
+    getFoilGradient,
+    resolveItemStyle,
+    styleToCssVars,
+  } from "$lib/trade/components/item/itemStyles";
 
   export let displayCurrency: string = "chaos";
   export let displayOptions: Partial<TileDisplayOptions> | null = null;
@@ -34,6 +41,9 @@
   export let tpQueued: boolean = false;
   export let tpVisited: boolean = false;
   export let tpError: string | null = null;
+  export let styleType: number = 0; // 0 | 1
+  export let gone: boolean = false;
+  export let doubleTitle: boolean = false;
 
   $: effectiveTraveling = isTraveling || tpTraveling;
   $: effectiveQueued = isQueued || tpQueued;
@@ -128,11 +138,21 @@
     ? (item?.properties?.[0]?.values?.[0]?.[0] ?? "")
     : "";
 
-  $: fullItemTitle = item
+  $: titleName = item
     ? isMercenaryWarrant && mercenaryName
       ? mercenaryName
-      : [item.name, item.typeLine || item.baseType].filter(Boolean).join(" ")
+      : (item.name ?? "")
     : "";
+  $: titleBase = item
+    ? isMercenaryWarrant && mercenaryName
+      ? ""
+      : item.typeLine || item.baseType || ""
+    : "";
+  $: fullItemTitle = [titleName, titleBase].filter(Boolean).join(" ");
+
+  // minimal mode has no title bar; nameless items are unaffected
+  $: useDoubleTitle =
+    doubleTitle && !!titleName && !!titleBase && resolvedStyle !== "minimal";
 
   // Also strip the first property from the item passed to <ItemStats> if you don't want
   // "Draxia, the Misanthrope" duplicated inside the properties list:
@@ -220,52 +240,17 @@
   /* ------------------------------------------------------------------ */
   /* Rarity                                                             */
   /* ------------------------------------------------------------------ */
-  const KNOWN_KEYS = new Set([
-    "normal",
-    "magic",
-    "rare",
-    "unique",
-    "gem",
-    "currency",
-    "divination",
-    "quest",
-    "prophecy",
-    "relic",
-    "necropolis",
-    "breach",
-  ]);
+  $: frameTypeId = (item as any)?.frameTypeId ?? "";
+  $: foilVariation = Number((item as any)?.foilVariation ?? 0);
 
-  const FRAME_KEYS: Record<number, string> = {
-    0: "normal",
-    1: "magic",
-    2: "rare",
-    3: "unique",
-    4: "gem",
-    5: "currency",
-    6: "divination",
-    7: "quest",
-    8: "prophecy",
-    9: "unique",
-    10: "unique",
-    11: "necropolis",
-    12: "currency",
-    13: "breach",
-  };
-
-  function getRarityKey(it?: Item): string {
-    if (!it) return "default";
-    if (it.isRelic) return "relic";
-    const frameId = (it.frameTypeId || "").toLowerCase();
-    if (KNOWN_KEYS.has(frameId)) return frameId;
-    if (it.frameType !== undefined && FRAME_KEYS[it.frameType]) {
-      return FRAME_KEYS[it.frameType];
-    }
-    const rarity = (it.rarity || "").toLowerCase();
-    if (KNOWN_KEYS.has(rarity)) return rarity;
-    return "rare";
-  }
-
-  $: rarityKey = getRarityKey(item);
+  $: itemStyle = resolveItemStyle(frameTypeId, foilVariation);
+  $: isCorruptedItem = !!(item?.corrupted || item?.doubleCorrupted);
+  $: foilGradient = getFoilGradient(frameTypeId, foilVariation);
+  $: styleVars = styleToCssVars(itemStyle, styleType, {
+    corrupted: isCorruptedItem,
+  });
+  $: defaultVars = styleToCssVars(DEFAULT_STYLE, 0);
+  $: isStyled = styleType === 1;
 
   /* ------------------------------------------------------------------ */
   /* Category symbols (shown on both sides of the title)                */
@@ -345,7 +330,8 @@
 
 {#if !data || !item}
   <div
-    class="item-row skeleton-row mode-{resolvedStyle} r-default"
+    class="item-row skeleton-row mode-{resolvedStyle}"
+    style={defaultVars}
     data-item-id={id}
     bind:clientWidth={rowWidth}
   >
@@ -376,7 +362,10 @@
   </div>
 {:else}
   <div
-    class="item-row mode-{resolvedStyle} r-{rarityKey}"
+    class="item-row mode-{resolvedStyle}"
+    style={styleVars}
+    class:style-1={isStyled}
+    class:is-gone={gone}
     class:is-live-entry={isLive}
     class:is-tp-visited={tpVisited}
     class:is-corrupted={item.corrupted || item.doubleCorrupted}
@@ -387,13 +376,31 @@
     {#if resolvedStyle !== "minimal"}
       <!-- Header: category symbols + "name base type" (action buttons sit under it) -->
       <div class="title-wrap" bind:this={titleWrapEl}>
-        <ItemTitleBar
-          title={fullItemTitle}
-          {symbols}
-          insetLeft={titleInsetLeft}
-          insetRight={titleInsetRight}
-          {boxWidth}
-        />
+        {#if isStyled}
+          <StyledTitleBar
+            {frameTypeId}
+            {isPoe2}
+            {foilVariation}
+            overlay={foilGradient ?? ""}
+            name={titleName}
+            baseType={titleBase}
+            double={useDoubleTitle}
+            {symbols}
+            insetLeft={titleInsetLeft}
+            insetRight={titleInsetRight}
+          />
+        {:else}
+          <ItemTitleBar
+            name={titleName}
+            baseType={titleBase}
+            double={useDoubleTitle}
+            overlay={foilGradient ?? ""}
+            {symbols}
+            insetLeft={titleInsetLeft}
+            insetRight={titleInsetRight}
+            {boxWidth}
+          />
+        {/if}
         <div class="top-actions">
           {#if item.extended?.text}
             <button
@@ -485,58 +492,6 @@
   /* ---------------------------------------------------------------- */
   /* Rarity tokens: every child component can read --rc / --rc-rgb    */
   /* ---------------------------------------------------------------- */
-  .r-default {
-    --rc: #7f7f7f;
-    --rc-rgb: 127, 127, 127;
-  }
-  .r-normal {
-    --rc: #c8c8c8;
-    --rc-rgb: 200, 200, 200;
-  }
-  .r-magic {
-    --rc: #8888ff;
-    --rc-rgb: 136, 136, 255;
-  }
-  .r-rare {
-    --rc: #ffff77;
-    --rc-rgb: 255, 255, 119;
-  }
-  .r-unique {
-    --rc: #af6025;
-    --rc-rgb: 175, 96, 37;
-  }
-  .r-gem {
-    --rc: #1ba29b;
-    --rc-rgb: 27, 162, 155;
-  }
-  .r-currency {
-    --rc: #aa9e82;
-    --rc-rgb: 170, 158, 130;
-  }
-  .r-divination {
-    --rc: #0ebaff;
-    --rc-rgb: 14, 186, 255;
-  }
-  .r-quest {
-    --rc: #4ae63a;
-    --rc-rgb: 74, 230, 58;
-  }
-  .r-prophecy {
-    --rc: #b54bff;
-    --rc-rgb: 181, 75, 255;
-  }
-  .r-relic {
-    --rc: #82ad6a;
-    --rc-rgb: 130, 173, 106;
-  }
-  .r-necropolis {
-    --rc: #dbcfad;
-    --rc-rgb: 219, 207, 173;
-  }
-  .r-breach {
-    --rc: #a3849a;
-    --rc-rgb: 163, 132, 154;
-  }
 
   /* ---------------------------------------------------------------- */
   /* Row shell                                                        */
@@ -545,14 +500,11 @@
     position: relative;
     display: grid;
     box-sizing: border-box;
-    background: linear-gradient(
-        90deg,
-        rgba(var(--rc-rgb), 0.07),
-        transparent 38%
-      ),
+    --item-border-color: color-mix(in srgb, var(--rc) 55%, transparent);
+    background: linear-gradient(90deg, var(--body-tint-color), transparent 38%),
       #06080b;
-    border: 1px solid #262626;
-    border-left: 3px solid var(--rc);
+    border: 1px solid var(--item-border-color);
+    border-left: 3px solid var(--side-bar-color);
     border-radius: 0;
     color: #c8c8c8;
     font-family: "FontinRegular", "Fontin", "Palatino Linotype", Georgia, serif;
@@ -564,20 +516,26 @@
   }
 
   .item-row:hover {
-    background: linear-gradient(
-        90deg,
-        rgba(var(--rc-rgb), 0.12),
-        transparent 45%
-      ),
+    background: linear-gradient(90deg, var(--body-tint-color), transparent 45%),
       #0a0d12;
-    border-top-color: rgba(var(--rc-rgb), 0.55);
-    border-right-color: rgba(var(--rc-rgb), 0.55);
-    border-bottom-color: rgba(var(--rc-rgb), 0.55);
+    border-top-color: var(--rc);
+    border-right-color: var(--rc);
+    border-bottom-color: var(--rc);
+  }
+  .item-row:hover .title-wrap {
+    background: #0a0d12; /* match the row's hover base */
+  }
+  .item-row.style-1,
+  .item-row.style-1:hover {
+    background: linear-gradient(var(--body-tint-color), var(--body-tint-color)),
+      #06080b;
+    border-left-color: var(--item-border-color);
+  }
+  .item-row.style-1:hover {
+    background: linear-gradient(var(--body-tint-color), var(--body-tint-color)),
+      #0a0d12;
   }
 
-  .item-row.is-corrupted {
-    box-shadow: inset 0 0 0 1px rgba(210, 0, 0, 0.28);
-  }
   .item-row.is-unidentified {
     box-shadow: inset 0 0 0 1px rgba(210, 0, 0, 0.18);
   }
@@ -589,7 +547,8 @@
     grid-column: 1 / -1;
     position: relative;
     min-width: 0;
-    contain: inline-size; /* long titles must not widen the tile */
+    contain: inline-size;
+    background: #06080b;
   }
 
   /* ---------------------------------------------------------------- */
@@ -752,13 +711,8 @@
     align-items: center;
     justify-content: center;
     padding: 8px 10px;
-    background: linear-gradient(
-      90deg,
-      rgba(var(--rc-rgb), 0.24) 0%,
-      rgba(var(--rc-rgb), 0.07) 55%,
-      rgba(0, 0, 0, 0.55) 100%
-    );
-    border-bottom: 1px solid rgba(var(--rc-rgb), 0.38);
+    background: var(--title-bar-color);
+    border: 1px solid var(--title-line-color);
   }
   .skel-icon,
   .skel-line {
