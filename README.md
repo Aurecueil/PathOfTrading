@@ -1,5 +1,5 @@
 <h1>
-  <img src="https://gitlab.com/aurecueil/pathoftrading/-/raw/f75fe1fb38652d1ca9eed56795bcc62484fffaac/static/favicon.png?raw=true" width="36" height="36" style="vertical-align: middle; margin-right: 10px;" />
+  <img src="https://github.com/Aurecueil/PathOfTrading/blob/main/.supplementary/static/pot.webp?raw=true" width="36" height="36" style="vertical-align: middle; margin-right: 10px;" />
   Path of Trading
 </h1>
 
@@ -7,12 +7,12 @@
 
 <p align="center">
   <a href="#">
-    <img src="https://gitlab.com/aurecueil/pathoftrading/-/raw/f75fe1fb38652d1ca9eed56795bcc62484fffaac/.supplementary/static/mainpage.png" width="800" >
+    <img src="https://github.com/Aurecueil/PathOfTrading/blob/main/.supplementary/static/mainpage.webp" width="800" >
   </a>
 </p>
 <p align="center">
   <a href="#">
-    <img src="https://gitlab.com/aurecueil/pathoftrading/-/raw/f75fe1fb38652d1ca9eed56795bcc62484fffaac/.supplementary/static/proj.png" width="800" >
+    <img src="https://github.com/Aurecueil/PathOfTrading/blob/main/.supplementary/static/proj.webp" width="800" >
   </a>
 </p>
 
@@ -36,6 +36,7 @@
 - auto-ignores "are u sure u want to telport to hidoeout? some bot has alreay snipped it so dont waste your time" when trying to teleport to hideout to buy an item
 
 ## Download / Install
+
 - [Latest Release Page](https://gitlab.com/aurecueil/pathoftrading/-/releases/permalink/latest)
 - [Click Here to Download setup.exe](https://gitlab.com/api/v4/projects/88416718/packages/generic/path-of-trading/v0.5.0/Path-of-Trading_0.5.0_x64-setup.exe)
 
@@ -55,4 +56,3 @@ uhhh future me will do this
 
 This product isn't affiliated with or endorsed by Grinding Gear Games in any way.
 The app icon (Pot of Greed) is the intellectual property of Konami and/or its respective rights holders; all rights are reserved by them.
-
