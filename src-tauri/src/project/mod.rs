@@ -1,4 +1,5 @@
 pub mod colorCodingSettings;
+pub mod fetch_prices;
 pub mod statgroup;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};

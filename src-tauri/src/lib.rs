@@ -57,7 +57,7 @@ pub fn run() {
                     Ok(true) => {
                         println!("Existing session found. Refreshing POETOKEN...");
                         match auth::refresh::refresh_poetoken_background(app_handle).await {
-                            Ok(t) => println!("POETOKEN refreshed successfully"),
+                            Ok(_) => println!("POETOKEN refreshed successfully"),
                             Err(err) => eprintln!("Background POETOKEN refresh failed: {err}"),
                         }
                     }
@@ -128,6 +128,8 @@ pub fn run() {
             trade::tp::tp_set_items,
             trade::tp::tp_clear_seen,
             trade::tp::tp_set_hotkey,
+            project::fetch_prices::fetch_pricing_index,
+            project::fetch_prices::fetch_realm_pricing,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

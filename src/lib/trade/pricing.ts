@@ -1,5 +1,6 @@
 // src/lib/trade/pricing.ts
 import { writable, get, derived, type Readable } from "svelte/store";
+import { invoke } from "@tauri-apps/api/core";
 import type { League } from "$lib/types/leagues";
 import type { Realm } from "$lib/types/leagues";
 
@@ -150,14 +151,14 @@ export type OverridesStoreMap = Record<
 >;
 
 const OVERRIDES_STORAGE_KEY = "pot.currencyOverrides";
-const PRICING_BASE_URL = "https://data.aurecueil.uk";
 
 // Store references injected from tradeStore.ts to avoid circular imports
 let leaguesStore: Readable<League[]> | null = null;
 let leaguesUnsubscribe: (() => void) | null = null;
 
-// Tracks subscribed realms and the `updated` unix timestamp of each realm's current.json
+// Tracks subscribed realms, in-flight requests, and the `updated` unix timestamp of each realm's current.json
 const subscribedRealms = new Set<Realm>();
+const fetchingRealms = new Set<Realm>();
 const realmRemoteUpdated: Record<Realm, number | null> = {
   pc: null,
   poe2: null,
@@ -719,7 +720,7 @@ export function getValidLeagues(
 }
 
 // ---------------------------------------------------------------------------
-// R2 Parsing, Fetching & Minute-Aligned Scheduler
+// R2 Parsing, Rust-Backed Fetching & Minute-Aligned Scheduler
 // ---------------------------------------------------------------------------
 function parseR2League(raw: R2LeagueData): LeagueExchangeMaps | null {
   if (!raw || !Array.isArray(raw.c) || !Array.isArray(raw.r)) return null;
@@ -784,120 +785,147 @@ function parseR2GameFile(
   return out;
 }
 
+/**
+ * Calls the Rust backend to pull raw `index.json` text and parses it in the frontend.
+ */
 async function fetchIndexFile(): Promise<R2IndexFile | null> {
   try {
-    const res = await fetch(`${PRICING_BASE_URL}/index.json`, {
-      headers: {
-        // Tells Cloudflare and intermediate proxies to bypass cache and fetch fresh from origin (R2)
-        "Cache-Control": "no-cache",
-        Pragma: "no-cache",
-      },
-      // Optional: ensures browser doesn't pull from its own disk/memory cache
-      cache: "no-store",
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as R2IndexFile;
+    const rawJson = await invoke<string>("fetch_pricing_index");
+    return JSON.parse(rawJson) as R2IndexFile;
   } catch (err) {
-    console.warn("[Pricing] Failed to fetch index.json:", err);
+    console.warn("[Pricing] Failed to fetch index.json via Rust:", err);
     return null;
   }
 }
 
+/**
+ * Calls the Rust backend to pull raw `{realm}/current.json` text and parses it in the frontend.
+ */
 async function fetchRealmCurrentFile(realm: Realm): Promise<R2GameFile | null> {
   try {
-    const res = await fetch(`${PRICING_BASE_URL}/${realm}/current.json`, {
-      headers: {
-        "Cache-Control": "no-cache",
-        Pragma: "no-cache",
-      },
-      cache: "no-store",
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as R2GameFile;
+    const rawJson = await invoke<string>("fetch_realm_pricing", { realm });
+    return JSON.parse(rawJson) as R2GameFile;
   } catch (err) {
-    console.warn(`[Pricing] Failed to fetch ${realm}/current.json:`, err);
+    console.warn(
+      `[Pricing] Failed to fetch ${realm}/current.json via Rust:`,
+      err,
+    );
     return null;
   }
+}
+
+function isRealmAlreadyFetched(realm: Realm): boolean {
+  return (
+    realmRemoteUpdated[realm] !== null ||
+    Object.keys(get(rawPrices)[realm] || {}).length > 0
+  );
 }
 
 let refreshInFlight: Promise<void> | null = null;
 
 /**
- * Fetches `current.json` from R2 for the target realms (defaults to all subscribed realms).
- * When `onlyIfChanged` is true (used by the hourly scheduler), checks `index.json` first
- * and skips fetching any `current.json` whose `updated` timestamp has not changed.
+ * Subscribes passed-down realms and fetches `current.json` from Rust/R2.
+ * - Avoids redundant fetches: if a realm has already been fetched (or is currently being fetched),
+ *   it is skipped unless `onlyIfChanged` (cron job) detects a newer timestamp or `force` is true.
  */
 export function refreshAllPrices(
   _overrideLeagues?: League[],
-  options?: { realms?: Realm[]; onlyIfChanged?: boolean },
+  options?: { realms?: Realm[]; onlyIfChanged?: boolean; force?: boolean },
 ): Promise<void> {
-  const targetRealms = (options?.realms ?? Array.from(subscribedRealms)).filter(
-    (r) => subscribedRealms.has(r),
-  );
+  // Subscribe only passed-down realms if provided
+  if (options?.realms) {
+    for (const r of options.realms) {
+      if (ALL_REALMS.includes(r)) {
+        subscribedRealms.add(r);
+      }
+    }
+  }
 
-  if (targetRealms.length === 0) return Promise.resolve();
+  const requestedRealms = options?.realms
+    ? options.realms.filter((r) => subscribedRealms.has(r))
+    : Array.from(subscribedRealms);
+
+  if (requestedRealms.length === 0) return Promise.resolve();
 
   const run = async () => {
     isRefreshingPrices.set(true);
     try {
-      let realmsToFetch = [...targetRealms];
+      // Filter out any realms that are currently mid-fetch
+      const candidates = requestedRealms.filter((r) => !fetchingRealms.has(r));
+      if (candidates.length === 0) return;
+
+      let realmsToFetch: Realm[] = [];
 
       if (options?.onlyIfChanged) {
+        // Cron path: check index.json and only fetch if never fetched or remote timestamp changed
         const index = await fetchIndexFile();
         if (index?.games) {
-          realmsToFetch = targetRealms.filter((realm) => {
+          realmsToFetch = candidates.filter((realm) => {
             const remoteUpdated = index.games[realm]?.current?.updated;
             const localUpdated = realmRemoteUpdated[realm];
-            // Fetch if we have never fetched this realm or if remote timestamp is newer/different
             return (
               localUpdated === null ||
               typeof remoteUpdated !== "number" ||
               remoteUpdated !== localUpdated
             );
           });
+        } else {
+          // If index.json failed, only attempt realms that have never been fetched
+          realmsToFetch = candidates.filter((r) => !isRealmAlreadyFetched(r));
         }
+      } else if (options?.force) {
+        realmsToFetch = [...candidates];
+      } else {
+        // Standard path: only fetch realms that haven't been fetched yet
+        realmsToFetch = candidates.filter((r) => !isRealmAlreadyFetched(r));
       }
 
       if (realmsToFetch.length === 0) return;
 
-      const results = await Promise.allSettled(
-        realmsToFetch.map(async (realm) => ({
-          realm,
-          file: await fetchRealmCurrentFile(realm),
-        })),
-      );
+      for (const r of realmsToFetch) fetchingRealms.add(r);
 
-      const touched = new Set<Realm>();
-      rawPrices.update((current) => {
-        const next: RawPricesStoreMap = {
-          pc: { ...current.pc },
-          poe2: { ...current.poe2 },
-          xbox: { ...current.xbox },
-          sony: { ...current.sony },
-        };
+      try {
+        const results = await Promise.allSettled(
+          realmsToFetch.map(async (realm) => ({
+            realm,
+            file: await fetchRealmCurrentFile(realm),
+          })),
+        );
 
-        for (const res of results) {
-          if (res.status === "fulfilled" && res.value.file) {
-            const { realm, file } = res.value;
-            const parsedLeagues = parseR2GameFile(file);
-            if (parsedLeagues) {
-              next[realm] = parsedLeagues;
-              realmRemoteUpdated[realm] = file.updated;
-              touched.add(realm);
+        const touched = new Set<Realm>();
+        rawPrices.update((current) => {
+          const next: RawPricesStoreMap = {
+            pc: { ...current.pc },
+            poe2: { ...current.poe2 },
+            xbox: { ...current.xbox },
+            sony: { ...current.sony },
+          };
+
+          for (const res of results) {
+            if (res.status === "fulfilled" && res.value.file) {
+              const { realm, file } = res.value;
+              const parsedLeagues = parseR2GameFile(file);
+              if (parsedLeagues) {
+                next[realm] = parsedLeagues;
+                realmRemoteUpdated[realm] = file.updated;
+                touched.add(realm);
+              }
             }
           }
-        }
 
-        return next;
-      });
-
-      if (touched.size > 0) {
-        const ts = Date.now();
-        lastPriceUpdate.update((u) => {
-          const n = { ...u };
-          for (const r of touched) n[r] = ts;
-          return n;
+          return next;
         });
+
+        if (touched.size > 0) {
+          const ts = Date.now();
+          lastPriceUpdate.update((u) => {
+            const n = { ...u };
+            for (const r of touched) n[r] = ts;
+            return n;
+          });
+        }
+      } finally {
+        for (const r of realmsToFetch) fetchingRealms.delete(r);
       }
     } finally {
       isRefreshingPrices.set(false);
@@ -935,19 +963,17 @@ function scheduleUpdate() {
 }
 
 /**
- * Connects the merged league store and subscribes to the specified realms.
- * Can be called multiple times; realms that are already subscribed are ignored.
+ * Connects the merged league store and subscribes to the specified realms via `refreshAllPrices`.
+ * Can be called multiple times; realms that were already fetched will not be re-fetched.
  */
 export function registerPricingStores(
   leagues: Readable<League[]>,
   realms: Realm[] = [...ALL_REALMS],
 ): void {
-  const newlyAdded: Realm[] = [];
-  for (const r of realms) {
-    if (ALL_REALMS.includes(r) && !subscribedRealms.has(r)) {
-      subscribedRealms.add(r);
-      newlyAdded.push(r);
-    }
+  const validRealms = realms.filter((r) => ALL_REALMS.includes(r));
+
+  if (validRealms.length > 0) {
+    refreshAllPrices(undefined, { realms: validRealms });
   }
 
   if (leaguesStore !== leagues) {
@@ -955,27 +981,16 @@ export function registerPricingStores(
     leaguesUnsubscribe?.();
     leaguesUnsubscribe = leagues.subscribe((list) => {
       if (list.length === 0) return;
-      const raw = get(rawPrices);
       const missingRealms = Array.from(subscribedRealms).filter(
         (r) =>
-          realmRemoteUpdated[r] === null &&
-          Object.keys(raw[r]).length === 0 &&
+          !isRealmAlreadyFetched(r) &&
+          !fetchingRealms.has(r) &&
           getValidLeagues(list, r).length > 0,
       );
       if (missingRealms.length > 0) {
         refreshAllPrices(list, { realms: missingRealms });
       }
     });
-  }
-
-  if (newlyAdded.length > 0) {
-    const raw = get(rawPrices);
-    const toFetchNow = newlyAdded.filter(
-      (r) => realmRemoteUpdated[r] === null && Object.keys(raw[r]).length === 0,
-    );
-    if (toFetchNow.length > 0) {
-      refreshAllPrices(undefined, { realms: toFetchNow });
-    }
   }
 
   if (!schedulerInitialized) {
