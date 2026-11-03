@@ -403,7 +403,7 @@ export function styleToCssVars(
 ): string {
   const isStyled = styleType === 1;
   const accent = isStyled ? s.title_font_color : s.side_bar_color;
-  const leftTint = opts.corrupted ? CORRUPTED_TINT : s.body_tint_color;
+  const leftTint = s.body_tint_color; //opts.corrupted ? CORRUPTED_TINT : s.body_tint_color;
   const rightTint = opts.runic ? RUNIC_TINT : "transparent";
 
   return [

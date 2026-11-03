@@ -21,14 +21,29 @@
   import { extractSkills } from "./stats/extractSkills";
   import { displayRune } from "$lib/trade/tradeStore";
   import { normalizeDisplayOptions } from "$lib/trade/components/drawer/tileDisplay";
+  import ProgressBar from "./stats/ProgressBar.svelte";
+  import LogbookMods from "./stats/LogbookMods.svelte";
+  import UltimatumMods from "./stats/UltimatumMods.svelte";
+  import GemTabs from "./stats/GemTabs.svelte";
+  import PropertyLine from "./stats/PropertyLine.svelte";
+  import { isRenderableProp } from "./stats/propertyGroups";
 
+  $: additionalProps = (item.additionalProperties ?? []).filter(
+    isRenderableProp,
+  );
   export let displayOptions: Partial<TileDisplayOptions> | null = null;
   export let item: Item;
   export let realm: string = "poe";
   export let styleMode: ResolvedDisplayStyle = "full";
   export let tileWidth: number = 600;
   export let isTooltip: boolean = false;
+  // script
+  import CdnImage from "./CdnImage.svelte";
 
+  const HYBRID_TITLE_BG =
+    "/protected/image/item/popup/hybrid-title.png?v=1709582916256&key=nu0qDrILwqRuP7H7QIIrpQ";
+  const VAAL_TITLE_BG =
+    "/protected/image/item/popup/vaal-title.png?v=1709582916256&key=vFmTmECcv9so6pXyNZv-RQ";
   let showBondedMods = false;
 
   $: effectiveMode = isTooltip ? "compact" : styleMode;
@@ -43,6 +58,41 @@
     typeof document !== "undefined"
       ? parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
       : 16;
+  /* Progress bars */
+  $: incubated = item.incubatedItem ?? null;
+  $: enshrouded = item.enshrouded ?? null;
+  $: hasProgressBlock = !!incubated || !!enshrouded;
+  const ratio = (p: number, t: number) => (t > 0 ? p / t : 0);
+
+  /* Gem tabs (interactive, so not in portaled tooltips - those keep tooltipTexts) */
+  $: gemTabs =
+    !isTooltip && show.displayExplicitMods ? (item.gemTabs ?? []) : [];
+
+  /* Logbook / Ultimatum */
+  $: logbookMods = item.logbookMods ?? [];
+  $: ultimatumMods = item.ultimatumMods ?? [];
+
+  /* Hybrid gem: rendered as its own title + nested ItemStats */
+  $: hybridItem = ((): Item | null => {
+    const hy = item.hybrid;
+    if (!hy?.baseTypeName) return null;
+    return {
+      name: "",
+      typeLine: hy.baseTypeName,
+      baseType: hy.baseTypeName,
+      ilvl: 0,
+      identified: true,
+      verified: true,
+      w: 1,
+      h: 1,
+      icon: "",
+      frameTypeId: item.frameTypeId,
+      realm: item.realm,
+      properties: hy.properties ?? [],
+      explicitMods: hy.explicitMods ?? [],
+      secDescrText: hy.secDescrText,
+    } as Item;
+  })();
   // The PoE2 veiled image is 58px tall. We show the middle 38px (10px cropped
   // top and bottom) and scale that to the mod row height.
   $: modHPx = isCompact ? 23 : 26;
@@ -366,12 +416,12 @@
     <div class="props-block">
       <ItemProperties
         {item}
+        {realm}
         {effectiveMode}
         on:itemhover={(e) => openItemTooltip(e.detail.item, e.detail.rect)}
         on:itemleave={closeItemTooltip}
       />
     </div>
-
     <!-- Enchant + Rune + Bonded -->
     {#if hasEnchantRuneBlock}
       <div class="section">
@@ -489,6 +539,11 @@
       </div>
     {/if}
 
+    {#if ultimatumMods.length > 0}
+      <div class="section">
+        <UltimatumMods mods={ultimatumMods} />
+      </div>
+    {/if}
     <!-- Explicit Mods + Veiled / Unrevealed Mods + Pseudo Mods -->
     {#if hasExplicitBlock}
       <div class="section">
@@ -515,7 +570,17 @@
         </div>
       </div>
     {/if}
+    {#if gemTabs.length > 0}
+      <div class="section">
+        <GemTabs tabs={gemTabs} {realm} compact={isCompact} />
+      </div>
+    {/if}
 
+    {#if logbookMods.length > 0}
+      <div class="section">
+        <LogbookMods {logbookMods} {realm} compact={isCompact} />
+      </div>
+    {/if}
     <!-- Crucible Mods (Under Explicit Mods) -->
     {#if crucibleMods.length > 0}
       <div class="section">
@@ -531,7 +596,6 @@
         </div>
       </div>
     {/if}
-
     <!-- Notable Properties -->
     {#if item.notableProperties && item.notableProperties.length > 0}
       <div class="section">
@@ -563,7 +627,25 @@
         />
       </div>
     {/if}
-
+    {#if hybridItem}
+      <div class="section hybrid-section">
+        <div class="hybrid-title {getRarityClass(item)}">
+          <CdnImage
+            src={item.hybrid?.isVaalGem ? VAAL_TITLE_BG : HYBRID_TITLE_BG}
+            alt=""
+            className="hybrid-bg"
+          />
+          <span class="hybrid-name">{hybridItem.typeLine}</span>
+        </div>
+        <svelte:self
+          item={hybridItem}
+          {realm}
+          styleMode={effectiveMode}
+          displayOptions={isTooltip ? null : displayOptions}
+          {tileWidth}
+        />
+      </div>
+    {/if}
     <!-- Bottom State Tags (Split, Mirrored, Corrupted, Unidentified, Scourge, etc.) -->
     {#if bottomStates.length > 0}
       <div class="section">
@@ -587,6 +669,35 @@
     {#if shownStatGroupMods.length > 0}
       <div class="section">
         <StatGroupSummary mods={shownStatGroupMods} compact={isCompact} />
+      </div>
+    {/if}
+
+    {#if hasProgressBlock}
+      <div class="section">
+        <div class="stat-group progress-group">
+          {#if incubated}
+            <ProgressBar
+              label="Incubating {incubated.name}"
+              text="{incubated.progress}/{incubated.total} Level {incubated.level}+ Monster Kills"
+              ratio={ratio(incubated.progress, incubated.total)}
+            />
+          {/if}
+          {#if enshrouded}
+            <ProgressBar
+              text="{enshrouded.progress}/{enshrouded.total}"
+              ratio={ratio(enshrouded.progress, enshrouded.total)}
+            />
+          {/if}
+        </div>
+      </div>
+    {/if}
+    {#if additionalProps.length > 0}
+      <div class="section">
+        <div class="additional-line">
+          {#each additionalProps as p}
+            <PropertyLine prop={p} {isPoe2} />
+          {/each}
+        </div>
       </div>
     {/if}
   </div>
@@ -898,5 +1009,55 @@
   .stats-skill-tooltip.r-gem {
     --rc: #1ba29b;
     --rc-rgb: 27, 162, 155;
+  }
+  .progress-group {
+    align-items: center;
+    gap: 0.3rem;
+  }
+  .stats-container,
+  .props-block,
+  .section {
+    min-width: 0;
+  }
+  .stats-container,
+  .props-block,
+  .section {
+    min-width: 0;
+  }
+
+  .hybrid-section::before {
+    display: none;
+  }
+  .hybrid-title {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 34px;
+    padding: 0 0.5rem;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+  .hybrid-title :global(.hybrid-bg) {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: fill;
+    pointer-events: none;
+  }
+  .hybrid-name {
+    position: relative;
+    z-index: 1;
+  }
+  .additional-line {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    column-gap: 0.55rem;
+    width: 100%;
+    min-width: 0;
+    text-align: center;
   }
 </style>

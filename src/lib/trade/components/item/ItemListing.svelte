@@ -733,7 +733,14 @@
   .listing-minimal.center-only .converted-headline {
     justify-content: center;
   }
-
+  .listing-panel.mode-compact .price-box {
+    display: contents;
+  }
+  .listing-panel.mode-compact .converted-headline {
+    flex: 1;
+    justify-content: center;
+    margin-top: 0;
+  }
   .min-price-wrap {
     display: flex;
     flex-direction: column;

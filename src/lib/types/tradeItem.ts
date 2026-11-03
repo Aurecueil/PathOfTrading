@@ -158,7 +158,7 @@ export interface LogbookFaction {
 export interface LogbookMod {
   name: string;
   faction: LogbookFaction;
-  mods: string[];
+  mods: Array<string | ItemMod>;
 }
 
 export interface UltimatumMod {
@@ -241,7 +241,15 @@ export interface ExtendedItemData {
   hashes?: ExtendedModHashes;
   [key: string]: unknown;
 }
-
+export interface GemTabPage {
+  skillName?: string;
+  properties?: ItemProperty[];
+  stats?: string[];
+}
+export interface GemTab {
+  name: string;
+  pages: GemTabPage[];
+}
 /**
  * Main Item Interface
  */
@@ -291,7 +299,7 @@ export interface Item {
   socketedItems?: Item[];
   support?: boolean;
   builtInSupport?: string;
-  gemTabs?: unknown[];
+  gemTabs?: GemTab[];
   gemBackground?: string;
   gemSkill?: string;
 

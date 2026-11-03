@@ -44,6 +44,7 @@
   export let tpError: string | null = null;
   export let styleType: number = 0; // 0 | 1
   export let gone: boolean = false;
+  $: isGone = gone || data?.gone === true;
   export let doubleTitle: boolean = false;
 
   const dispatch = createEventDispatcher<{
@@ -116,13 +117,24 @@
     };
   }
 
-  $: boxWidth = rowWidth > 0 ? rowWidth : tileWidth;
-  $: resolvedStyle = ((): ResolvedDisplayStyle => {
-    if (boxWidth < 520) return "minimal";
-    if (boxWidth < 720) return "compact";
-    return "full";
-  })();
+  // Compact is a single-column layout and stays readable far below 520px,
+  // so minimal only kicks in when the row is really narrow.
+  const MINIMAL_BELOW = 480;
+  const COMPACT_BELOW = 880;
+  const HYSTERESIS = 12;
+  let prevStyle: ResolvedDisplayStyle = "full";
 
+  function pickStyle(w: number): ResolvedDisplayStyle {
+    const minLimit =
+      MINIMAL_BELOW + (prevStyle === "minimal" ? HYSTERESIS : -HYSTERESIS);
+    const cmpLimit =
+      COMPACT_BELOW + (prevStyle === "compact" ? HYSTERESIS : -HYSTERESIS);
+    prevStyle = w < minLimit ? "minimal" : w < cmpLimit ? "compact" : "full";
+    return prevStyle;
+  }
+
+  $: boxWidth = rowWidth > 0 ? rowWidth : tileWidth;
+  $: resolvedStyle = pickStyle(boxWidth);
   $: item = data?.item as Item | undefined;
   $: listing = data?.listing;
   $: isMercenaryWarrant =
@@ -308,6 +320,9 @@
     data-item-id={id}
     bind:clientWidth={rowWidth}
   >
+    {#if isGone}
+      <div class="gone-badge" role="status">No longer available</div>
+    {/if}
     {#if resolvedStyle !== "minimal"}
       <div class="skel-title-bar">
         <div class="skel-line title"></div>
@@ -404,40 +419,42 @@
         />
       </div>
 
-      <div class="top-actions">
-        {#if item.extended?.text}
+      {#if resolvedStyle !== "minimal"}
+        <div class="top-actions">
+          {#if item.extended?.text}
+            <button
+              type="button"
+              class="btn-top-action"
+              class:is-copied={isCopied}
+              aria-label="Copy item text"
+              title="Copy item text"
+              on:click|stopPropagation={handleCopyText}
+            >
+              {#if isCopied}
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+              {:else}
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path
+                    d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                  />
+                </svg>
+              {/if}
+            </button>
+          {/if}
           <button
             type="button"
             class="btn-top-action"
-            class:is-copied={isCopied}
-            aria-label="Copy item text"
-            title="Copy item text"
-            on:click|stopPropagation={handleCopyText}
+            aria-label="View raw JSON"
+            title="View raw JSON"
+            on:click|stopPropagation={() => (isJsonModalOpen = true)}
           >
-            {#if isCopied}
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M20 6 9 17l-5-5" />
-              </svg>
-            {:else}
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                <path
-                  d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-                />
-              </svg>
-            {/if}
+            &#123;&nbsp;&#125;
           </button>
-        {/if}
-        <button
-          type="button"
-          class="btn-top-action"
-          aria-label="View raw JSON"
-          title="View raw JSON"
-          on:click|stopPropagation={() => (isJsonModalOpen = true)}
-        >
-          &#123;&nbsp;&#125;
-        </button>
-      </div>
+        </div>
+      {/if}
     </div>
   </div>
 
@@ -547,8 +564,13 @@
   }
 
   .row-content.mode-full {
+    --icon-w: 168px;
+    --listing-w: calc(
+      168px + 0.85rem + 1px
+    ); /* panel + padding-left + border */
+    grid-template-columns: var(--icon-w) minmax(0, 1fr) var(--listing-w);
+
     --row-pad-x: 0.7rem;
-    grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr) minmax(140px, 1fr);
     column-gap: 0.85rem;
     row-gap: 0.5rem;
     padding: 0.65rem var(--row-pad-x) 0.6rem;
@@ -556,11 +578,11 @@
   }
 
   .row-content.mode-full .col-listing {
-    padding-left: 0.85rem;
-    border-left: 1px solid rgba(255, 255, 255, 0.07);
-    align-self: stretch;
+    justify-content: center;
   }
-
+  .row-content.mode-full .col-icon {
+    justify-content: center;
+  }
   .row-content.mode-compact {
     --row-pad-x: 0.6rem;
     grid-template-columns: minmax(0, 1fr);
@@ -658,10 +680,7 @@
 
   .col-stats {
     min-width: 0;
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
+    overflow-wrap: anywhere;
   }
 
   .col-listing {
@@ -742,7 +761,31 @@
     height: 26px;
     width: 120px;
   }
-
+  /* dim the content, not the badge */
+  .item-row.is-gone .title-wrap,
+  .item-row.is-gone .row-content {
+    opacity: 0.38;
+    filter: saturate(0.3);
+  }
+  .item-row.is-gone .col-listing {
+    pointer-events: none;
+  }
+  .gone-badge {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    z-index: 20;
+    transform: translate(-50%, -50%) rotate(-5deg);
+    padding: 0.2rem 0.8rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    color: #ff7b7b;
+    background: rgba(20, 4, 4, 0.88);
+    border: 1px solid rgba(210, 0, 0, 0.7);
+    pointer-events: none;
+  }
   @keyframes shimmer {
     0% {
       background-position: 200% 0;

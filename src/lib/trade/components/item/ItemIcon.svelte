@@ -9,16 +9,16 @@
   export let styleMode: ResolvedDisplayStyle = "full";
 
   $: iconDimensions = (() => {
-    if (styleMode === "minimal") {
-      return { w: 48, h: 48 };
-    }
-    const cellW = 62;
-    const cellH = 62;
-    const w = Math.min(Math.max((item.w || 1) * cellW, 116), 136);
-    const h = Math.min(Math.max((item.h || 1) * cellH, 136), 192);
-    return { w, h };
+    if (styleMode === "minimal") return { w: 48, h: 48 };
+    const MAX_W = 168,
+      MIN_H = 136,
+      MAX_H = 240;
+    const ratio = (item.h || 1) / (item.w || 1);
+    return {
+      w: MAX_W,
+      h: Math.round(Math.min(Math.max(MAX_W * ratio, MIN_H), MAX_H)),
+    };
   })();
-
   // Width the item image actually renders at (.item-icon is 92% of the box and
   // object-fit: contain, so it is limited by whichever axis is tighter).
   $: imageWidth = (() => {
@@ -48,6 +48,7 @@
   class:is-unidentified={styleMode !== "minimal" && item.identified === false}
   style:width="{iconDimensions.w}px"
   style:height="{iconDimensions.h}px"
+  style:max-width="100%"
 >
   {#if item.icon}
     <CdnImage
@@ -76,6 +77,9 @@
         ? `/${item.maxStackSize}`
         : ""}
     </span>
+  {/if}
+  {#if item.iconTierText}
+    <span class="tier-text">{item.iconTierText}</span>
   {/if}
 </div>
 
@@ -168,6 +172,28 @@
   }
   .mode-minimal .stack-badge {
     font-size: 0.78rem;
+    left: 3px;
+  }
+  .tier-text {
+    position: absolute;
+    bottom: 2px;
+    left: 5px;
+    z-index: 3;
+    font-family: "FontinBold", "FontinRegular", Georgia, serif;
+    font-size: 0.85rem;
+    font-weight: 700;
+    line-height: 1.1;
+    color: #fff;
+    text-shadow:
+      -1px -1px 0 #000,
+      1px -1px 0 #000,
+      -1px 1px 0 #000,
+      1px 1px 0 #000,
+      0 0 4px #000;
+    pointer-events: none;
+  }
+  .mode-minimal .tier-text {
+    font-size: 0.7rem;
     left: 3px;
   }
 </style>
