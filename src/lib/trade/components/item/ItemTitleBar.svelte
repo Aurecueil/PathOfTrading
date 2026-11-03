@@ -6,25 +6,23 @@
   export let baseType: string = "";
   export let double: boolean = false;
   export let symbols: CategorySymbol[] = [];
-  export let insetLeft: number = 10;
-  export let insetRight: number = 10;
   export let isStyled: boolean = false;
   export let hasOverlay: boolean = false;
   export let thick: boolean = false;
+  export let styledHeaderBg: string = "";
 
   $: rightSymbols = [...symbols].reverse();
   $: fullTitle = [name, baseType].filter(Boolean).join(" ");
-  // Offset needed to visually align the center of the title with the stats column
-  $: centerShift = Math.round(insetLeft - insetRight);
 </script>
 
 <div
   class="title-bar"
   class:is-styled={isStyled}
-  class:is-double={double}
   class:thick
-  style:--shift-left="{Math.max(0, centerShift)}px"
-  style:--shift-right="{Math.max(0, -centerShift)}px"
+  style:background={isStyled && styledHeaderBg
+    ? styledHeaderBg
+    : "var(--title-bar-bg)"}
+  style:background-size="auto 100%, auto 100%, auto 100%"
 >
   {#if hasOverlay}
     <div class="overlay"></div>
@@ -57,9 +55,6 @@
       </span>
     {/if}
   </div>
-
-  <!-- Action buttons slot cleanly into the right side of the title bar -->
-  <slot name="actions" />
 </div>
 
 <style>
@@ -71,15 +66,11 @@
     width: 100%;
     box-sizing: border-box;
     overflow: hidden;
-    padding: 4px 62px 4px 12px;
-    background: var(--title-bar-bg);
+    padding: 5px 12px;
+    background-color: var(--title-bar-bg);
     border-bottom: 1px solid var(--title-line-color);
     box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.45);
     color: var(--title-font-color);
-  }
-
-  .title-bar.is-double {
-    padding-block: 5px;
   }
 
   .title-bar.thick {
@@ -91,30 +82,31 @@
     inset: 0;
     background: var(--foil-overlay);
     opacity: 0.32;
+    mix-blend-mode: overlay;
     pointer-events: none;
+    z-index: 1;
   }
 
   .title-bar.is-styled .overlay {
     opacity: 1;
+    mix-blend-mode: overlay;
   }
 
   .title-group {
     position: relative;
-    z-index: 1;
+    z-index: 2;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 7px;
     max-width: 100%;
     min-width: 0;
-    margin-left: var(--shift-left, 0px);
-    margin-right: var(--shift-right, 0px);
-    font-size: 20px;
-    line-height: 1.18;
+    margin: 0 auto;
+    font-size: 22px;
+    line-height: 1.2;
     text-shadow:
       0 1px 2px rgba(0, 0, 0, 0.95),
       0 0 6px rgba(0, 0, 0, 0.5);
-    transition: margin 0.08s ease-out;
   }
 
   .title-text {
@@ -130,7 +122,7 @@
     flex-direction: column;
     align-items: center;
     text-align: center;
-    gap: 1px;
+    gap: 2px;
   }
 
   .title-text.double .t-name,
@@ -139,6 +131,7 @@
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
+    font-size: 22px;
   }
 
   .t-name,
@@ -148,13 +141,6 @@
 
   .t-base:not(.solo) {
     font-weight: 400;
-    font-size: 0.9em;
-    opacity: 0.92;
-  }
-
-  .title-text.double .t-base:not(.solo) {
-    font-size: 0.84em;
-    opacity: 0.88;
   }
 
   .symbols {

@@ -141,7 +141,7 @@
   $: titleBase = item
     ? isMercenaryWarrant && mercenaryName
       ? ""
-      : item.typeLine || item.baseType || ""
+      : item.baseType || item.typeLine || ""
     : "";
   $: fullItemTitle = [titleName, titleBase].filter(Boolean).join(" ");
 
@@ -227,14 +227,13 @@
   $: isRunic = isRunicFrame(frameTypeId);
   $: foilGradient = getFoilGradient(frameTypeId, foilVariation);
   $: styledHeaderBg = isStyled
-    ? getStyledHeaderBg(frameTypeId, isPoe2, foilVariation)
-    : null;
+    ? getStyledHeaderBg(frameTypeId, useDoubleTitle, isPoe2)
+    : "";
 
   $: styleVars = styleToCssVars(itemStyle, styleType, {
     corrupted: isCorruptedItem,
     runic: isRunic,
     foilGradient,
-    styledHeaderBg,
   });
   $: defaultVars = styleToCssVars(DEFAULT_STYLE, 0);
   $: symbols = item ? getCategorySymbols(item, isPoe2) : [];
@@ -349,7 +348,11 @@
     bind:clientWidth={rowWidth}
   >
     {#if resolvedStyle !== "minimal"}
-      <div class="title-wrap" bind:this={titleWrapEl}>
+      <div
+        class="title-wrap"
+        style:margin-inline={styleType === 1 ? "-1px" : null}
+        style:width={styleType === 1 ? "calc(100% + 2px)" : "calc(100% + 1px)"}
+      >
         <ItemTitleBar
           name={titleName}
           baseType={titleBase}
@@ -357,83 +360,84 @@
           {isStyled}
           hasOverlay={!!foilGradient}
           {symbols}
-          insetLeft={titleInsetLeft}
-          insetRight={titleInsetRight}
-        >
-          <div class="top-actions" slot="actions">
-            {#if item.extended?.text}
-              <button
-                type="button"
-                class="btn-top-action"
-                class:is-copied={isCopied}
-                aria-label="Copy item text"
-                title="Copy item text"
-                on:click|stopPropagation={handleCopyText}
-              >
-                {#if isCopied}
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M20 6 9 17l-5-5" />
-                  </svg>
-                {:else}
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                    <path
-                      d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-                    />
-                  </svg>
-                {/if}
-              </button>
+          {styledHeaderBg}
+        />
+      </div>
+    {/if}
+
+    <div class="row-content mode-{resolvedStyle}">
+      {#if resolvedStyle !== "compact"}
+        <div class="col-icon">
+          <ItemIcon item={displayItem ?? item} styleMode={resolvedStyle} />
+        </div>
+      {/if}
+
+      <div
+        class="col-stats"
+        class:hide-inner-title={resolvedStyle !== "minimal"}
+        bind:this={statsEl}
+        use:watchSize
+      >
+        <ItemStats
+          item={displayItem ?? item}
+          {realm}
+          {displayOptions}
+          styleMode={resolvedStyle}
+          tileWidth={boxWidth}
+        />
+      </div>
+
+      <div class="col-listing">
+        <ItemListing
+          {listing}
+          convertedPrice={displayConvertedPrice}
+          convertedCurrency={targetCurrency}
+          isTraveling={effectiveTraveling}
+          isQueued={effectiveQueued}
+          isVisited={tpVisited}
+          travelError={effectiveTravelError}
+          {realm}
+          {league}
+          {searchId}
+          styleMode={resolvedStyle}
+          onTravel={handleTravel}
+        />
+      </div>
+
+      <div class="top-actions">
+        {#if item.extended?.text}
+          <button
+            type="button"
+            class="btn-top-action"
+            class:is-copied={isCopied}
+            aria-label="Copy item text"
+            title="Copy item text"
+            on:click|stopPropagation={handleCopyText}
+          >
+            {#if isCopied}
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            {:else}
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path
+                  d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                />
+              </svg>
             {/if}
-            <button
-              type="button"
-              class="btn-top-action"
-              aria-label="View raw JSON"
-              title="View raw JSON"
-              on:click|stopPropagation={() => (isJsonModalOpen = true)}
-            >
-              &#123;&nbsp;&#125;
-            </button>
-          </div>
-        </ItemTitleBar>
+          </button>
+        {/if}
+        <button
+          type="button"
+          class="btn-top-action"
+          aria-label="View raw JSON"
+          title="View raw JSON"
+          on:click|stopPropagation={() => (isJsonModalOpen = true)}
+        >
+          &#123;&nbsp;&#125;
+        </button>
       </div>
-    {/if}
-
-    {#if resolvedStyle !== "compact"}
-      <div class="col-icon">
-        <ItemIcon item={displayItem ?? item} styleMode={resolvedStyle} />
-      </div>
-    {/if}
-
-    <div
-      class="col-stats"
-      class:hide-inner-title={resolvedStyle !== "minimal"}
-      bind:this={statsEl}
-      use:watchSize
-    >
-      <ItemStats
-        item={displayItem ?? item}
-        {realm}
-        {displayOptions}
-        styleMode={resolvedStyle}
-        tileWidth={boxWidth}
-      />
-    </div>
-
-    <div class="col-listing">
-      <ItemListing
-        {listing}
-        convertedPrice={displayConvertedPrice}
-        convertedCurrency={targetCurrency}
-        isTraveling={effectiveTraveling}
-        isQueued={effectiveQueued}
-        isVisited={tpVisited}
-        travelError={effectiveTravelError}
-        {realm}
-        {league}
-        {searchId}
-        styleMode={resolvedStyle}
-        onTravel={handleTravel}
-      />
     </div>
   </div>
 
@@ -456,7 +460,8 @@
     --item-border-color: color-mix(in srgb, var(--rc) 50%, transparent);
 
     position: relative;
-    display: grid;
+    display: flex;
+    flex-direction: column;
     box-sizing: border-box;
     background: linear-gradient(
         90deg,
@@ -468,13 +473,11 @@
     border: 1px solid var(--item-border-color);
     border-left: 3px solid var(--side-bar-color);
     color: #c8c8c8;
-    font-family: "FontinRegular", "Fontin", "Palatino Linotype", Georgia, serif;
     transition:
       background-color 0.12s ease,
       border-color 0.12s ease,
       box-shadow 0.12s ease,
       opacity 0.15s ease;
-    overflow: hidden;
   }
 
   .item-row:hover {
@@ -488,7 +491,7 @@
   .item-row.style-1 {
     --left-stop: 65%;
     --right-stop: 55%;
-    border-left-color: var(--item-border-color);
+    border-left: 1px solid var(--item-border-color);
   }
 
   .item-row.style-1:hover {
@@ -521,22 +524,71 @@
   }
 
   /* ---------------------------------------------------------------- */
-  /* Title wrapper & Docked Header Actions                            */
+  /* Title wrapper (Edge-to-Edge)                                     */
   /* ---------------------------------------------------------------- */
   .title-wrap {
-    grid-column: 1 / -1;
     position: relative;
+    z-index: 2;
     min-width: 0;
     contain: inline-size;
     background: var(--row-base-bg);
+    margin-top: -1px;
+    height: calc(100% + 1px);
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Row Content Body & Top Actions                                   */
+  /* ---------------------------------------------------------------- */
+  .row-content {
+    position: relative;
+    display: grid;
+    box-sizing: border-box;
+    width: 100%;
+  }
+
+  .row-content.mode-full {
+    --row-pad-x: 0.7rem;
+    grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr) minmax(140px, 1fr);
+    column-gap: 0.85rem;
+    row-gap: 0.5rem;
+    padding: 0.65rem var(--row-pad-x) 0.6rem;
+    align-items: center;
+  }
+
+  .row-content.mode-full .col-listing {
+    padding-left: 0.85rem;
+    border-left: 1px solid rgba(255, 255, 255, 0.07);
+    align-self: stretch;
+  }
+
+  .row-content.mode-compact {
+    --row-pad-x: 0.6rem;
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 0.4rem;
+    padding: 0.5rem var(--row-pad-x);
+    align-items: center;
+  }
+
+  .row-content.mode-compact .col-listing {
+    grid-column: 1 / -1;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    padding-top: 0.4rem;
+    justify-content: space-between;
+  }
+
+  .row-content.mode-minimal {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 0.55rem;
+    padding: 0.3rem 0.35rem 0.3rem 0.55rem;
+    align-items: center;
+    min-height: 54px;
   }
 
   .top-actions {
     position: absolute;
-    top: 50%;
-    right: 6px;
-    transform: translateY(-50%);
-    z-index: 5;
+    top: 4px;
+    right: 4px;
+    z-index: 15;
     display: flex;
     align-items: center;
     gap: 4px;
@@ -551,7 +603,6 @@
     border: 1px solid rgba(255, 255, 255, 0.16);
     color: #b8b8b8;
     font-size: 10px;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
     font-weight: 700;
     line-height: 1;
     padding: 3px 5px;
@@ -621,73 +672,8 @@
   }
 
   /* ---------------------------------------------------------------- */
-  /* Layout modes                                                     */
+  /* Skeleton                                                         */
   /* ---------------------------------------------------------------- */
-  .item-row.mode-full {
-    --row-pad-x: 0.7rem;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    column-gap: 0.85rem;
-    row-gap: 0.5rem;
-    padding: 0 var(--row-pad-x) 0.6rem;
-    align-items: center;
-  }
-
-  .item-row.mode-full .title-wrap,
-  .item-row.mode-full .skel-title-bar {
-    margin-inline: calc(var(--row-pad-x) * -1);
-  }
-
-  .item-row.mode-full .col-listing {
-    padding-left: 0.85rem;
-    border-left: 1px solid rgba(255, 255, 255, 0.07);
-    align-self: stretch;
-  }
-
-  .item-row.mode-compact {
-    --row-pad-x: 0.6rem;
-    grid-template-columns: minmax(0, 1fr);
-    row-gap: 0.4rem;
-    padding: 0 var(--row-pad-x) 0.5rem;
-    align-items: center;
-  }
-
-  .item-row.mode-compact .title-wrap,
-  .item-row.mode-compact .skel-title-bar {
-    margin-inline: calc(var(--row-pad-x) * -1);
-  }
-
-  .item-row.mode-compact .col-listing {
-    grid-column: 1 / -1;
-    border-top: 1px solid rgba(255, 255, 255, 0.07);
-    padding-top: 0.4rem;
-    justify-content: space-between;
-  }
-
-  .item-row.mode-minimal {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    gap: 0.55rem;
-    padding: 0.3rem 0.35rem 0.3rem 0.55rem;
-    align-items: center;
-    min-height: 54px;
-  }
-
-  /* ---------------------------------------------------------------- */
-  /* Live entry flash & Skeleton                                      */
-  /* ---------------------------------------------------------------- */
-  .item-row.is-live-entry {
-    animation: liveFlash 2s ease-out;
-  }
-
-  @keyframes liveFlash {
-    0% {
-      background-color: rgba(239, 68, 68, 0.25);
-      box-shadow: inset 0 0 14px rgba(239, 68, 68, 0.4);
-    }
-    100% {
-      box-shadow: none;
-    }
-  }
-
   .skeleton-row {
     pointer-events: none;
   }

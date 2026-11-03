@@ -1,5 +1,5 @@
 // src/lib/trade/components/item/itemStyles.ts
-export const CORRUPTED_TINT = "#d2000033";
+export const CORRUPTED_TINT = "#bc313133";
 export const RUNIC_TINT = "#4eacf02d";
 
 export interface ItemStyle {
@@ -67,7 +67,7 @@ export const ITEM_STYLES: Record<string, ItemStyle> = {
     title_bar_color: "#af60253d",
     title_line_color: "#af602561",
     side_bar_color: "#af6025",
-    body_tint_color: "#af602512",
+    body_tint_color: "#af61252c",
   },
   gem: {
     title_font_color: "#1BA29B",
@@ -145,17 +145,238 @@ export function resolveItemStyle(frameTypeId?: string | null): ItemStyle {
 }
 
 export function getStyledHeaderBg(
-  _frameTypeId?: string | null,
-  _isPoe2: boolean = false,
-  _foilVariation: number = 0,
+  frameTypeId?: string | null,
+  double: boolean = false,
+  isPoe2: boolean = false,
 ): string {
+  const type = String(frameTypeId ?? "").toLowerCase();
+
+  if (isPoe2) {
+    if (type === "magic") {
+      return [
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-magic-left.png?v=1709582916256&key=o3_dFKQzRKG62y6uHCs7jQ") top left/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-magic-right.png?v=1709582916256&key=Z4fOOCC3bnyTIZvSCJZSqw") top right/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-magic-middle.png?v=1709582916256&key=23gaDOOaTXEb7bKEt0GMfA") top center/29px auto repeat-x`,
+      ].join(", ");
+    }
+    if (type === "rare") {
+      if (double) {
+        return [
+          `url("https://web.poecdn.com/protected/image/item/popup2/header-double-rare-left.png?v=1709582916256&key=GlFK9dDlo33Cw3Ak7P5MnA") top left/46px auto no-repeat`,
+          `url("https://web.poecdn.com/protected/image/item/popup2/header-double-rare-right.png?v=1709582916256&key=rXqdxbUkuIkWyVJPJVY9cQ") top right/46px auto no-repeat`,
+          `url("https://web.poecdn.com/protected/image/item/popup2/header-double-rare-middle.png?v=1709582916256&key=yJGcA667EzDzrPzd1_9-vg") top center/46px auto repeat-x`,
+        ].join(", ");
+      }
+      return [
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-rare-left.png?v=1709582916256&key=I3T2vXAWpNnedfwkMVK3ZA") top left/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-rare-right.png?v=1709582916256&key=ZGQJNEchUOjMqm8UcnXedQ") top right/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-rare-middle.png?v=1709582916256&key=CEBfM9Dbz-I9nhXZKUalGA") top center/29px auto repeat-x`,
+      ].join(", ");
+    }
+    if (type === "unique") {
+      if (double) {
+        return [
+          `url("https://web.poecdn.com/protected/image/item/popup2/header-double-unique-left.png?v=1709582916256&key=qrl8M2m852PSVfYgs7nT9g") top left no-repeat`,
+          `url("https://web.poecdn.com/protected/image/item/popup2/header-double-unique-right.png?v=1709582916256&key=o1T64-ZQYCasntgXT_L8SA") top right no-repeat`,
+          `url("https://web.poecdn.com/protected/image/item/popup2/header-double-unique-middle.png?v=1709582916256&key=wxQkVW4aTky07SUpkACvSA") top center repeat-x`,
+        ].join(", ");
+      }
+      return [
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-unique-left.png?v=1709582916256&key=LfcfpM0Zj_hf2IAdg7W3ww") top left no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-unique-right.png?v=1709582916256&key=Ur5K4jb1yTYY_CKF5m-9PQ") top right no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-unique-middle.png?v=1709582916256&key=sPiOBadbuA6zqLIJTgQ6HQ") top center repeat-x`,
+      ].join(", ");
+    }
+    if (type === "supporterfoil" || type === "relic") {
+      if (double) {
+        return [
+          `url("https://web.poecdn.com/protected/image/item/popup2/header-double-relic-left.png?v=1742523473552&key=FYMGa7CrowT_fAWqcf3M-g") top left/46px auto no-repeat`,
+          `url("https://web.poecdn.com/protected/image/item/popup2/header-double-relic-right.png?v=1742523473552&key=Yrlkt73O6Ty19plaLH6t6g") top right/46px auto no-repeat`,
+          `url("https://web.poecdn.com/protected/image/item/popup2/header-double-relic-middle.png?v=1742523473552&key=xKW2HY2WawlIK5ruLOHKcw") top center/46px auto repeat-x`,
+        ].join(", ");
+      }
+      return [
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-relic-left.png?v=1742523473552&key=eLRRNZAOKrK5jF8Y2SF3Lw") top left/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-relic-right.png?v=1742523473552&key=Zloh7-1KlqDxDjQdK-nibQ") top right/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-relic-middle.png?v=1742523473552&key=QH7gwzBDamSgJYEhCYYa7g") top center/29px auto repeat-x`,
+      ].join(", ");
+    }
+    if (type === "runicnormal") {
+      return [
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-runic-normal-left.png?v=1777507982778&key=wyDKbvlQxYQSZbLnbeQSlA") top left/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-runic-normal-right.png?v=1777507982778&key=RVs7zd7-wR2x8jDnCqwUTg") top right/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-runic-normal-middle.png?v=1777507982778&key=_TK6dhTaRkq4uUYxIECtBg") top center/29px auto repeat-x`,
+      ].join(", ");
+    }
+    if (type === "runicmagic") {
+      return [
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-runic-magic-left.png?v=1777507982778&key=hAVTb9XOLd43qSk9A66Cew") top left/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-runic-magic-right.png?v=1777507982778&key=awv_SNEo7ENRZ23bibGC_g") top right/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-runic-magic-middle.png?v=1777507982778&key=BXhh4sBOTeuBcK20PaRzwg") top center/29px auto repeat-x`,
+      ].join(", ");
+    }
+    if (type === "runicrare") {
+      if (double) {
+        return [
+          `url("https://web.poecdn.com/protected/image/item/popup2/header-double-runic-rare-left.png?v=1777507982778&key=JVw2kypI6Np55WG9asiK2A") top left/46px auto no-repeat`,
+          `url("https://web.poecdn.com/protected/image/item/popup2/header-double-runic-rare-right.png?v=1777507982778&key=6a1jv2cbsz8TRjOC-myOdQ") top right/46px auto no-repeat`,
+          `url("https://web.poecdn.com/protected/image/item/popup2/header-double-runic-rare-middle.png?v=1777507982778&key=LB4kNA9FoTr8FgaHC9ozvQ") top center/46px auto repeat-x`,
+        ].join(", ");
+      }
+      return [
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-runic-rare-left.png?v=1777507982778&key=yTs6E7z43PhylMGGPqYbIg") top left/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-runic-rare-right.png?v=1777507982778&key=DgsHCpdADp7-ta5BuTJunQ") top right/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-runic-rare-middle.png?v=1777507982778&key=rZYc2n0Hu1NIXNoD3_nbIA") top center/29px auto repeat-x`,
+      ].join(", ");
+    }
+    if (type === "runicunique") {
+      if (double) {
+        return [
+          `url("https://web.poecdn.com/protected/image/item/popup2/header-double-runic-unique-left.png?v=1777507982778&key=Pn8wBLG515yxWwrxM_vw-A") top left/46px auto no-repeat`,
+          `url("https://web.poecdn.com/protected/image/item/popup2/header-double-runic-unique-right.png?v=1777507982778&key=SPNmClgwmKjsPHYlzdnuPw") top right/46px auto no-repeat`,
+          `url("https://web.poecdn.com/protected/image/item/popup2/header-double-runic-unique-middle.png?v=1777507982778&key=pDWuRNbFXX8ed4f4VLL49g") top center/46px auto repeat-x`,
+        ].join(", ");
+      }
+      return [
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-runic-unique-left.png?v=1777507982778&key=uQmEmFotr2GEu30Kqh3G9A") top left/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-runic-unique-right.png?v=1777507982778&key=eX6xLzvlo8dqwca2-OLwoA") top right/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-runic-unique-middle.png?v=1777507982778&key=EJBMyiE6EBpl9rpvdJ6Cgw") top center/29px auto repeat-x`,
+      ].join(", ");
+    }
+    if (type === "runicrelic") {
+      if (double) {
+        return [
+          `url("https://web.poecdn.com/protected/image/item/popup2/header-double-runic-relic-left.png?v=1777507982778&key=cJKFmxuJ1cvghqUkY7HZHA") top left/46px auto no-repeat`,
+          `url("https://web.poecdn.com/protected/image/item/popup2/header-double-runic-relic-right.png?v=1777507982778&key=_FtGBIRfk1p0QaSp2A6Lyw") top right/46px auto no-repeat`,
+          `url("https://web.poecdn.com/protected/image/item/popup2/header-double-runic-relic-middle.png?v=1777507982778&key=GgX1OtWJJC2pGDvDvV8uiA") top center/46px auto repeat-x`,
+        ].join(", ");
+      }
+      return [
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-runic-relic-left.png?v=1777507982778&key=pIHNgUBhiDYUir03lj9tGQ") top left/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-runic-relic-right.png?v=1777507982778&key=-VI8d6ZFhebEunBYAjedSw") top right/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-runic-relic-middle.png?v=1777507982778&key=BR5wipDeCqNvPUd6Ll21FA") top center/29px auto repeat-x`,
+      ].join(", ");
+    }
+
+    if (type === "sentinel") {
+      return [
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-sentinel-left.png?v=1777507982778&key=6Mg2COvT2XXv4a4shVhY7w") top left/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-sentinel-right.png?v=1777507982778&key=pxPIWOtol-iSxWFBIa_g3A") top right/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-sentinel-middle.png?v=1777507982778&key=-9Xe2vpyeqEKyP3daPqNDQ") top center/29px auto repeat-x`,
+      ].join(", ");
+    }
+
+    if (type === "gem") {
+      return [
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-gem-left.png?v=1709582916256&key=tsyUWDR5c5mkpo9XuTWrWw") top left/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-gem-right.png?v=1709582916256&key=EbvhZRjkXpQGeGnykCZ3aw") top right/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-gem-middle.png?v=1709582916256&key=cbR_jjI0yENCTeDCXbm8-w") top center/29px auto repeat-x`,
+      ].join(", ");
+    }
+
+    if (type === "currency") {
+      return [
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-currency-left.png?v=1709582916256&key=7qq3c91Y-hFlkX5KCFUn9A") top left/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-currency-right.png?v=1709582916256&key=S6hXs3dduboIaBwUUnwNCw") top right/29px auto no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup2/header-currency-middle.png?v=1709582916256&key=pY3IJTa71gwI0gYQbYjApA") top center/29px auto repeat-x`,
+      ].join(", ");
+    }
+
+    // Default PoE 2 Normal
+    return [
+      `url("https://web.poecdn.com/protected/image/item/popup2/header-normal-left.png?v=1709582916256&key=bRxHEyXQX_lD_K8cBxkp_A") top left/29px auto no-repeat`,
+      `url("https://web.poecdn.com/protected/image/item/popup2/header-normal-right.png?v=1709582916256&key=HviWVYf7VEXctz2vGG9d6A") top right/29px auto no-repeat`,
+      `url("https://web.poecdn.com/protected/image/item/popup2/header-normal-middle.png?v=1709582916256&key=ZGjsa2Ou6Fe2cIvZsoNeyw") top center/29px auto repeat-x`,
+    ].join(", ");
+  }
+
+  if (type === "magic") {
+    return [
+      `url("https://web.poecdn.com/protected/image/item/popup/header-magic-left.png?v=1709582916256&key=70xZDYjvxOk-Dy0ubVnmDQ") top left no-repeat`,
+      `url("https://web.poecdn.com/protected/image/item/popup/header-magic-right.png?v=1709582916256&key=Ns5zBHC-Iiy7UlkZJ8Mqug") top right no-repeat`,
+      `url("https://web.poecdn.com/protected/image/item/popup/header-magic-middle.png?v=1709582916256&key=FFR-bQYccIWgM7HdwCnSDw") top center repeat-x`,
+    ].join(", ");
+  }
+  if (type === "rare") {
+    if (double) {
+      return [
+        `url("https://web.poecdn.com/protected/image/item/popup/header-double-rare-left.png?v=1709582916256&key=7fOI1NQk5oFidrmivWNAqw") top left no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup/header-double-rare-right.png?v=1709582916256&key=0DQ30sqHO9eanQuL1NTpNQ") top right no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup/header-double-rare-middle.png?v=1709582916256&key=Hzon14Iy53cgwlmBET_yqw") top center repeat-x`,
+      ].join(", ");
+    }
+    return [
+      `url("https://web.poecdn.com/protected/image/item/popup/header-rare-left.png?v=1709582916256&key=KgDLjLOcAYP3e061vylrSg") top left no-repeat`,
+      `url("https://web.poecdn.com/protected/image/item/popup/header-rare-right.png?v=1709582916256&key=gAvlu2XH9IYKUJDQpZbVVQ") top right no-repeat`,
+      `url("https://web.poecdn.com/protected/image/item/popup/header-rare-middle.png?v=1709582916256&key=tTNH6Y8qTQozyum923VNoQ") top center repeat-x`,
+    ].join(", ");
+  }
+  if (type === "unique") {
+    if (double) {
+      return [
+        `url("https://web.poecdn.com/protected/image/item/popup/header-double-unique-left.png?v=1709582916256&key=wWot3i-c3fi9mITi48Vl9g") top left no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup/header-double-unique-right.png?v=1709582916256&key=-dfCEOleavUZZdgllVgSsQ") top right no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup/header-double-unique-middle.png?v=1709582916256&key=eZIr40k4fczlgGEz5heqLA") top center repeat-x`,
+      ].join(", ");
+    }
+    return [
+      `url("https://web.poecdn.com/protected/image/item/popup/header-unique-left.png?v=1709582916256&key=Io4Xtj7OPIZ2cINiEqrYBw") top left no-repeat`,
+      `url("https://web.poecdn.com/protected/image/item/popup/header-unique-right.png?v=1709582916256&key=FOkvOp5-3oW0rgZW0yk3cw") top right no-repeat`,
+      `url("https://web.poecdn.com/protected/image/item/popup/header-unique-middle.png?v=1709582916256&key=jFFYVSyMDfxGNiBlvOgPmw") top center repeat-x`,
+    ].join(", ");
+  }
+  if (type === "foil") {
+    if (double) {
+      return [
+        `url("https://web.poecdn.com/protected/image/item/popup/header-double-relic-left.png?v=1709582916256&key=PUK6IFm3hE8Z44O7MkywBA") top left no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup/header-double-relic-right.png?v=1709582916256&key=lJOFpLwcJrs3gMMSEN1JMA") top right no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup/header-double-relic-middle.png?v=1709582916256&key=TEtSZ05l67LhIlkLpl6NkQ") top center repeat-x`,
+      ].join(", ");
+    }
+    return [
+      `url("https://web.poecdn.com/protected/image/item/popup/header-relic-left.png?v=1709582916256&key=kfzr3Cf-2NO1XJ2OrgRFfg") top left no-repeat`,
+      `url("https://web.poecdn.com/protected/image/item/popup/header-relic-right.png?v=1709582916256&key=7TwAuAFXBdi7u8cGui8wMA") top right no-repeat`,
+      `url("https://web.poecdn.com/protected/image/item/popup/header-relic-middle.png?v=1709582916256&key=L7mSm5mlok_neoblj2okbg") top center repeat-x`,
+    ].join(", ");
+  }
+  if (type === "supporterfoil") {
+    if (double) {
+      return [
+        `url("https://web.poecdn.com/protected/image/item/popup/header-double-supporter-foil-left.png?v=1709582916256&key=Srs3vUIokkxoAutHkZ74gg") top left no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup/header-double-supporter-foil-right.png?v=1709582916256&key=TIONk32YLtVFvS2bxYL6dg") top right no-repeat`,
+        `url("https://web.poecdn.com/protected/image/item/popup/header-double-supporter-foil-middle.png?v=1709582916256&key=6YL2su2rtRv9g46Dny2OSg") top center repeat-x`,
+      ].join(", ");
+    }
+    return [
+      `url("https://web.poecdn.com/protected/image/item/popup/header-supporter-foil-left.png?v=1709582916256&key=k32gMRMG6PWn_1p-Ix5sow") top left no-repeat`,
+      `url("https://web.poecdn.com/protected/image/item/popup/header-supporter-foil-right.png?v=1709582916256&key=C-B_2BDJBM1ZMi_rgqa2mw") top right no-repeat`,
+      `url("https://web.poecdn.com/protected/image/item/popup/header-supporter-foil-middle.png?v=1709582916256&key=uz-laapu479imRcBv4ch6g") top center repeat-x`,
+    ].join(", ");
+  }
+
+  if (type === "gem") {
+    return [
+      `url("https://web.poecdn.com/protected/image/item/popup/header-gem-left.png?v=1709582916256&key=Msuu9QQfzbXDh3eQrPQwUA") top left no-repeat`,
+      `url("https://web.poecdn.com/protected/image/item/popup/header-gem-right.png?v=1709582916256&key=3hhgiyMDfG_8GThSuPE8Ew") top right no-repeat`,
+      `url("https://web.poecdn.com/protected/image/item/popup/header-gem-middle.png?v=1709582916256&key=h184nSfQVwyEK6NT6Gaa0Q") top center repeat-x`,
+    ].join(", ");
+  }
+
+  if (type === "currency") {
+    return [
+      `url("https://web.poecdn.com/protected/image/item/popup/header-currency-left.png?v=1709582916256&key=oeBVoVugHT2j8plEd7sTEA") top left no-repeat`,
+      `url("https://web.poecdn.com/protected/image/item/popup/header-currency-right.png?v=1709582916256&key=MxuOpkj5D8XEXXwp0i6wQQ") top right no-repeat`,
+      `url("https://web.poecdn.com/protected/image/item/popup/header-currency-middle.png?v=1709582916256&key=wlP-xE52TcaH6Bcoj6ke2Q") top center repeat-x`,
+    ].join(", ");
+  }
+
+  // Default PoE 1 Normal
   return [
-    `url("/protected/image/item/popup/header-double-unique-left.png?v=1709582916256&key=wWot3i-c3fi9mITi48Vl9g") top left no-repeat`,
-    `url("/protected/image/item/popup/header-double-unique-right.png?v=1709582916256&key=-dfCEOleavUZZdgllVgSsQ") top right no-repeat`,
-    `url("/protected/image/item/popup/header-double-unique-middle.png?v=1709582916256&key=eZIr40k4fczlgGEz5heqLA") top center repeat-x`,
+    `url("https://web.poecdn.com/protected/image/item/popup/header-normal-left.png?v=1709582916256&key=LCTuNK-HvMIA0Nuij8tZow") top left no-repeat`,
+    `url("https://web.poecdn.com/protected/image/item/popup/header-normal-right.png?v=1709582916256&key=DwLfH4yfGrGtAnoUBj4eSQ") top right no-repeat`,
+    `url("https://web.poecdn.com/protected/image/item/popup/header-normal-middle.png?v=1709582916256&key=mwhrNsoM49XtomPe-u3dmw") top center repeat-x`,
   ].join(", ");
 }
-
 function toRgbTriplet(c: string): string {
   const s = c.trim();
   if (s.startsWith("#")) {
@@ -182,16 +403,12 @@ export function styleToCssVars(
 ): string {
   const isStyled = styleType === 1;
   const accent = isStyled ? s.title_font_color : s.side_bar_color;
-  const titleBg =
-    isStyled && opts.styledHeaderBg ? opts.styledHeaderBg : s.title_bar_color;
-
-  // Left: Rarity or Corrupted | Right: Nothing or Runic
   const leftTint = opts.corrupted ? CORRUPTED_TINT : s.body_tint_color;
   const rightTint = opts.runic ? RUNIC_TINT : "transparent";
 
   return [
     `--title-font-color: ${s.title_font_color}`,
-    `--title-bar-bg: ${titleBg}`,
+    `--title-bar-bg: ${s.title_bar_color}`,
     `--title-line-color: ${s.title_line_color}`,
     `--side-bar-color: ${s.side_bar_color}`,
     `--left-tint: ${leftTint}`,

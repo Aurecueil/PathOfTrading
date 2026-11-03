@@ -786,7 +786,15 @@ function parseR2GameFile(
 
 async function fetchIndexFile(): Promise<R2IndexFile | null> {
   try {
-    const res = await fetch(`${PRICING_BASE_URL}/index.json?_=${Date.now()}`);
+    const res = await fetch(`${PRICING_BASE_URL}/index.json`, {
+      headers: {
+        // Tells Cloudflare and intermediate proxies to bypass cache and fetch fresh from origin (R2)
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      },
+      // Optional: ensures browser doesn't pull from its own disk/memory cache
+      cache: "no-store",
+    });
     if (!res.ok) return null;
     return (await res.json()) as R2IndexFile;
   } catch (err) {
@@ -797,9 +805,13 @@ async function fetchIndexFile(): Promise<R2IndexFile | null> {
 
 async function fetchRealmCurrentFile(realm: Realm): Promise<R2GameFile | null> {
   try {
-    const res = await fetch(
-      `${PRICING_BASE_URL}/${realm}/current.json?_=${Date.now()}`,
-    );
+    const res = await fetch(`${PRICING_BASE_URL}/${realm}/current.json`, {
+      headers: {
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      },
+      cache: "no-store",
+    });
     if (!res.ok) return null;
     return (await res.json()) as R2GameFile;
   } catch (err) {
