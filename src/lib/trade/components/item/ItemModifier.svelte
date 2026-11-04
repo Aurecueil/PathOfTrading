@@ -29,12 +29,25 @@
    * Rune mods that are shown inline although bonded ("Bonded: +5% ..." or "[Bonded]: +5% ...")
    * keep a gray "Bonded:" prefix; the rest of the text uses the normal rune colour.
    */
+  const normalizeNewlines = (s: string) => s.replace(/\r\n?/g, "\n");
+
+  /**
+   * Bonded rune mods shown inline keep their prefix ("[ShamanOnlyMods|絆]",
+   * legacy "[Bonded]:" or "Bonded:") in gray; the rest uses the normal rune colour.
+   */
+  const BONDED_SPLIT_RE =
+    /^\s*(\[ShamanOnlyMods\|[^\]]*\](?:\s*:)?)\s*([\s\S]*)$/i;
+
   function splitBondedPrefix(text: string): { prefix: string; rest: string } {
     if (category !== "rune") return { prefix: "", rest: text };
-    const m = text.match(/^\s*(\[[^\]]*Bonded\]\s*:|Bonded\s*:)\s*([\s\S]*)$/i);
+    const m = text.match(BONDED_SPLIT_RE);
     return m ? { prefix: m[1], rest: m[2] } : { prefix: "", rest: text };
   }
-
+  // Nothing to reveal on hover: plain string, or an object with no sub-mods
+  // (tier / range / level) and no flags (crafted, fractured, desecrated, ...)
+  $: descriptionOnly =
+    typeof mod === "string" ||
+    (!(mod.mods?.length ?? 0) && !Object.values(parsed.flags).some(Boolean));
   /**
    * Injects `[min-max]` after numbers outside of `[keyword|label]` brackets,
    * preserving all keyword brackets for `<KeywordText />`.
@@ -107,7 +120,7 @@
 
   $: parsed = (() => {
     if (typeof mod === "string") {
-      const { prefix, rest } = splitBondedPrefix(mod);
+      const { prefix, rest } = splitBondedPrefix(normalizeNewlines(mod));
       return {
         prefix,
         description: rest,
@@ -144,7 +157,7 @@
       .map((m) => m.level)
       .filter((l): l is number => typeof l === "number" && l > 0);
     const level = levels.length > 0 ? Math.max(...levels) : null;
-    const rawDesc = mod.description || "";
+    const rawDesc = normalizeNewlines(mod.description || "");
     const split = splitBondedPrefix(rawDesc);
     const hovered = splitBondedPrefix(
       buildHoveredDescription(rawDesc, subMods),
@@ -181,6 +194,7 @@
 <!-- svelte-ignore a11y-no-static-element-interactions -->
 <div
   class="mod-row {category}"
+  class:hoverable={!descriptionOnly}
   class:compact
   class:is-desecrated={parsed.flags.desecrated}
   class:is-crafted={parsed.flags.crafted}
@@ -192,7 +206,9 @@
     : fallbackBadge
       ? 1
       : 0}
-  on:mouseenter={() => (isHovered = true)}
+  on:mouseenter={() => {
+    if (!descriptionOnly) isHovered = true;
+  }}
   on:mouseleave={() => (isHovered = false)}
 >
   {#if (parsed.tierParts.length > 0 || fallbackBadge) && ($displayTiers || isHovered)}
@@ -254,6 +270,10 @@
     font-size: 20px;
     line-height: 22px;
   }
+  /* was `.mod-row:hover` */
+  .mod-row.hoverable:hover {
+    background-color: rgba(var(--mod-rgb), 0.1);
+  }
 
   .mod-row:hover {
     background-color: rgba(var(--mod-rgb), 0.1);
@@ -285,6 +305,7 @@
     color: var(--mod);
     word-break: break-word;
     font-variant-numeric: tabular-nums;
+    white-space: pre-line;
   }
 
   /* Gray "Bonded:" prefix on inline (non-collapsed) bonded rune mods */

@@ -21,6 +21,7 @@ const POE1_COLORS: Record<number, string> = {
   21: "rgb(181, 168, 144)", // --colour-sanctum-boon
   22: "rgb(160, 109, 202)", // --colour-sanctum-curse
   23: "rgb(171, 139, 173)", // --colour-sanctum-pact
+  24: "#7f7f7f", // --colour-grey
   30: "rgb(219, 152, 50)", // --colour-deepwater-special-area
 };
 const fake: Record<number, string> = {
@@ -29,7 +30,6 @@ const fake: Record<number, string> = {
   18: "rgb(255, 111, 38)", // --colour-scourged
   19: "rgb(255, 115, 57)", // --colour-crucible-mod
   20: "#a29162", // --colour-sanctified
-  21: "#7f7f7f", // --colour-grey
   22: "rgb(200, 200, 200)", // --colour-rarity-normal
   23: "rgb(255, 255, 119)", // --colour-rarity-rare
   24: "rgb(136, 136, 255)", // --colour-rarity-magic

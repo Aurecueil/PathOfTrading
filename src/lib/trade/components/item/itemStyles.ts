@@ -126,7 +126,13 @@ export const ITEM_STYLES: Record<string, ItemStyle> = {
     body_tint_color: "#af602512",
   },
 };
-
+/** Left tint comes from the item's `rarity` field (Normal/Magic/Rare/Unique) */
+export function resolveRarityTint(rarity?: string | null): string | null {
+  const r = String(rarity ?? "").toLowerCase();
+  return r === "normal" || r === "magic" || r === "rare" || r === "unique"
+    ? ITEM_STYLES[r].body_tint_color
+    : null;
+}
 const FOIL_BASE: ItemStyle = {
   title_font_color: ITEM_STYLES.foil.title_font_color,
   title_bar_color: ITEM_STYLES.foil.title_bar_color,
@@ -394,6 +400,7 @@ export interface StyleVarOptions {
   runic?: boolean;
   foilGradient?: string | null;
   styledHeaderBg?: string | null;
+  tint?: string | null; // rarity tint
 }
 
 export function styleToCssVars(
@@ -403,7 +410,10 @@ export function styleToCssVars(
 ): string {
   const isStyled = styleType === 1;
   const accent = isStyled ? s.title_font_color : s.side_bar_color;
-  const leftTint = s.body_tint_color; //opts.corrupted ? CORRUPTED_TINT : s.body_tint_color;
+  const leftTint = opts.corrupted
+    ? CORRUPTED_TINT
+    : (opts.tint ?? s.body_tint_color);
+  //const leftTint = s.body_tint_color; //opts.corrupted ? CORRUPTED_TINT : s.body_tint_color;
   const rightTint = opts.runic ? RUNIC_TINT : "transparent";
 
   return [

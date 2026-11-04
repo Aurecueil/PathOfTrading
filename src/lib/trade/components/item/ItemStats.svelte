@@ -1,11 +1,15 @@
 <!-- src/lib/trade/components/item/ItemStats.svelte -->
 <script lang="ts">
-  import type { Item, ItemMod } from "$lib/types/tradeItem";
+  import type { Item, ItemMod, ItemProperty } from "$lib/types/tradeItem";
   import type {
     ResolvedDisplayStyle,
     TileDisplayOptions,
   } from "$lib/types/types";
   import ItemModifier from "../item/ItemModifier.svelte";
+  import ItemTooltip from "./ItemTooltip.svelte";
+  import { buildExtendedCells } from "./stats/propertyGroups";
+  import ExtendedStatsRow from "./stats/ExtendedStatsRow.svelte";
+  import { separatorCssVars } from "./separators";
   import ItemProperties from "./stats/ItemProperties.svelte";
   import GrantedSkills from "./stats/GrantedSkills.svelte";
   import VeiledMods from "./stats/VeiledMods.svelte";
@@ -54,6 +58,18 @@
   /* ------------------------------------------------------------------ */
   /* Mod row height + PoE2 veiled scale                                 */
   /* ------------------------------------------------------------------ */
+  $: sepVars = separatorCssVars(item.rarity);
+
+  $: monsterLevelProp = item.monsterLevel
+    ? ({
+        name: "Monster Level",
+        values: [[String(item.monsterLevel), 0]],
+      } as ItemProperty)
+    : null;
+
+  $: extendedCells = buildExtendedCells(item.extended, isPoe2);
+  $: hasExtended = extendedCells.some(Boolean);
+
   const REM_PX =
     typeof document !== "undefined"
       ? parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
@@ -123,20 +139,23 @@
   /* ------------------------------------------------------------------ */
   /* Descriptions                                                       */
   /* ------------------------------------------------------------------ */
-  // Always show secDescrText when present (above explicit stats, #1BA274)
+  $: descrTextRaw = "".trim(); // (item.descrText || "").trim();
   $: secDescrTextRaw = (item.secDescrText || "").trim();
+  $: prophecyTextRaw = (item.prophecyText || "").trim();
+  $: hasDescriptions = !!(descrTextRaw || secDescrTextRaw || prophecyTextRaw);
 
-  // Gem / socketable stats & fallback descrText (shown in tooltips)
-  $: tooltipTexts = ((): { desc: string; stats: string[] } => {
+  $: flavourLines = isTooltip
+    ? (item.flavourText ?? [])
+        .map((l) => l.replace(/\r\n?/g, "\n").trim())
+        .filter(Boolean)
+    : [];
+
+  // Gem / socketable stats (tooltip only)
+  $: tooltipStats = ((): string[] => {
     const tab = (item.gemTabs as any[] | undefined)?.[0];
-    const stats: string[] = (tab?.pages?.[0]?.stats ?? []).map((t: string) =>
-      t.trim(),
-    );
-    const desc =
-      !secDescrTextRaw && !stats.length ? (item.descrText || "").trim() : "";
-    return { desc, stats };
+    return (tab?.pages?.[0]?.stats ?? []).map((t: string) => t.trim());
   })();
-
+  $: hasTooltipText = isTooltip && tooltipStats.length > 0;
   // Granted / socketed skills follow the implicit-mods option
   $: extractedSkills = show.displayImplicitMods ? extractSkills(item) : [];
 
@@ -148,25 +167,38 @@
   $: shownRuneRegular = showRunes ? separatedMods.runeRegular : [];
   $: shownRuneBonded = showRunes ? separatedMods.runeBonded : [];
 
-  // A mod is "bonded" only if it IS a bonded line (starts with the Bonded
-  // marker). Text that merely mentions [..|Bonded] mid-sentence is not.
+  // Only mods starting with [ShamanOnlyMods|<label>] are bonded
+  const BONDED_PREFIX_RE = /^\s*\[ShamanOnlyMods\|([^\]]*)\]\s*:?\s*/i;
+  const IDOL_NAME_RE = /^(?:idol|\[idol(?:\|[^\]]*)?\])$/i;
+
+  const modText = (mod: string | ItemMod) =>
+    typeof mod === "string" ? mod : mod.description || "";
+
   function isBondedMod(mod: string | ItemMod): boolean {
-    const raw = typeof mod === "string" ? mod : mod.description || "";
-    if (typeof mod !== "string" && mod.domain === "bonded") return true;
-    return /^\s*\[[^\]]*Bonded\]\s*:/i.test(raw) || /^\s*Bonded\s*:/i.test(raw);
+    return BONDED_PREFIX_RE.test(modText(mod));
   }
 
   function normalizeBondedEffect(mod: string | ItemMod): string {
-    const raw = typeof mod === "string" ? mod : mod.description || "";
-    const cleaned = cleanBracketText(raw).trim();
-    const colonIdx = cleaned.indexOf(":");
-    return (colonIdx !== -1 ? cleaned.slice(colonIdx + 1) : cleaned)
+    return cleanBracketText(modText(mod).replace(BONDED_PREFIX_RE, ""))
+      .replace(/^\s*Bonded\s*:/i, "")
       .trim()
       .toLowerCase();
   }
 
-  // With a Fox Idol socketed, ONLY bonded rune mods sourced from items
-  // ending with " idol" are shown inline; other bonded rune mods stay collapsed.
+  function isIdolItem(it: Item): boolean {
+    return (it.properties || []).some((p) =>
+      IDOL_NAME_RE.test((p.name ?? "").trim()),
+    );
+  }
+
+  // Header text comes from the mod itself (e.g. 絆)
+  $: bondedLabel = (() => {
+    for (const m of [...(item.runeMods || []), ...(item.bondedMods || [])]) {
+      const l = modText(m).match(BONDED_PREFIX_RE)?.[1]?.trim();
+      if (l) return l;
+    }
+    return "Bonded";
+  })();
   $: hasFoxIdol = (item.runeMods || []).some(
     (m) =>
       typeof m !== "string" &&
@@ -177,10 +209,7 @@
     if (!hasFoxIdol) return set;
 
     for (const si of item.socketedItems || []) {
-      const itemName = (si.baseType || si.typeLine || si.name || "")
-        .trim()
-        .toLowerCase();
-      if (!itemName.endsWith(" idol")) continue;
+      if (!isIdolItem(si)) continue;
 
       for (const bm of si.bondedMods || []) {
         const effect = normalizeBondedEffect(bm);
@@ -290,8 +319,6 @@
     classifiedExplicits.length > 0 ||
     veiledMods.length > 0 ||
     pseudoMods.length > 0;
-  $: hasTooltipText =
-    isTooltip && (tooltipTexts.desc || tooltipTexts.stats.length > 0);
   $: showMercSkills = !isTooltip && (item.mercenarySkills?.length ?? 0) > 0;
 
   /* ------------------------------------------------------------------ */
@@ -313,10 +340,11 @@
     if (item.foreseeing) {
       states.push({ kind: "foreseeing" });
     }
-    if (item.identified === false) {
+    if (!item.identified) {
+      const t = item.unidentifiedTier;
       states.push({
         kind: "text",
-        label: "Unidentified",
+        label: t != null ? `Unidentified (Tier ${t})` : "Unidentified",
         cls: "state-corrupted",
       });
     }
@@ -347,7 +375,30 @@
         cls: "state-scourge",
       });
     }
-
+    if (item.unmodifiableExceptChaos) {
+      states.push({
+        kind: "text",
+        label:
+          "Modifiable only with Chaos Orbs, Vaal Orbs, Delirium Orbs and Chisels",
+        cls: "state-info",
+      });
+    } else if (item.unmodifiable) {
+      states.push({ kind: "text", label: "Unmodifiable", cls: "state-info" });
+    }
+    if (item.cisRaceReward)
+      states.push({
+        kind: "text",
+        label: "CIS Race Reward",
+        cls: "state-race",
+      });
+    if (item.seaRaceReward)
+      states.push({
+        kind: "text",
+        label: "SEA Race Reward",
+        cls: "state-race",
+      });
+    if (item.thRaceReward)
+      states.push({ kind: "text", label: "TH Race Reward", cls: "state-race" });
     return states;
   })();
 
@@ -355,17 +406,10 @@
   /* Portaled Tooltip for Granted Skills, Merc Skills & Socketed Items  */
   /* ------------------------------------------------------------------ */
   const TIP_W = 450;
-  let hoveredItem: { item: Item; left: number; top: number } | null = null;
-
+  let hoveredItem: { item: Item; rect: DOMRect } | null = null;
   function openItemTooltip(targetItem: Item, rect: DOMRect) {
-    let left = rect.right + 8;
-    if (left + TIP_W > window.innerWidth - 8) {
-      left = Math.max(8, rect.left - TIP_W - 8);
-    }
-    const top = Math.max(8, Math.min(rect.top, window.innerHeight - 340));
-    hoveredItem = { item: targetItem, left, top };
+    hoveredItem = { item: targetItem, rect };
   }
-
   function closeItemTooltip() {
     hoveredItem = null;
   }
@@ -396,24 +440,13 @@
   <div
     class="stats-container mode-{effectiveMode}"
     class:is-tooltip={isTooltip}
-    style="--mod-h: {modHPx}px; --veil-scale: {veilScale}"
+    style="--mod-h: {modHPx}px; --veil-scale: {veilScale}; {sepVars}"
   >
-    <!-- Tooltip-only Item Name Header -->
-    {#if isTooltip}
-      <div class="tooltip-header {getRarityClass(item)}">
-        {#if item.name}
-          <div class="tooltip-item-name">{cleanBracketText(item.name)}</div>
-        {/if}
-        {#if item.typeLine || item.baseType}
-          <div class="tooltip-item-base">
-            {cleanBracketText(item.typeLine || item.baseType)}
-          </div>
-        {/if}
-      </div>
-    {/if}
-
     <!-- Properties (hidden by CSS when it renders nothing) -->
     <div class="props-block">
+      {#if monsterLevelProp}
+        <PropertyLine prop={monsterLevelProp} {isPoe2} />
+      {/if}
       <ItemProperties
         {item}
         {realm}
@@ -449,8 +482,8 @@
                   (showBondedMods = !showBondedMods)}
               >
                 {showBondedMods
-                  ? "▾ Hide Bonded"
-                  : `▸ +${shownRuneBonded.length} Bonded`}
+                  ? `▾ - ${bondedLabel}`
+                  : `▸ +${shownRuneBonded.length} ${bondedLabel}`}
               </button>
             {/if}
             {#if isTooltip || showBondedMods}
@@ -512,12 +545,22 @@
     {/if}
 
     <!-- Secondary Description Text (above explicit stats, #1BA274) -->
-    {#if secDescrTextRaw}
+    {#if hasDescriptions}
       <div class="section">
-        <div class="stat-group sec-descr-group">
-          <div class="sec-descr-text">
-            <KeywordText text={secDescrTextRaw} />
-          </div>
+        <div class="stat-group descr-group">
+          {#if descrTextRaw}
+            <div class="descr-text"><KeywordText text={descrTextRaw} /></div>
+          {/if}
+          {#if secDescrTextRaw}
+            <div class="sec-descr-text">
+              <KeywordText text={secDescrTextRaw} />
+            </div>
+          {/if}
+          {#if prophecyTextRaw}
+            <div class="prophecy-text">
+              <KeywordText text={prophecyTextRaw} />
+            </div>
+          {/if}
         </div>
       </div>
     {/if}
@@ -525,16 +568,11 @@
     {#if hasTooltipText}
       <div class="section">
         <div class="stat-group tooltip-text-group">
-          {#each tooltipTexts.stats as line}
+          {#each tooltipStats as line}
             <div class="tooltip-text-line stat">
               <KeywordText text={line} />
             </div>
           {/each}
-          {#if tooltipTexts.desc}
-            <div class="tooltip-text-line desc">
-              <KeywordText text={tooltipTexts.desc} />
-            </div>
-          {/if}
         </div>
       </div>
     {/if}
@@ -700,18 +738,25 @@
         </div>
       </div>
     {/if}
+    {#if flavourLines.length > 0}
+      <div class="section">
+        <div class="stat-group flavour-group">
+          {#each flavourLines as line}
+            <div class="flavour-text"><KeywordText text={line} /></div>
+          {/each}
+        </div>
+      </div>
+    {/if}
+    {#if hasExtended}
+      <div class="section">
+        <ExtendedStatsRow cells={extendedCells} compact={isCompact} />
+      </div>
+    {/if}
   </div>
 {/if}
 
 {#if hoveredItem}
-  <div
-    class="stats-skill-tooltip"
-    class:r-gem={hoveredItem.item.frameTypeId === "Gem"}
-    use:portal
-    style:left="{hoveredItem.left}px"
-    style:top="{hoveredItem.top}px"
-    style:width="{TIP_W}px"
-  >
+  <ItemTooltip item={hoveredItem.item} {realm} rect={hoveredItem.rect}>
     <svelte:self
       item={hoveredItem.item}
       {realm}
@@ -719,7 +764,7 @@
       isTooltip={true}
       tileWidth={TIP_W}
     />
-  </div>
+  </ItemTooltip>
 {/if}
 
 <style>
@@ -758,30 +803,6 @@
   }
   .stats-container.mode-compact {
     gap: 0.16rem;
-  }
-
-  /* Tooltip Header */
-  .tooltip-header {
-    text-align: center;
-    padding: 0.25rem 0.5rem;
-    margin-bottom: 0.1rem;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      rgba(255, 255, 255, 0.06) 50%,
-      transparent
-    );
-    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
-  }
-  .tooltip-item-name {
-    font-size: 1.05rem;
-    font-weight: 700;
-    line-height: 1.2;
-  }
-  .tooltip-item-base {
-    font-size: 0.95rem;
-    opacity: 0.9;
-    line-height: 1.2;
   }
 
   /* Rarities */
@@ -986,30 +1007,63 @@
     width: 56px;
     background: var(--foresight-url) no-repeat center / contain;
   }
+  .section::before {
+    content: "";
+    flex-shrink: 0;
+    height: var(--sep-h, 8px);
+    margin: 1px 0;
+    background: var(--sep-img, none) center no-repeat;
+  }
+  .separator-line {
+    height: var(--sep-h, 8px);
+    margin: 1px 0;
+    background: var(--sep-img, none) center no-repeat;
+  }
 
-  /* Portaled Skill/Socket Tooltip */
-  .stats-skill-tooltip {
-    position: fixed;
-    z-index: 100000;
-    max-height: 80vh;
-    overflow-y: auto;
+  .descr-group {
+    align-items: center;
+    padding: 0 0.5rem;
     box-sizing: border-box;
-    padding: 0.55rem 0.65rem;
-    background: rgba(4, 5, 7, 0.97);
-    border: 1px solid #3a3326;
-    border-top: 2px solid #8a6a2e;
-    border-radius: 0;
-    box-shadow:
-      0 14px 34px rgba(0, 0, 0, 0.85),
-      0 0 0 1px #000;
-    pointer-events: none;
-    scrollbar-width: thin;
+    gap: 0.2rem;
   }
-  /* Portaled to <body>, so it loses the row's --rc tokens */
-  .stats-skill-tooltip.r-gem {
-    --rc: #1ba29b;
-    --rc-rgb: 27, 162, 155;
+  .descr-text {
+    color: #8b95a5;
+    font-style: italic;
+    text-align: center;
+    line-height: 1.25;
+    white-space: pre-line;
   }
+  .prophecy-text {
+    color: #d6ba70;
+    text-align: center;
+    line-height: 1.25;
+    white-space: pre-line;
+  }
+  .flavour-group {
+    align-items: center;
+    padding: 0 0.5rem;
+    box-sizing: border-box;
+  }
+  .flavour-text {
+    color: #af6025;
+    font-style: italic;
+    text-align: center;
+    line-height: 1.25;
+    white-space: pre-line;
+  }
+
+  .state-stat-line {
+    font-size: var(--mod-font-size, 1rem); /* set to ItemModifier's font size */
+    font-weight: 600;
+    line-height: 1.22;
+  }
+  .state-info {
+    color: #6588ff;
+  }
+  .state-race {
+    color: #d6ba70;
+  }
+
   .progress-group {
     align-items: center;
     gap: 0.3rem;

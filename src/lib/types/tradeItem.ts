@@ -237,6 +237,9 @@ export interface ExtendedItemData {
   pdps?: number;
   pdps_aug?: boolean;
   edps?: number;
+  edps_aug?: boolean;
+  ward?: number;
+  ward_aug?: boolean;
   text?: string;
   hashes?: ExtendedModHashes;
   [key: string]: unknown;

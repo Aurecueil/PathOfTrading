@@ -168,16 +168,10 @@
   .prop-sep {
     display: block;
     flex-basis: 100%;
-    width: 60%;
-    height: 1px;
-    margin: 0.1rem auto;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      #283042 20%,
-      #283042 80%,
-      transparent
-    );
+    width: 100%;
+    height: var(--sep-h, 8px);
+    margin: 1px 0;
+    background: var(--sep-img, none) center no-repeat;
   }
   :global(.prop-icon) {
     width: 15px;

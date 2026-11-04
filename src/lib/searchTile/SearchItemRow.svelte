@@ -23,6 +23,7 @@
     isRunicFrame,
     resolveItemStyle,
     styleToCssVars,
+    resolveRarityTint,
   } from "$lib/trade/components/item/itemStyles";
 
   export let displayCurrency: string = "chaos";
@@ -42,10 +43,10 @@
   export let tpQueued: boolean = false;
   export let tpVisited: boolean = false;
   export let tpError: string | null = null;
-  export let styleType: number = 0; // 0 | 1
+  export let styleType: number = 1; // 0 | 1
   export let gone: boolean = false;
   $: isGone = gone || data?.gone === true;
-  export let doubleTitle: boolean = false;
+  export let doubleTitle: boolean = true;
   export let onRefresh: ((realId: string) => Promise<void>) | null = null;
   let isRefreshing = false;
 
@@ -283,10 +284,12 @@
     ? getStyledHeaderBg(frameTypeId, useDoubleTitle, isPoe2)
     : "";
 
+  $: rarityTint = resolveRarityTint(item?.rarity);
   $: styleVars = styleToCssVars(itemStyle, styleType, {
     corrupted: isCorruptedItem,
     runic: isRunic,
     foilGradient,
+    tint: rarityTint,
   });
   $: defaultVars = styleToCssVars(DEFAULT_STYLE, 0);
   $: symbols = item ? getCategorySymbols(item, isPoe2) : [];

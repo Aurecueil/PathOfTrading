@@ -10,19 +10,13 @@ export interface FormattedPropValue {
   color: string;
 }
 
-export interface KpiStat {
-  label: string;
-  value: string;
-  augmented?: boolean;
-}
-
-/** One wrapping line made of several properties (requirements etc.) */
 export interface PropertyGroup {
   key: string;
   label?: string;
   props: ItemProperty[];
-  /** requirement-style: "Level 60" instead of "Level: 60", comma separated */
   bare: boolean;
+  /** draw a separator above and below this group */
+  separated?: boolean;
 }
 
 /* Special properties (Memory Strands = type 99, Intangibility = type 110) */
@@ -61,6 +55,15 @@ const INLINE_GROUPS: {
 
 export function buildInlineGroups(item: Item): PropertyGroup[] {
   const out: PropertyGroup[] = [];
+  const ilvl = item.ilvl || item.itemLevel;
+  if (ilvl && ilvl > 0) {
+    out.push({
+      key: "itemLevel",
+      props: [{ name: "Item Level", values: [[String(ilvl), 0]] }],
+      bare: false,
+      separated: true,
+    });
+  }
   for (const g of INLINE_GROUPS) {
     const props = ((item[g.key] as ItemProperty[] | undefined) ?? []).filter(
       isRenderableProp,
@@ -71,31 +74,52 @@ export function buildInlineGroups(item: Item): PropertyGroup[] {
   }
   return out;
 }
+export interface ExtendedCell {
+  pre?: string;
+  value: string;
+  post?: string;
+  color: string;
+}
 
-/** DPS, pDPS, eDPS (from `extended`, shown in one line) */
-export function buildKpiStats(item: Item): KpiStat[] {
-  const list: KpiStat[] = [];
-  const ext = item.extended;
-  if (ext?.dps) {
-    list.push({
-      label: "DPS",
-      value: Math.round(ext.dps).toLocaleString(),
-      augmented: ext.dps_aug,
-    });
-  }
-  if (ext?.pdps) {
-    list.push({
-      label: "pDPS",
-      value: Math.round(ext.pdps).toLocaleString(),
-      augmented: ext.pdps_aug,
-    });
-  }
-  if (ext?.edps) {
-    list.push({
-      label: "eDPS",
-      value: Math.round(ext.edps).toLocaleString(),
-      augmented: true,
-    });
-  }
-  return list;
+export function buildExtendedCells(
+  ext: Item["extended"] | undefined,
+  isPoe2: boolean,
+): (ExtendedCell | null)[] {
+  if (!ext) return [null, null, null, null, null];
+  const pos = (v: unknown): v is number =>
+    typeof v === "number" && Number.isFinite(v) && v > 0;
+  const fmt = (v: number) => Math.round(v).toLocaleString();
+  const col = (aug?: boolean) => resolvePropertyColor(aug ? 1 : 0, isPoe2);
+  const mk = (
+    v: number,
+    aug: boolean | undefined,
+    pre?: string,
+    post?: string,
+  ): ExtendedCell => ({ pre, value: fmt(v), post, color: col(aug) });
+
+  const pick = (
+    a: ExtendedCell | null,
+    b: ExtendedCell | null,
+  ): ExtendedCell | null => a ?? b;
+
+  return [
+    pick(
+      typeof ext.base_defence_percentile === "number"
+        ? mk(ext.base_defence_percentile, false, undefined, "% Base")
+        : null,
+      pos(ext.dps) ? mk(ext.dps, ext.dps_aug, "DPS: ") : null,
+    ),
+    pick(
+      pos(ext.ar) ? mk(ext.ar, ext.ar_aug, "Armour: ") : null,
+      pos(ext.pdps) ? mk(ext.pdps, ext.pdps_aug, "Physical DPS: ") : null,
+    ),
+    pick(
+      pos(ext.ev) ? mk(ext.ev, ext.ev_aug, "Evasion: ") : null,
+      pos(ext.edps)
+        ? mk(ext.edps, (ext as any).edps_aug, "Elemental DPS: ")
+        : null,
+    ),
+    pos(ext.es) ? mk(ext.es, ext.es_aug, "Energy Shield: ") : null,
+    pos(ext.ward) ? mk(ext.ward, ext.ward_aug, "Ward: ") : null,
+  ];
 }
