@@ -22,7 +22,7 @@ export const FILLED: Record<Attr, Pos> = {
   S: [-72, -37],
   D: [-37, -37],
   I: [-2, -37],
-  G: [-142, -72],
+  G: [-140, -70],
 };
 
 export const DELVE: Pos = [-37, -2];
@@ -88,5 +88,5 @@ export function getBase(socket: ItemSocket): Sprite | null {
   if (a === "S" || a === "D" || a === "I") {
     return { sheet: SHEET_1, size: 35, pos: EMPTY[a] };
   }
-  return { sheet: SHEET_1, size: 31, pos: FILLED.G };
+  return { sheet: SHEET_1, size: 35, pos: FILLED.G };
 }

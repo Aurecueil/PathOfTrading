@@ -2,6 +2,7 @@
 <script lang="ts">
   import type { Item, ItemSocket } from "$lib/types/tradeItem";
   import ItemStats from "$lib/trade/components/item/ItemStats.svelte";
+  import ItemTooltip from "./ItemTooltip.svelte";
   import CdnImage from "./CdnImage.svelte";
   import {
     SHEET_1,
@@ -17,8 +18,8 @@
   export let w: number = 1;
   export let h: number = 1;
   export let realm: string = "poe";
-  /** Rendered width (px) of the item image */
-  export let gridWidth: number = 0;
+  /** Rendered size (px) of a single item cell (imageWidth / w) */
+  export let cellSize: number = 57; // 62 * 0.92 default reference
 
   interface Cell {
     idx: number;
@@ -37,19 +38,24 @@
 
   $: socketCount = nonGemSockets.length;
 
-  // 1 -> 1x1, 2 -> 2x1, 3-4 -> 2x2, 5-6 -> 2x3
+  // w === 1 -> always 1 column (1x1, 1x2, 1x3, 1x4)
+  // w >= 2  -> 1: 1x1, 2: 2x1 (or 1x2 if h >= 2 and w === 1), 3-4: 2x2, 5-6: 2x3
   $: ({ cols, rows } = (() => {
     if (socketCount <= 1) return { cols: 1, rows: 1 };
+    if (w === 1) return { cols: 1, rows: socketCount };
     if (socketCount === 2) return { cols: 2, rows: 1 };
     if (socketCount <= 4) return { cols: 2, rows: 2 };
     return { cols: 2, rows: 3 };
   })());
 
-  // Every cell in the grid is a square of CELL_SIZE x CELL_SIZE:
-  // 1x1 -> square, 2x2 -> square, 2x3 -> 1:1.5 proportion rectangle.
+  // Every cell in the unscaled grid is a 48x48 square, then scaled proportionally
+  // to match the reference 1.2 scale at baseCellSize = 62 (rendered cell = 57.04px).
   const CELL_SIZE = 48;
+  const REF_RENDERED_CELL = 62 * 0.92;
   $: gridW = cols * CELL_SIZE;
   $: gridH = rows * CELL_SIZE;
+  $: gridScale =
+    1.2 * ((cellSize > 0 ? cellSize : REF_RENDERED_CELL) / REF_RENDERED_CELL);
 
   const boxSize = (c: Cell) => c.base?.size ?? SOCKET_SIZE;
 
@@ -88,37 +94,28 @@
   });
 
   const TIP_W = 450;
-  let hovered: { item: Item; left: number; top: number } | null = null;
+  let hovered: { item: Item; rect: DOMRect } | null = null;
 
   function showTip(e: Event, item: Item | null) {
     if (!item) return;
     const rect = (e.currentTarget as HTMLElement)
       .querySelector(".box")!
       .getBoundingClientRect();
-    let left = rect.right + 8;
-    if (left + TIP_W > window.innerWidth - 8) {
-      left = Math.max(8, rect.left - TIP_W - 8);
-    }
-    const top = Math.max(8, Math.min(rect.top, window.innerHeight - 320));
-    hovered = { item, left, top };
+    hovered = { item, rect };
   }
 
   function hideTip() {
     hovered = null;
   }
-
-  function portal(node: HTMLElement) {
-    document.body.appendChild(node);
-    return {
-      destroy() {
-        node.remove();
-      },
-    };
-  }
 </script>
 
 <div class="sockets-overlay">
-  <div class="sockets-grid" style:width="{gridW}px" style:height="{gridH}px">
+  <div
+    class="sockets-grid"
+    style:width="{gridW}px"
+    style:height="{gridH}px"
+    style:transform="scale({gridScale})"
+  >
     {#each links as link}
       <span class="link-pos" style:left="{link.x}%" style:top="{link.y}%">
         {#if link.horizontal}
@@ -210,13 +207,7 @@
 </div>
 
 {#if hovered}
-  <div
-    class="socket-tooltip"
-    use:portal
-    style:left="{hovered.left}px"
-    style:top="{hovered.top}px"
-    style:width="{TIP_W}px"
-  >
+  <ItemTooltip item={hovered.item} {realm} rect={hovered.rect}>
     <ItemStats
       item={hovered.item}
       {realm}
@@ -224,7 +215,7 @@
       isTooltip={true}
       tileWidth={TIP_W}
     />
-  </div>
+  </ItemTooltip>
 {/if}
 
 <style>
@@ -238,11 +229,11 @@
     pointer-events: none;
   }
 
-  /* Grid composed of square cells, shifted slightly higher on the item icon */
+  /* Grid composed of square cells, scaled proportionally with the item icon */
   .sockets-grid {
     position: relative;
     flex-shrink: 0;
-    transform: scale(1.2);
+    transform-origin: center center;
   }
 
   .slot {
@@ -323,23 +314,5 @@
     z-index: 2;
     transform: translate(-50%, -50%);
     transform-origin: center;
-  }
-
-  .socket-tooltip {
-    position: fixed;
-    z-index: 100000;
-    max-height: 80vh;
-    overflow-y: auto;
-    box-sizing: border-box;
-    padding: 0.55rem 0.65rem;
-    background: rgba(4, 5, 7, 0.97);
-    border: 1px solid #3a3326;
-    border-top: 2px solid #8a6a2e;
-    border-radius: 0;
-    box-shadow:
-      0 14px 34px rgba(0, 0, 0, 0.8),
-      0 0 0 1px #000;
-    pointer-events: none;
-    scrollbar-width: thin;
   }
 </style>

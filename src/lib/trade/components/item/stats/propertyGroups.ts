@@ -19,7 +19,6 @@ export interface PropertyGroup {
   separated?: boolean;
 }
 
-/* Special properties (Memory Strands = type 99, Intangibility = type 110) */
 export function getSpecialKind(p: ItemProperty): SpecialKind | null {
   if (p.type === 99) return "memory";
   if (p.type === 110) return "intangibility";
@@ -36,7 +35,6 @@ export function toFormattedValues(
   }));
 }
 
-/** Separators (mode 4) are always renderable; otherwise need a name or a value. */
 export function isRenderableProp(p: ItemProperty): boolean {
   if (p.displayMode === 4) return true;
   return Boolean((p.name ?? "").trim()) || (p.values?.length ?? 0) > 0;
@@ -50,30 +48,57 @@ const INLINE_GROUPS: {
   { key: "requirements", label: "Requires:", bare: true },
   { key: "weaponRequirements", bare: true },
   { key: "supportGemRequirements", bare: true },
-  { key: "nextLevelRequirements", label: "Next Level:", bare: true },
 ];
 
 export function buildInlineGroups(item: Item): PropertyGroup[] {
   const out: PropertyGroup[] = [];
   const ilvl = item.ilvl || item.itemLevel;
-  if (ilvl && ilvl > 0) {
+
+  // Collect all requirement props
+  const reqProps: ItemProperty[] = [];
+  for (const g of INLINE_GROUPS) {
+    const props = ((item[g.key] as ItemProperty[] | undefined) ?? []).filter(
+      isRenderableProp,
+    );
+    reqProps.push(...props);
+  }
+
+  // If we have either ilvl or requirements, bundle them together with separators
+  const hasIlvl = ilvl && ilvl > 0;
+  const hasReqs = reqProps.length > 0;
+
+  if (hasIlvl) {
     out.push({
       key: "itemLevel",
       props: [{ name: "Item Level", values: [[String(ilvl), 0]] }],
       bare: false,
-      separated: true,
+      separated: !hasReqs, // only separated if no requirements follow inside the same block
     });
   }
+
   for (const g of INLINE_GROUPS) {
     const props = ((item[g.key] as ItemProperty[] | undefined) ?? []).filter(
       isRenderableProp,
     );
     if (props.length > 0) {
-      out.push({ key: String(g.key), label: g.label, props, bare: g.bare });
+      out.push({
+        key: String(g.key),
+        label: g.label,
+        props,
+        bare: g.bare,
+        separated: false,
+      });
     }
   }
+
+  // Mark the last requirement group as separated so the bottom divider renders
+  if (out.length > 0) {
+    out[out.length - 1].separated = true;
+  }
+
   return out;
 }
+
 export interface ExtendedCell {
   pre?: string;
   value: string;

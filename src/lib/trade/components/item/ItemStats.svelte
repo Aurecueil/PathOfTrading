@@ -7,8 +7,6 @@
   } from "$lib/types/types";
   import ItemModifier from "../item/ItemModifier.svelte";
   import ItemTooltip from "./ItemTooltip.svelte";
-  import { buildExtendedCells } from "./stats/propertyGroups";
-  import ExtendedStatsRow from "./stats/ExtendedStatsRow.svelte";
   import { separatorCssVars } from "./separators";
   import ItemProperties from "./stats/ItemProperties.svelte";
   import GrantedSkills from "./stats/GrantedSkills.svelte";
@@ -31,6 +29,7 @@
   import GemTabs from "./stats/GemTabs.svelte";
   import PropertyLine from "./stats/PropertyLine.svelte";
   import { isRenderableProp } from "./stats/propertyGroups";
+  import CdnImage from "./CdnImage.svelte";
 
   $: additionalProps = (item.additionalProperties ?? []).filter(
     isRenderableProp,
@@ -41,8 +40,6 @@
   export let styleMode: ResolvedDisplayStyle = "full";
   export let tileWidth: number = 600;
   export let isTooltip: boolean = false;
-  // script
-  import CdnImage from "./CdnImage.svelte";
 
   const HYBRID_TITLE_BG =
     "/protected/image/item/popup/hybrid-title.png?v=1709582916256&key=nu0qDrILwqRuP7H7QIIrpQ";
@@ -55,6 +52,7 @@
   $: isPoe2 = (item.realm || realm || "").toLowerCase() === "poe2";
 
   $: show = normalizeDisplayOptions(isTooltip ? null : displayOptions);
+
   /* ------------------------------------------------------------------ */
   /* Mod row height + PoE2 veiled scale                                 */
   /* ------------------------------------------------------------------ */
@@ -67,13 +65,6 @@
       } as ItemProperty)
     : null;
 
-  $: extendedCells = buildExtendedCells(item.extended, isPoe2);
-  $: hasExtended = extendedCells.some(Boolean);
-
-  const REM_PX =
-    typeof document !== "undefined"
-      ? parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
-      : 16;
   /* Progress bars */
   $: incubated = item.incubatedItem ?? null;
   $: enshrouded = item.enshrouded ?? null;
@@ -109,10 +100,10 @@
       secDescrText: hy.secDescrText,
     } as Item;
   })();
-  // The PoE2 veiled image is 58px tall. We show the middle 38px (10px cropped
-  // top and bottom) and scale that to the mod row height.
+
   $: modHPx = isCompact ? 23 : 26;
   $: veilScale = modHPx / 38;
+  $: modFontSize = isCompact ? "0.96rem" : "1.04rem";
 
   const FORESIGHT_ICON = `${CDN_BASE}/protected/image/item/popup/foresight.png?v=1709582916256&key=Lef8eETW43fyBwYaZ_f3SA`;
 
@@ -139,7 +130,7 @@
   /* ------------------------------------------------------------------ */
   /* Descriptions                                                       */
   /* ------------------------------------------------------------------ */
-  $: descrTextRaw = "".trim(); // (item.descrText || "").trim();
+  $: descrTextRaw = "".trim();
   $: secDescrTextRaw = (item.secDescrText || "").trim();
   $: prophecyTextRaw = (item.prophecyText || "").trim();
   $: hasDescriptions = !!(descrTextRaw || secDescrTextRaw || prophecyTextRaw);
@@ -162,14 +153,13 @@
   /* ------------------------------------------------------------------ */
   /* Modifiers & Bonded Handling                                        */
   /* ------------------------------------------------------------------ */
-  // Runes need BOTH the tile option and the global toggle (tooltips always show them)
   $: showRunes = isTooltip || ($displayRune && show.displayRuneMods);
   $: shownRuneRegular = showRunes ? separatedMods.runeRegular : [];
   $: shownRuneBonded = showRunes ? separatedMods.runeBonded : [];
 
-  // Only mods starting with [ShamanOnlyMods|<label>] are bonded
+  // Only mods starting with [ShamanOnlyMods|<label>] are bonded rune mods
   const BONDED_PREFIX_RE = /^\s*\[ShamanOnlyMods\|([^\]]*)\]\s*:?\s*/i;
-  const IDOL_NAME_RE = /^(?:idol|\[idol(?:\|[^\]]*)?\])$/i;
+  const IDOL_PROP_RE = /^\[?idol(?:\|[^\]]*)?\]?$/i;
 
   const modText = (mod: string | ItemMod) =>
     typeof mod === "string" ? mod : mod.description || "";
@@ -181,17 +171,39 @@
   function normalizeBondedEffect(mod: string | ItemMod): string {
     return cleanBracketText(modText(mod).replace(BONDED_PREFIX_RE, ""))
       .replace(/^\s*Bonded\s*:/i, "")
+      .replace(/\s+/g, " ")
       .trim()
       .toLowerCase();
   }
 
-  function isIdolItem(it: Item): boolean {
-    return (it.properties || []).some((p) =>
-      IDOL_NAME_RE.test((p.name ?? "").trim()),
-    );
+  /**
+   * Socketed idols list bondedMods with an item-category prefix such as:
+   *   "Body Armours: 15% chance for [Charm|Charms] you use to not consume Charges"
+   * whereas item.runeMods has only:
+   *   "[ShamanOnlyMods|Bonded]: 15% chance for [Charm|Charms] you use to not consume Charges"
+   * We index both the full normalized string and the string after `<Category>:`.
+   */
+  function extractIdolEffectVariants(mod: string | ItemMod): string[] {
+    const base = normalizeBondedEffect(mod);
+    if (!base) return [];
+    const variants = [base];
+    const colonIdx = base.indexOf(":");
+    if (colonIdx !== -1) {
+      const stripped = base.slice(colonIdx + 1).trim();
+      if (stripped) variants.push(stripped);
+    }
+    return variants;
   }
 
-  // Header text comes from the mod itself (e.g. 絆)
+  function isIdolItem(it: Item): boolean {
+    return (it.properties || []).some((p) => {
+      const raw = (p.name ?? "").trim();
+      const cleaned = cleanBracketText(raw).trim();
+      return IDOL_PROP_RE.test(raw) || /^idol$/i.test(cleaned);
+    });
+  }
+
+  // Header text comes from the mod itself (e.g. Bonded / 絆)
   $: bondedLabel = (() => {
     for (const m of [...(item.runeMods || []), ...(item.bondedMods || [])]) {
       const l = modText(m).match(BONDED_PREFIX_RE)?.[1]?.trim();
@@ -199,11 +211,13 @@
     }
     return "Bonded";
   })();
+
   $: hasFoxIdol = (item.runeMods || []).some(
     (m) =>
       typeof m !== "string" &&
-      normalizeModHash(m.hash) === "rune.stat_726496846",
+      normalizeModHash(m.hash).endsWith("rune.stat_726496846"),
   );
+
   $: idolBondedEffects = (() => {
     const set = new Set<string>();
     if (!hasFoxIdol) return set;
@@ -212,12 +226,14 @@
       if (!isIdolItem(si)) continue;
 
       for (const bm of si.bondedMods || []) {
-        const effect = normalizeBondedEffect(bm);
-        if (effect) set.add(effect);
+        for (const v of extractIdolEffectVariants(bm)) {
+          set.add(v);
+        }
       }
     }
     return set;
   })();
+
   $: separatedMods = (() => {
     const runeRegular: Array<string | ItemMod> = [];
     const runeBonded: Array<string | ItemMod> = [];
@@ -225,11 +241,11 @@
     (item.runeMods || []).forEach((m) => {
       if (isBondedMod(m)) {
         const effect = normalizeBondedEffect(m);
-        if (hasFoxIdol && idolBondedEffects.has(effect)) {
-          // Bonded mod from an Idol while Fox Idol is socketed -> keep inline
+        if (hasFoxIdol && effect && idolBondedEffects.has(effect)) {
+          // Bonded rune mod coming specifically from a socketed Idol when Fox Idol is present
           runeRegular.push(m);
         } else {
-          // Non-idol bonded mod (or no Fox Idol socketed) -> collapse
+          // Non-idol bonded rune mod (e.g. Greater Iron Rune) or no Fox Idol -> collapsed
           runeBonded.push(m);
         }
       } else {
@@ -243,7 +259,17 @@
 
     return { runeRegular, implicitRegular, runeBonded };
   })();
-  $: enchantMods = show.displayEnchantMods ? (item.enchantMods ?? []) : [];
+
+  // builtInSupport is treated as an enchant modifier
+  $: builtInSupportMods = ((): Array<string | ItemMod> => {
+    const bis = (item as any).builtInSupport;
+    if (!bis) return [];
+    return Array.isArray(bis) ? bis : [bis];
+  })();
+
+  $: enchantMods = show.displayEnchantMods
+    ? [...builtInSupportMods, ...(item.enchantMods ?? [])]
+    : [];
   $: crucibleMods = show.displayCrucibleMods ? (item.crucibleMods ?? []) : [];
   $: scourgeMods = show.displayScourgeMods
     ? ((item.scourgeMods ?? []) as Array<string | ItemMod>)
@@ -261,17 +287,12 @@
     const others: Array<{ mod: string | ItemMod; cat: "generic" | "bonded" }> =
       [];
 
-    const allExplicitMods: Array<{ mod: string | ItemMod; forced: boolean }> = [
-      ...(show.displayExplicitMods
-        ? (item.explicitMods || []).map((mod) => ({ mod, forced: false }))
-        : []),
-      ...(show.displayBondedMods
-        ? (item.bondedMods || []).map((mod) => ({ mod, forced: true }))
-        : []),
-    ];
+    const explicitList = show.displayExplicitMods
+      ? item.explicitMods || []
+      : [];
 
-    allExplicitMods.forEach(({ mod, forced }) => {
-      const bonded = forced || isBondedMod(mod);
+    explicitList.forEach((mod) => {
+      const bonded = isBondedMod(mod);
       if (typeof mod === "string") {
         others.push({ mod, cat: bonded ? "bonded" : "generic" });
         return;
@@ -289,9 +310,15 @@
     return [...prefixes, ...suffixes, ...others];
   })();
 
+  // item.bondedMods displayed directly BELOW explicit mods with no divider
+  $: directBondedMods = show.displayBondedMods
+    ? ((item.bondedMods ?? []) as Array<string | ItemMod>)
+    : [];
+
   $: veiledMods = show.displayVeiledMods
     ? ((item.veiledMods ?? []) as Array<string | ItemMod>)
     : [];
+
   /* ------------------------------------------------------------------ */
   /* Pseudo mods: `statgroup.N` ones are Count / Sum lines at the bottom */
   /* ------------------------------------------------------------------ */
@@ -317,6 +344,7 @@
     shownRuneBonded.length > 0;
   $: hasExplicitBlock =
     classifiedExplicits.length > 0 ||
+    directBondedMods.length > 0 ||
     veiledMods.length > 0 ||
     pseudoMods.length > 0;
   $: showMercSkills = !isTooltip && (item.mercenarySkills?.length ?? 0) > 0;
@@ -331,6 +359,16 @@
   $: bottomStates = ((): BottomState[] => {
     const states: BottomState[] = [];
 
+    if (item.unmodifiableExceptChaos) {
+      states.push({
+        kind: "text",
+        label:
+          "Modifiable only with Chaos Orbs, Vaal Orbs, Delirium Orbs and Chisels",
+        cls: "state-info",
+      });
+    } else if (item.unmodifiable) {
+      states.push({ kind: "text", label: "Unmodifiable", cls: "state-info" });
+    }
     if (item.split) {
       states.push({ kind: "text", label: "Split", cls: "state-split" });
     }
@@ -375,16 +413,6 @@
         cls: "state-scourge",
       });
     }
-    if (item.unmodifiableExceptChaos) {
-      states.push({
-        kind: "text",
-        label:
-          "Modifiable only with Chaos Orbs, Vaal Orbs, Delirium Orbs and Chisels",
-        cls: "state-info",
-      });
-    } else if (item.unmodifiable) {
-      states.push({ kind: "text", label: "Unmodifiable", cls: "state-info" });
-    }
     if (item.cisRaceReward)
       states.push({
         kind: "text",
@@ -413,20 +441,9 @@
   function closeItemTooltip() {
     hoveredItem = null;
   }
-
-  function portal(node: HTMLElement) {
-    document.body.appendChild(node);
-    return {
-      destroy() {
-        node.remove();
-      },
-    };
-  }
 </script>
 
 {#if effectiveMode === "minimal"}
-  <!-- MINIMAL VIEW: no tags, no iLvl, no sockets.
-       name + base type (2 lines) | only name | only base type -->
   <div class="minimal-stats {getRarityClass(item)}">
     {#if minimalName}
       <div class="min-name">{minimalName}</div>
@@ -440,7 +457,7 @@
   <div
     class="stats-container mode-{effectiveMode}"
     class:is-tooltip={isTooltip}
-    style="--mod-h: {modHPx}px; --veil-scale: {veilScale}; {sepVars}"
+    style="--mod-h: {modHPx}px; --mod-font-size: {modFontSize}; --veil-scale: {veilScale}; {sepVars}"
   >
     <!-- Properties (hidden by CSS when it renders nothing) -->
     <div class="props-block">
@@ -455,7 +472,21 @@
         on:itemleave={closeItemTooltip}
       />
     </div>
-    <!-- Enchant + Rune + Bonded -->
+
+    <!-- Additional Properties (above implicit, enchant, and rune mods) -->
+    {#if additionalProps.length > 0}
+      <div class="section">
+        <div class="additional-line">
+          {#each additionalProps as p}
+            <div class="prop-line">
+              <PropertyLine prop={p} {isPoe2} />
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
+    <!-- Enchant (incl. builtInSupport) + Rune + Bonded Rune -->
     {#if hasEnchantRuneBlock}
       <div class="section">
         <div class="stat-group">
@@ -582,7 +613,8 @@
         <UltimatumMods mods={ultimatumMods} />
       </div>
     {/if}
-    <!-- Explicit Mods + Veiled / Unrevealed Mods + Pseudo Mods -->
+
+    <!-- Explicit Mods + Bonded Mods (below explicit, no divider) + Veiled + Pseudo -->
     {#if hasExplicitBlock}
       <div class="section">
         <div class="stat-group">
@@ -591,6 +623,15 @@
               mod={entry.mod}
               {realm}
               category={entry.cat}
+              compact={isCompact}
+            />
+          {/each}
+
+          {#each directBondedMods as bMod}
+            <ItemModifier
+              mod={bMod}
+              {realm}
+              category="bonded"
               compact={isCompact}
             />
           {/each}
@@ -608,6 +649,7 @@
         </div>
       </div>
     {/if}
+
     {#if gemTabs.length > 0}
       <div class="section">
         <GemTabs tabs={gemTabs} {realm} compact={isCompact} />
@@ -619,6 +661,7 @@
         <LogbookMods {logbookMods} {realm} compact={isCompact} />
       </div>
     {/if}
+
     <!-- Crucible Mods (Under Explicit Mods) -->
     {#if crucibleMods.length > 0}
       <div class="section">
@@ -634,6 +677,7 @@
         </div>
       </div>
     {/if}
+
     <!-- Notable Properties -->
     {#if item.notableProperties && item.notableProperties.length > 0}
       <div class="section">
@@ -665,6 +709,7 @@
         />
       </div>
     {/if}
+
     {#if hybridItem}
       <div class="section hybrid-section">
         <div class="hybrid-title {getRarityClass(item)}">
@@ -684,6 +729,7 @@
         />
       </div>
     {/if}
+
     <!-- Bottom State Tags (Split, Mirrored, Corrupted, Unidentified, Scourge, etc.) -->
     {#if bottomStates.length > 0}
       <div class="section">
@@ -729,15 +775,7 @@
         </div>
       </div>
     {/if}
-    {#if additionalProps.length > 0}
-      <div class="section">
-        <div class="additional-line">
-          {#each additionalProps as p}
-            <PropertyLine prop={p} {isPoe2} />
-          {/each}
-        </div>
-      </div>
-    {/if}
+
     {#if flavourLines.length > 0}
       <div class="section">
         <div class="stat-group flavour-group">
@@ -745,11 +783,6 @@
             <div class="flavour-text"><KeywordText text={line} /></div>
           {/each}
         </div>
-      </div>
-    {/if}
-    {#if hasExtended}
-      <div class="section">
-        <ExtendedStatsRow cells={extendedCells} compact={isCompact} />
       </div>
     {/if}
   </div>
@@ -768,7 +801,7 @@
 {/if}
 
 <style>
-  /* Minimal Mode */
+  /* Minimal Mode (acts as the row title in minimal view -> bold) */
   .minimal-stats {
     display: flex;
     flex-direction: column;
@@ -776,7 +809,8 @@
     gap: 1px;
     min-width: 0;
   }
-  .min-name {
+  .min-name,
+  .min-base {
     font-size: 0.96rem;
     font-weight: 700;
     line-height: 1.2;
@@ -786,20 +820,21 @@
   }
   .min-base {
     font-size: 0.9rem;
-    line-height: 1.2;
     opacity: 0.88;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
-  /* Full & Compact Modes */
+  /* Full & Compact Modes: no bold anywhere inside stats */
   .stats-container {
     display: flex;
     flex-direction: column;
     gap: 0.24rem;
     width: 100%;
+    min-width: 0;
     text-align: center;
+    font-weight: 400;
+  }
+  .stats-container :global(*) {
+    font-weight: 400 !important;
   }
   .stats-container.mode-compact {
     gap: 0.16rem;
@@ -833,26 +868,19 @@
     width: 100%;
   }
 
-  /* Dividers: a section draws its own divider ABOVE itself. Sections only
-     exist when they have content, so dividers can never double up or dangle. */
   .section {
     display: flex;
     flex-direction: column;
     gap: inherit;
     width: 100%;
+    min-width: 0;
   }
   .section::before {
     content: "";
     flex-shrink: 0;
-    height: 1px;
-    margin: 0.05rem 0;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      #283042 20%,
-      #283042 80%,
-      transparent
-    );
+    height: var(--sep-h, 8px);
+    margin: 1px 0;
+    background: var(--sep-img, none) center no-repeat;
   }
 
   .props-block {
@@ -860,8 +888,8 @@
     flex-direction: column;
     gap: inherit;
     width: 100%;
+    min-width: 0;
   }
-  /* No properties -> collapse it, and the first section needs no divider */
   .props-block:not(:has(*)) {
     display: none;
   }
@@ -869,25 +897,13 @@
     display: none;
   }
 
-  /* Only used between enchant and rune lines inside one group */
   .separator-line {
-    height: 1px;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      #283042 20%,
-      #283042 80%,
-      transparent
-    );
-    margin: 0.05rem 0;
+    height: var(--sep-h, 8px);
+    margin: 1px 0;
+    background: var(--sep-img, none) center no-repeat;
   }
 
   /* Secondary Description Text (Skills / Gems) */
-  .sec-descr-group {
-    align-items: center;
-    padding: 0 0.5rem;
-    box-sizing: border-box;
-  }
   .sec-descr-text {
     color: #1ba274;
     font-size: 0.98rem;
@@ -946,7 +962,7 @@
   }
   .notable-title {
     font-size: 0.98rem;
-    font-weight: 700;
+    font-weight: 400;
     color: #b8b09c;
   }
   .notable-line {
@@ -955,32 +971,20 @@
     line-height: 1.22;
   }
 
-  /* Mercenary Skills */
-  .mercenary-skill-line {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.4rem;
-  }
-  :global(.skill-icon) {
-    width: 20px;
-    height: 20px;
-    border-radius: 0;
-  }
-  .skill-name {
-    color: #cbd5e1;
-    font-size: 0.94rem;
-  }
-
-  /* Bottom Exclusive State & Split */
+  /* Bottom State Tags (Corrupted, Mirrored, Split, etc.):
+     exact same font size as ItemModifier and regular weight (not bold) */
   .bottom-state-group {
     align-items: center;
     text-align: center;
   }
   .state-stat-line {
-    font-size: 1.02rem;
-    font-weight: 600;
-    line-height: 1.22;
+    margin-top: -2px;
+    font-size: 20px;
+    font-weight: 400;
+    line-height: 24px;
+  }
+  .mode-compact .state-stat-line {
+    font-size: var(--mod-font-size, 0.96rem);
   }
   .state-corrupted {
     color: #d20000;
@@ -997,6 +1001,12 @@
   .state-scourge {
     color: #ff6e25;
   }
+  .state-info {
+    color: #6588ff;
+  }
+  .state-race {
+    color: #d6ba70;
+  }
 
   .item-popup__desc-text--foreseeing::before {
     display: block;
@@ -1006,18 +1016,6 @@
     height: 35px;
     width: 56px;
     background: var(--foresight-url) no-repeat center / contain;
-  }
-  .section::before {
-    content: "";
-    flex-shrink: 0;
-    height: var(--sep-h, 8px);
-    margin: 1px 0;
-    background: var(--sep-img, none) center no-repeat;
-  }
-  .separator-line {
-    height: var(--sep-h, 8px);
-    margin: 1px 0;
-    background: var(--sep-img, none) center no-repeat;
   }
 
   .descr-group {
@@ -1052,31 +1050,9 @@
     white-space: pre-line;
   }
 
-  .state-stat-line {
-    font-size: var(--mod-font-size, 1rem); /* set to ItemModifier's font size */
-    font-weight: 600;
-    line-height: 1.22;
-  }
-  .state-info {
-    color: #6588ff;
-  }
-  .state-race {
-    color: #d6ba70;
-  }
-
   .progress-group {
     align-items: center;
     gap: 0.3rem;
-  }
-  .stats-container,
-  .props-block,
-  .section {
-    min-width: 0;
-  }
-  .stats-container,
-  .props-block,
-  .section {
-    min-width: 0;
   }
 
   .hybrid-section::before {
@@ -1090,7 +1066,7 @@
     min-height: 34px;
     padding: 0 0.5rem;
     font-size: 1rem;
-    font-weight: 700;
+    font-weight: 700 !important;
     line-height: 1.2;
   }
   .hybrid-title :global(.hybrid-bg) {
@@ -1104,12 +1080,13 @@
   .hybrid-name {
     position: relative;
     z-index: 1;
+    font-weight: 700 !important;
   }
   .additional-line {
     display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    column-gap: 0.55rem;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.12rem;
     width: 100%;
     min-width: 0;
     text-align: center;

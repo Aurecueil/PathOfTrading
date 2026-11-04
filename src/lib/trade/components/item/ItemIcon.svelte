@@ -7,26 +7,37 @@
 
   export let item: Item;
   export let styleMode: ResolvedDisplayStyle = "full";
+  /** Base size (px) of a 1x1 inventory cell; scales down automatically if container is narrower */
+  export let baseCellSize: number = 62;
+
+  let hostWidth = 0;
+
+  $: itemW = Math.max(1, item.w || 1);
+  $: itemH = Math.max(1, item.h || 1);
+
+  // Target cell size adapts to available host width while keeping exact w:h proportions
+  $: effectiveCellSize = (() => {
+    if (styleMode === "minimal") return 48 / Math.max(itemW, itemH);
+    if (hostWidth > 0) {
+      // Allow growing/shrinking based on available column space (clamped to sensible bounds)
+      const maxFromHost = hostWidth / 2; // 2-col item fills hostWidth; 1-col item takes half
+      return Math.min(Math.max(maxFromHost, 38), 84);
+    }
+    return baseCellSize;
+  })();
 
   $: iconDimensions = (() => {
-    if (styleMode === "minimal") return { w: 48, h: 48 };
-    const MAX_W = 168,
-      MIN_H = 136,
-      MAX_H = 240;
-    const ratio = (item.h || 1) / (item.w || 1);
+    if (styleMode === "minimal") {
+      return { w: 48, h: 48 };
+    }
     return {
-      w: MAX_W,
-      h: Math.round(Math.min(Math.max(MAX_W * ratio, MIN_H), MAX_H)),
+      w: Math.round(itemW * effectiveCellSize),
+      h: Math.round(itemH * effectiveCellSize),
     };
   })();
-  // Width the item image actually renders at (.item-icon is 92% of the box and
-  // object-fit: contain, so it is limited by whichever axis is tighter).
-  $: imageWidth = (() => {
-    const boxW = iconDimensions.w * 0.92;
-    const boxH = iconDimensions.h * 0.92;
-    const ratio = (item.w || 1) / (item.h || 1);
-    return Math.round(Math.min(boxW, boxH * ratio));
-  })();
+
+  // Actual rendered cell size inside the 92% padded image area
+  $: renderedCellSize = (iconDimensions.w * 0.92) / itemW;
 
   $: stackMaxed =
     item.stackSize !== undefined &&
@@ -39,51 +50,63 @@
   $: hasEquipmentSockets = nonGemSockets.length > 0;
 </script>
 
-<div
-  class="item-icon-wrapper mode-{styleMode}"
-  class:is-corrupted={styleMode !== "minimal" &&
-    (item.corrupted || item.doubleCorrupted)}
-  class:is-sanctified={styleMode !== "minimal" && item.sanctified}
-  class:is-fractured={styleMode !== "minimal" && item.fractured}
-  class:is-unidentified={styleMode !== "minimal" && item.identified === false}
-  style:width="{iconDimensions.w}px"
-  style:height="{iconDimensions.h}px"
-  style:max-width="100%"
->
-  {#if item.icon}
-    <CdnImage
-      src={item.icon}
-      alt={item.typeLine || item.name}
-      className="item-icon"
-      loading="lazy"
-    />
-  {/if}
+<div class="item-icon-host" bind:clientWidth={hostWidth}>
+  <div
+    class="item-icon-wrapper mode-{styleMode}"
+    class:is-corrupted={styleMode !== "minimal" &&
+      (item.corrupted || item.doubleCorrupted)}
+    class:is-sanctified={styleMode !== "minimal" && item.sanctified}
+    class:is-fractured={styleMode !== "minimal" && item.fractured}
+    class:is-unidentified={styleMode !== "minimal" && item.identified === false}
+    style:width="{iconDimensions.w}px"
+    style:height="{iconDimensions.h}px"
+    style:aspect-ratio={styleMode === "minimal"
+      ? "1 / 1"
+      : `${itemW} / ${itemH}`}
+  >
+    {#if item.icon}
+      <CdnImage
+        src={item.icon}
+        alt={item.typeLine || item.name}
+        className="item-icon"
+        loading="lazy"
+      />
+    {/if}
 
-  <!-- Minimal mode: image only, never any socket graphics -->
-  {#if styleMode !== "minimal" && hasEquipmentSockets}
-    <ItemSockets
-      sockets={item.sockets ?? []}
-      socketedItems={item.socketedItems ?? []}
-      w={item.w}
-      h={item.h}
-      realm={item.realm === "poe2" ? "poe2" : "poe"}
-      gridWidth={imageWidth}
-    />
-  {/if}
+    <!-- Minimal mode: image only, never any socket graphics -->
+    {#if styleMode !== "minimal" && hasEquipmentSockets}
+      <ItemSockets
+        sockets={item.sockets ?? []}
+        socketedItems={item.socketedItems ?? []}
+        w={itemW}
+        h={itemH}
+        realm={item.realm === "poe2" ? "poe2" : "poe"}
+        cellSize={renderedCellSize}
+      />
+    {/if}
 
-  {#if item.stackSize}
-    <span class="stack-badge" class:maxed={stackMaxed}>
-      {item.stackSize}{styleMode === "full" && item.maxStackSize
-        ? `/${item.maxStackSize}`
-        : ""}
-    </span>
-  {/if}
-  {#if item.iconTierText}
-    <span class="tier-text">{item.iconTierText}</span>
-  {/if}
+    {#if item.stackSize}
+      <span class="stack-badge" class:maxed={stackMaxed}>
+        {item.stackSize}{styleMode === "full" && item.maxStackSize
+          ? `/${item.maxStackSize}`
+          : ""}
+      </span>
+    {/if}
+    {#if item.iconTierText}
+      <span class="tier-text">{item.iconTierText}</span>
+    {/if}
+  </div>
 </div>
 
 <style>
+  .item-icon-host {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+  }
+
   .item-icon-wrapper {
     --_rgb: var(--rc-rgb, 127, 127, 127);
     position: relative;
@@ -154,9 +177,9 @@
     top: 2px;
     left: 5px;
     z-index: 3;
-    font-family: "FontinBold", "FontinRegular", Georgia, serif;
+    font-family: "FontinRegular", Georgia, serif;
     font-size: 0.95rem;
-    font-weight: 700;
+    font-weight: 400;
     line-height: 1.1;
     color: #fff;
     text-shadow:
@@ -179,9 +202,9 @@
     bottom: 2px;
     left: 5px;
     z-index: 3;
-    font-family: "FontinBold", "FontinRegular", Georgia, serif;
+    font-family: "FontinRegular", Georgia, serif;
     font-size: 0.85rem;
-    font-weight: 700;
+    font-weight: 400;
     line-height: 1.1;
     color: #fff;
     text-shadow:

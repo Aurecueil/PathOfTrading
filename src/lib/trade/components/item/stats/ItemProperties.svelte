@@ -18,26 +18,25 @@
   export let realm: string = "poe";
 
   $: isPoe2 = (item.realm || realm || "").toLowerCase() === "poe2";
-  // `properties` and `tamedBeastProperties`: one property per line
   $: lineProps = (item.properties ?? []).filter(isRenderableProp);
   $: tamedProps = (item.tamedBeastProperties ?? []).filter(isRenderableProp);
-  // item level / requirements / weapon / support gem / next level: one wrapping line each
+  $: nextLevelProps = (item.nextLevelRequirements ?? []).filter(
+    isRenderableProp,
+  );
   $: groups = buildInlineGroups(item);
   $: sockets = getInlineSockets(item, effectiveMode);
 
-  $: hasLines = lineProps.length + tamedProps.length > 0;
-
+  $: hasLines =
+    lineProps.length + tamedProps.length + nextLevelProps.length > 0;
   $: hasContent = hasLines || groups.length > 0 || sockets.length > 0;
 
-  // A "separated" group gets a divider above/below, but only when something
-  // else is actually rendered on that side (no dangling dividers at the edges).
   function sepAbove(i: number): boolean {
-    return !!groups[i].separated && (hasLines || i > 0);
+    // Render top separator before the very first group in the block
+    return i === 0 && groups.length > 0;
   }
   function sepBelow(i: number): boolean {
-    return (
-      !!groups[i].separated && (i < groups.length - 1 || sockets.length > 0)
-    );
+    // Render bottom separator after the last group in the block
+    return i === groups.length - 1 && groups.length > 0;
   }
 </script>
 
@@ -59,6 +58,12 @@
     {/each}
 
     {#each tamedProps as p}
+      <div class="prop-line" data-prop-type={p.type}>
+        <PropertyLine prop={p} {isPoe2} />
+      </div>
+    {/each}
+
+    {#each nextLevelProps as p}
       <div class="prop-line" data-prop-type={p.type}>
         <PropertyLine prop={p} {isPoe2} />
       </div>
@@ -108,7 +113,7 @@
     margin-left: -0.3rem;
   }
   .group-label {
-    color: #8b9bb4;
+    color: #7f7f7f;
     font-size: 0.95rem;
     line-height: 1.22;
   }
@@ -116,7 +121,6 @@
     font-size: 0.9rem;
   }
 
-  /* --sep-img / --sep-h are set on .stats-container by ItemStats (frame based) */
   .prop-divider {
     width: 100%;
     flex-shrink: 0;

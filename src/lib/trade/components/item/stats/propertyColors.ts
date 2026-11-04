@@ -15,6 +15,7 @@ const POE1_COLORS: Record<number, string> = {
   6: "rgb(255, 215, 0)", // --colour-lightning-damage
   7: "rgb(208, 32, 144)", // --colour-chaos-damage
   10: "rgb(175, 96, 37)", // --colour-unique
+  15: "#5a5a5a", // --colour-unreachable
   18: "rgb(170, 158, 130)", // --colour-currency
   19: "rgb(255, 255, 255)", // --colour-reward-quantity
   20: "rgb(14, 186, 255)", // --colour-divination
@@ -25,7 +26,6 @@ const POE1_COLORS: Record<number, string> = {
   30: "rgb(219, 152, 50)", // --colour-deepwater-special-area
 };
 const fake: Record<number, string> = {
-  9: "#5a5a5a", // --colour-unreachable
   17: "rgb(180, 180, 255)", // --colour-crafted
   18: "rgb(255, 111, 38)", // --colour-scourged
   19: "rgb(255, 115, 57)", // --colour-crucible-mod

@@ -19,6 +19,7 @@
   $: mode = (prop.displayMode ??
     DisplayMode.NameFollowedByValues) as DisplayMode;
   $: name = (prop.name ?? "").trim();
+  $: isItalic = prop.type === 77;
   $: values = (prop.values ?? []).map(
     ([text, idx]): Val => ({
       text: text ?? "",
@@ -57,7 +58,7 @@
 {#if mode === DisplayMode.Separator}
   <span class="prop-sep" role="separator"></span>
 {:else if mode === DisplayMode.ProgressBar}
-  <span class="prop-item prop-progress">
+  <span class="prop-item prop-progress" class:is-italic={isItalic}>
     {#if prop.icon}<CdnImage
         src={prop.icon}
         alt=""
@@ -66,7 +67,7 @@
     <ProgressBar text={valuesText} {ratio} />
   </span>
 {:else if mode === DisplayMode.ValuesInsertedByIndex}
-  <span class="prop-item wrap-text">
+  <span class="prop-item wrap-text" class:is-italic={isItalic}>
     {#if prop.icon}<CdnImage
         src={prop.icon}
         alt=""
@@ -76,24 +77,24 @@
       >{#each parts as part}{#if part.kind === "text"}<KeywordText
             text={part.text}
             useColorCoding
-          />{:else}<strong style="color: {part.color}"
-            ><KeywordText text={part.text} /></strong
+          />{:else}<span class="val" style="color: {part.color}"
+            ><KeywordText text={part.text} /></span
           >{/if}{/each}</span
     >
     {#if suffix}<span class="suffix">{suffix}</span>{/if}
   </span>
 {:else if mode === DisplayMode.ValuesFollowedByName}
-  <span class="prop-item">
+  <span class="prop-item" class:is-italic={isItalic}>
     {#if prop.icon}<CdnImage
         src={prop.icon}
         alt=""
         className="prop-icon"
       />{/if}
     {#each values as val, vi}
-      <strong style="color: {val.color}"
+      <span class="val" style="color: {val.color}"
         ><KeywordText text={val.text} />{vi < values.length - 1
           ? ","
-          : ""}</strong
+          : ""}</span
       >
     {/each}
     {#if name}
@@ -103,7 +104,7 @@
   </span>
 {:else}
   <!-- NameFollowedByValues (0) and any unknown mode. Empty name => values only. -->
-  <span class="prop-item">
+  <span class="prop-item" class:is-italic={isItalic}>
     {#if prop.icon}<CdnImage
         src={prop.icon}
         alt=""
@@ -118,10 +119,10 @@
       >
     {/if}
     {#each values as val, vi}
-      <strong style="color: {val.color}"
+      <span class="val" style="color: {val.color}"
         ><KeywordText text={val.text} />{vi < values.length - 1
           ? ","
-          : ""}</strong
+          : ""}</span
       >
     {/each}
     {#if suffix}<span class="suffix">{suffix}</span>{/if}
@@ -141,8 +142,12 @@
     text-align: center;
     gap: 0.1rem 0.32rem;
     font-size: 0.95rem;
+    font-weight: 400;
     line-height: 1.22;
-    color: #cbd5e1;
+    color: #7f7f7f;
+  }
+  .prop-item.is-italic {
+    font-style: italic;
   }
   .prop-item.wrap-text {
     white-space: normal;
@@ -152,18 +157,16 @@
     display: flex;
     width: 100%;
   }
-  .label {
-    color: #8b9bb4;
-  }
-  .label.tag-only {
-    color: #94a3b8;
-  }
-  strong {
-    font-weight: 600;
-    color: #f1f5f9;
-  }
+  .label,
+  .label.tag-only,
+  .tpl,
   .suffix {
-    color: #8b95a5;
+    color: #7f7f7f;
+    font-weight: 400;
+  }
+  .val {
+    font-weight: 400;
+    color: #f1f5f9;
   }
   .prop-sep {
     display: block;

@@ -12,6 +12,9 @@
   import ItemListing from "$lib/trade/components/item/ItemListing.svelte";
   import ItemJsonModal from "$lib/trade/components/item/ItemJsonModal.svelte";
   import ItemTitleBar from "$lib/trade/components/item/ItemTitleBar.svelte";
+  import ExtendedStatsRow from "$lib/trade/components/item/stats/ExtendedStatsRow.svelte";
+  import { buildExtendedCells } from "$lib/trade/components/item/stats/propertyGroups";
+  import { separatorCssVars } from "$lib/trade/components/item/separators";
   import { getCategorySymbols } from "$lib/trade/components/item/categorySymbols";
   import { extractSortValue } from "$lib/trade/components/item/sortValue";
   import { convertCurrency, pricingRevision } from "$lib/trade/pricing";
@@ -46,7 +49,7 @@
   export let styleType: number = 1; // 0 | 1
   export let gone: boolean = false;
   $: isGone = gone || data?.gone === true;
-  export let doubleTitle: boolean = true;
+  export let doubleTitle: boolean = false;
   export let onRefresh: ((realId: string) => Promise<void>) | null = null;
   let isRefreshing = false;
 
@@ -54,8 +57,8 @@
     sortvalue: { id: string; value: any };
     gone: { id: string };
   }>();
+
   async function handleRefresh() {
-    // use the id from the fetch result: for live rows `id` can still be the live token
     if (isRefreshing || !onRefresh || !data?.id) return;
     isRefreshing = true;
     travelError = null;
@@ -84,7 +87,6 @@
     return null;
   }
 
-  // {"error":{"code":1,"message":"Resource not found; Item no longer available"}}
   function isItemGoneError(err: any): boolean {
     const o = parseErrorObject(err);
     const code = o?.error?.code ?? o?.code;
@@ -93,6 +95,7 @@
       o?.error?.message ?? o?.message ?? (typeof err === "string" ? err : "");
     return /item no longer available/i.test(String(msg));
   }
+
   let isTraveling = false;
   let isQueued = false;
   let travelError: string | null = null;
@@ -159,8 +162,6 @@
     };
   }
 
-  // Compact is a single-column layout and stays readable far below 520px,
-  // so minimal only kicks in when the row is really narrow.
   const MINIMAL_BELOW = 440;
   const COMPACT_BELOW = 880;
   const HYSTERESIS = 12;
@@ -269,13 +270,16 @@
   }
 
   /* ------------------------------------------------------------------ */
-  /* Rarity & Style Tokens                                              */
+  /* Frame Style, Left Rarity/Frame Tint & Supporter Foil Colors        */
   /* ------------------------------------------------------------------ */
-  $: frameTypeId = (item as any)?.frameTypeId ?? "";
+  $: frameTypeId = String(
+    (item as any)?.frameTypeId ?? (item as any)?.frameType ?? "",
+  );
   $: foilVariation = Number((item as any)?.foilVariation ?? 0);
   $: isPoe2 = (item?.realm || realm || "").toLowerCase() === "poe2";
   $: isStyled = styleType === 1;
 
+  // Overall style depends on frameTypeId
   $: itemStyle = resolveItemStyle(frameTypeId);
   $: isCorruptedItem = !!(item?.corrupted || item?.doubleCorrupted);
   $: isRunic = isRunicFrame(frameTypeId);
@@ -284,15 +288,62 @@
     ? getStyledHeaderBg(frameTypeId, useDoubleTitle, isPoe2)
     : "";
 
-  $: rarityTint = resolveRarityTint(item?.rarity);
+  // Left tint specifically depends on rarity if present, else on frameTypeId/frameType
+  $: rarityTint = item?.rarity
+    ? resolveRarityTint(item.rarity)
+    : resolveRarityTint(frameTypeId);
+
   $: styleVars = styleToCssVars(itemStyle, styleType, {
     corrupted: isCorruptedItem,
     runic: isRunic,
     foilGradient,
     tint: rarityTint,
   });
+
+  $: leftTintOverride = rarityTint
+    ? `--left-tint: ${rarityTint};`
+    : (itemStyle as any)?.leftTint
+      ? `--left-tint: ${(itemStyle as any).leftTint};`
+      : "";
+
+  const FOIL_VARIATION_COLORS: Record<number, [string, string]> = {
+    0: ["#50d890", "#a8ffce"],
+    1: ["#d667ff", "#f0b8ff"],
+    2: ["#4bb8ff", "#aee2ff"],
+    3: ["#ff5252", "#ffb4b4"],
+    4: ["#ffbe42", "#ffe6a3"],
+    5: ["#e2e8f0", "#ffffff"],
+    6: ["#ff7847", "#ffc2a8"],
+  };
+
+  $: foilTitleVars = (() => {
+    if (
+      !foilGradient &&
+      frameTypeId.toLowerCase() !== "foil" &&
+      frameTypeId.toLowerCase() !== "supporter_foil" &&
+      (item as any)?.frameType !== 9
+    ) {
+      return "";
+    }
+    const colorMatches = foilGradient
+      ? foilGradient.match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|hsla?\([^)]+\)/g)
+      : null;
+    const c1 =
+      colorMatches?.[0] ??
+      (FOIL_VARIATION_COLORS[foilVariation] ?? FOIL_VARIATION_COLORS[0])[0];
+    const c2 =
+      colorMatches?.[1] ??
+      colorMatches?.[0] ??
+      (FOIL_VARIATION_COLORS[foilVariation] ?? FOIL_VARIATION_COLORS[0])[1];
+    return `--foil-c1: ${c1}; --foil-c2: ${c2};`;
+  })();
+
+  $: sepVars = separatorCssVars(item?.rarity);
   $: defaultVars = styleToCssVars(DEFAULT_STYLE, 0);
   $: symbols = item ? getCategorySymbols(item, isPoe2) : [];
+
+  $: extendedCells = buildExtendedCells(item?.extended, isPoe2);
+  $: hasExtended = extendedCells.some(Boolean);
 
   /* ------------------------------------------------------------------ */
   /* Travel / Whisper & Error Extraction                                */
@@ -402,13 +453,14 @@
 {:else}
   <div
     class="item-row mode-{resolvedStyle}"
-    style={styleVars}
+    style="{styleVars}; {leftTintOverride} {foilTitleVars} {sepVars}"
     class:style-1={isStyled}
     class:is-gone={gone}
     class:is-live-entry={isLive}
     class:is-tp-visited={tpVisited}
     class:is-corrupted={isCorruptedItem}
-    class:is-foil={!!foilGradient}
+    class:is-foil={!!foilTitleVars}
+    class:is-double-title={useDoubleTitle}
     class:is-unidentified={item.identified === false}
     data-item-id={id}
     bind:clientWidth={rowWidth}
@@ -416,6 +468,7 @@
     {#if resolvedStyle !== "minimal"}
       <div
         class="title-wrap"
+        bind:this={titleWrapEl}
         style:margin-inline={styleType === 1 ? "-1px" : null}
         style:width={styleType === 1 ? "calc(100% + 2px)" : "calc(100% + 1px)"}
       >
@@ -452,6 +505,17 @@
           tileWidth={boxWidth}
         />
       </div>
+
+      <!-- In compact mode, ExtendedStatsRow renders ABOVE col-listing.
+           In full mode, CSS places col-extended on the bottom full-width row below icon/stats/listing. -->
+      {#if resolvedStyle !== "minimal" && hasExtended}
+        <div class="col-extended">
+          <ExtendedStatsRow
+            cells={extendedCells}
+            compact={resolvedStyle === "compact"}
+          />
+        </div>
+      {/if}
 
       <div class="col-listing">
         <ItemListing
@@ -531,6 +595,14 @@
 {/if}
 
 <style>
+  @font-face {
+    font-family: "FontinRegular";
+    src: url("/static/fontin-regular-webfont.woff") format("woff");
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+  }
+
   /* ---------------------------------------------------------------- */
   /* Row shell & Left/Right Gradient Tints                            */
   /* ---------------------------------------------------------------- */
@@ -544,6 +616,8 @@
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
+    font-family: "FontinRegular", Georgia, serif;
+    font-weight: 400;
     background: linear-gradient(
         90deg,
         var(--left-tint),
@@ -559,6 +633,20 @@
       border-color 0.12s ease,
       box-shadow 0.12s ease,
       opacity 0.15s ease;
+  }
+
+  .item-row :global(*) {
+    font-family: "FontinRegular", Georgia, serif;
+  }
+
+  /* No bold text anywhere in row content except minimal title */
+  .row-content:not(.mode-minimal) :global(*) {
+    font-weight: 400 !important;
+  }
+
+  /* Title (both name and baseType) is always bold */
+  .title-wrap :global(*) {
+    font-weight: 700 !important;
   }
 
   .item-row:hover {
@@ -600,6 +688,46 @@
       var(--row-base-bg);
   }
 
+  /* Supporter Foil Title Colors:
+     - 1 line: 1st color of gradient
+     - 2 lines (doubleTitle): 1st color for name (row 1), 2nd color for baseType (row 2) */
+  .item-row.is-foil:not(.is-double-title) .title-wrap :global(*) {
+    color: var(--foil-c1, var(--rc)) !important;
+  }
+  .item-row.is-foil.is-double-title .title-wrap :global(.title-name),
+  .item-row.is-foil.is-double-title .title-wrap :global(.name),
+  .item-row.is-foil.is-double-title .title-wrap :global(.line-1),
+  .item-row.is-foil.is-double-title .title-wrap :global(.row-1),
+  .item-row.is-foil.is-double-title
+    .title-wrap
+    :global(:is(div, span, h1, h2, h3, p):first-of-type),
+  .item-row.is-foil.is-double-title
+    .title-wrap
+    :global(:is(div, span, h1, h2, h3, p):first-of-type *) {
+    color: var(--foil-c1, var(--rc)) !important;
+  }
+  .item-row.is-foil.is-double-title .title-wrap :global(.title-base),
+  .item-row.is-foil.is-double-title .title-wrap :global(.base),
+  .item-row.is-foil.is-double-title .title-wrap :global(.base-type),
+  .item-row.is-foil.is-double-title .title-wrap :global(.line-2),
+  .item-row.is-foil.is-double-title .title-wrap :global(.row-2),
+  .item-row.is-foil.is-double-title
+    .title-wrap
+    :global(:is(div, span, h1, h2, h3, p):nth-of-type(2)),
+  .item-row.is-foil.is-double-title
+    .title-wrap
+    :global(:is(div, span, h1, h2, h3, p):nth-of-type(2) *) {
+    color: var(--foil-c2, var(--rc)) !important;
+  }
+
+  /* Minimal mode foil text colors */
+  .item-row.mode-minimal.is-foil :global(.minimal-stats > :first-child) {
+    color: var(--foil-c1, inherit) !important;
+  }
+  .item-row.mode-minimal.is-foil :global(.minimal-stats > :nth-child(2)) {
+    color: var(--foil-c2, inherit) !important;
+  }
+
   .item-row.is-unidentified {
     box-shadow: inset 0 0 0 1px rgba(210, 0, 0, 0.24);
   }
@@ -618,7 +746,7 @@
   }
 
   /* ---------------------------------------------------------------- */
-  /* Row Content Body & Top Actions                                   */
+  /* Row Content Body & Extended Stats Ordering                       */
   /* ---------------------------------------------------------------- */
   .row-content {
     position: relative;
@@ -629,30 +757,49 @@
 
   .row-content.mode-full {
     --icon-w: 168px;
-    --listing-w: calc(
-      168px + 0.85rem + 1px
-    ); /* panel + padding-left + border */
+    --listing-w: calc(168px + 0.85rem + 1px);
     grid-template-columns: var(--icon-w) minmax(0, 1fr) var(--listing-w);
 
     --row-pad-x: 0.7rem;
     column-gap: 0.85rem;
     row-gap: 0.5rem;
-    padding: 0.65rem var(--row-pad-x) 0.6rem;
+    padding: 0.65rem var(--row-pad-x) 0.5rem;
     align-items: center;
   }
 
-  .row-content.mode-full .col-listing {
-    justify-content: center;
-  }
   .row-content.mode-full .col-icon {
+    grid-column: 1;
+    grid-row: 1;
     justify-content: center;
   }
+  .row-content.mode-full .col-stats {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .row-content.mode-full .col-listing {
+    grid-column: 3;
+    grid-row: 1;
+    justify-content: center;
+  }
+  .row-content.mode-full .col-extended {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    padding-top: 0.35rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
   .row-content.mode-compact {
     --row-pad-x: 0.6rem;
     grid-template-columns: minmax(0, 1fr);
     row-gap: 0.4rem;
     padding: 0.5rem var(--row-pad-x);
     align-items: center;
+  }
+
+  .row-content.mode-compact .col-extended {
+    grid-column: 1 / -1;
+    padding-top: 0.3rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
   }
 
   .row-content.mode-compact .col-listing {
@@ -689,7 +836,7 @@
     border: 1px solid rgba(255, 255, 255, 0.16);
     color: #b8b8b8;
     font-size: 10px;
-    font-weight: 700;
+    font-weight: 400;
     line-height: 1;
     padding: 3px 5px;
     min-height: 18px;
@@ -745,6 +892,11 @@
   .col-stats {
     min-width: 0;
     overflow-wrap: anywhere;
+  }
+
+  .col-extended {
+    width: 100%;
+    min-width: 0;
   }
 
   .col-listing {
@@ -825,7 +977,7 @@
     height: 26px;
     width: 120px;
   }
-  /* dim the content, not the badge */
+
   .item-row.is-gone .title-wrap,
   .item-row.is-gone .row-content {
     opacity: 0.38;
@@ -842,7 +994,7 @@
     transform: translate(-50%, -50%) rotate(-5deg);
     padding: 0.2rem 0.8rem;
     font-size: 0.95rem;
-    font-weight: 700;
+    font-weight: 400;
     letter-spacing: 0.04em;
     white-space: nowrap;
     color: #ff7b7b;
@@ -879,7 +1031,7 @@
     justify-content: center;
     width: 26px;
     height: 26px;
-    padding: 0;
+    padding: 2px 4px;
     border: none;
     background: none;
     color: #b8b8b8;
@@ -907,10 +1059,6 @@
     background-color: currentColor;
     -webkit-mask: url("/static/refresh.svg") center / contain no-repeat;
     mask: url("/static/refresh.svg") center / contain no-repeat;
-  }
-
-  .btn-refresh {
-    padding: 2px 4px;
   }
 
   .btn-refresh.is-refreshing .refresh-icon {
