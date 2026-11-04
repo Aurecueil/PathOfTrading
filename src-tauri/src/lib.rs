@@ -128,6 +128,7 @@ pub fn run() {
             trade::tp::tp_set_items,
             trade::tp::tp_clear_seen,
             trade::tp::tp_set_hotkey,
+            trade::tp::tp_mark_gone,
             project::fetch_prices::fetch_pricing_index,
             project::fetch_prices::fetch_realm_pricing,
         ])

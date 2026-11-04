@@ -16,6 +16,35 @@ const MAX_SEEN: usize = 5000;
 const UI_REVEAL_TIMEOUT: Duration = Duration::from_secs(5);
 const LIVE_WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 
+#[derive(Clone, Serialize)]
+struct TpGone {
+    tile_id: String,
+    item_id: String,
+}
+#[tauri::command]
+pub async fn tp_mark_gone(tp: State<'_, Arc<TpController>>, item_id: String) -> Result<(), String> {
+    tp.index.mark_gone(&item_id);
+    tp.mark_seen(&item_id).await;
+    Ok(())
+}
+/// {"error":{"code":1,"message":"Resource not found; Item no longer available"}}
+fn is_gone_error(err: &str) -> bool {
+    let t = err.trim();
+    if let (Some(s), Some(e)) = (t.find('{'), t.rfind('}')) {
+        if e > s {
+            if let Ok(v) = serde_json::from_str::<Value>(&t[s..=e]) {
+                let code = v
+                    .pointer("/error/code")
+                    .or_else(|| v.get("code"))
+                    .and_then(|c| c.as_i64());
+                if code == Some(1) {
+                    return true;
+                }
+            }
+        }
+    }
+    t.to_lowercase().contains("item no longer available")
+}
 // ===========================================================================
 // Token index (filled by the limiter on every fetch response)
 // ===========================================================================
@@ -49,7 +78,10 @@ fn entry_from_item(item: &Value) -> Option<(String, TpEntry)> {
             .filter(|s| !s.is_empty())
             .map(str::to_string)
     };
-    let entry = if let Some(t) = pick("hideout_token") {
+    let is_gone = item.get("gone").and_then(|g| g.as_bool()).unwrap_or(false);
+    let entry = if is_gone {
+        TpEntry::NoToken
+    } else if let Some(t) = pick("hideout_token") {
         TpEntry::Token {
             token: t,
             hideout: true,
@@ -147,6 +179,13 @@ impl TpIndex {
     pub async fn wait_code(&self, code: &str, timeout: Duration) -> Option<Vec<String>> {
         self.wait_for(timeout, || self.get_code(code)).await
     }
+    pub fn mark_gone(&self, id: &str) {
+        {
+            let mut map = self.entries.lock().unwrap();
+            map.insert(id.to_string(), TpEntry::NoToken);
+        }
+        self.notify.notify_waiters();
+    }
 }
 
 // ===========================================================================
@@ -241,7 +280,17 @@ impl TpController {
             busy: AtomicBool::new(false),
         })
     }
-
+    async fn handle_gone(&self, app: &AppHandle, tile_id: &str, id: &str) {
+        self.index.mark_gone(id);
+        self.mark_seen(id).await;
+        let _ = app.emit(
+            "tp-gone",
+            TpGone {
+                tile_id: tile_id.to_string(),
+                item_id: id.to_string(),
+            },
+        );
+    }
     // ---- live codes (called from live.rs) -------------------------------
 
     pub async fn on_live_code(&self, tile_id: &str, code: &str) {
@@ -379,9 +428,13 @@ impl TpController {
                         },
                         Some(id),
                     );
-                    self.travel(app, a, &token)
-                        .await
-                        .map_err(|e| (e, Some(id.clone())))?;
+                    if let Err(e) = self.travel(app, a, &token).await {
+                        if is_gone_error(&e) {
+                            self.handle_gone(app, &a.tile_id, id).await;
+                            return Err(("Item no longer available".into(), Some(id.clone())));
+                        }
+                        return Err((e, Some(id.clone())));
+                    }
                     self.mark_seen(id).await;
                     return Ok((
                         format!(
@@ -495,9 +548,14 @@ impl TpController {
                     },
                     Some(&first),
                 );
-                self.travel(app, a, &token)
-                    .await
-                    .map_err(|e| (e, Some(first.clone())))?;
+                if let Err(e) = self.travel(app, a, &token).await {
+                    if is_gone_error(&e) {
+                        self.handle_gone(app, &a.tile_id, &first).await;
+                        self.mark_seen(&code_key).await;
+                        return Err(("Item no longer available".to_string(), Some(first.clone())));
+                    }
+                    return Err((e, Some(first.clone())));
+                }
                 self.mark_seen(&first).await;
                 self.mark_seen(&code_key).await;
                 Ok((

@@ -138,6 +138,7 @@
     if (isDestroyed || !tpActive || !tile.searchId || mode === "live") return;
     const ids = orderedEntries
       .filter((e) => !(e.isLive && e.data === null))
+      .filter((e) => !(e.data?.gone || goneIds.has(e.id)))
       .map((e) => e.id);
 
     if (ids.length === 0) return;
@@ -162,6 +163,7 @@
   let tpStatusMessage: string = "";
   let tpActiveItemId: string | null = null;
   let tpVisitedIds: Set<string> = new Set();
+  let goneIds: Set<string> = new Set();
   let tpItemErrors: Map<string, string> = new Map();
   let tpStatusTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -222,7 +224,12 @@
     let cancelled = false;
     let offReveal: UnlistenFn | null = null;
     let offStatus: UnlistenFn | null = null;
+    let offGone: UnlistenFn | null = null;
 
+    listen<{ tile_id: string; item_id: string }>("tp-gone", (e) => {
+      if (e.payload.tile_id !== String(tile.id)) return;
+      markGone(e.payload.item_id, false); // Rust already knows
+    }).then((u) => (cancelled ? u() : (offGone = u)));
     listen<{ tile_id: string; index: number; id: string }>("tp-reveal", (e) => {
       if (e.payload.tile_id !== String(tile.id)) return;
       void revealIndex(e.payload.index, e.payload.id);
@@ -628,7 +635,7 @@
     tpVisitedIds = new Set();
     tpItemErrors = new Map();
     visibleCount = 0;
-
+    goneIds = new Set();
     lastSearchResponse = null;
     searchErrorMsg = null;
 
@@ -826,6 +833,7 @@
           orderedEntries.push(newEntry);
         }
       }
+      noteGone(fetchedResults);
 
       if (mode === "mixed") {
         sortOrderedList();
@@ -934,7 +942,7 @@
         orderedEntries.unshift(extraEntry);
       }
     }
-
+    noteGone(fetchedResults);
     const unusedPlaceholderUids = new Set(
       placeholders
         .filter((p) => !usedPlaceholderUids.has(p.uid))
@@ -1135,7 +1143,66 @@
       }
     }
   }
+  function markGone(id: string, notifyBackend = true) {
+    if (!id || goneIds.has(id)) return;
+    goneIds.add(id);
+    goneIds = goneIds;
+    if (notifyBackend) {
+      invoke("tp_mark_gone", { itemId: id }).catch((err) =>
+        console.error(`[SearchTile ${tile.id}] tp_mark_gone failed:`, err),
+      );
+    }
+    void pushTpItems();
+  }
 
+  function noteGone(results: TradeFetchResult[]) {
+    for (const r of results) {
+      if (r?.id && r.gone) markGone(r.id);
+    }
+  }
+
+  // Row-triggered refresh. `realId` = data.id of the row (never a live token).
+  async function refreshItem(realId: string): Promise<void> {
+    if (isDestroyed || !tile.searchId || !realId) return;
+    const uiId = String(tile.id);
+    const pseudos = extractPseudoStatsFromPayload(activePayload);
+
+    const raw: string | TradeFetchResponse = await invoke("fetch_items", {
+      job: {
+        id: tile.searchId,
+        ids: [realId],
+        min: 1,
+        wait_ms: 0,
+        cache_ok: false,
+        reservation: null,
+        realm: tile.realm,
+        is_token: false,
+        ui_id: uiId,
+        pseudos,
+      },
+      pseudos,
+    });
+    if (isDestroyed) return;
+
+    const parsed: TradeFetchResponse =
+      typeof raw === "string" ? JSON.parse(raw) : raw;
+    const fresh = (parsed?.result ?? []).find(
+      (r): r is TradeFetchResult => !!r && r.id === realId,
+    );
+
+    // requested but not returned = sold / removed
+    if (!fresh) {
+      markGone(realId);
+      return;
+    }
+
+    const entry = itemsMap.get(realId);
+    if (entry) entry.data = fresh;
+    noteGone([fresh]);
+
+    if (mode === "mixed") sortOrderedList();
+    else displayedItems = orderedEntries.slice(0, visibleCount);
+  }
   async function stopLive() {
     try {
       await invoke("stop_live_search", { tileId: String(tile.id) });
@@ -1543,6 +1610,9 @@
               tpVisited={tpVisitedIds.has(itemEntry.id)}
               tpError={tpItemErrors.get(itemEntry.id) ?? null}
               on:sortvalue={handleRowSortValue}
+              gone={goneIds.has(itemEntry.id) || itemEntry.data?.gone === true}
+              onRefresh={refreshItem}
+              on:gone={(e) => markGone(e.detail.id)}
             />
           {/each}
 

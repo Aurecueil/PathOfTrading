@@ -24,6 +24,7 @@
   import { openSettings } from "$lib/settings/settingsState.svelte";
   import { authState } from "$lib/trade/tradeStore";
   import { t } from "$lib/translation/text";
+  import { updaterState, renderMarkdown } from "$lib/update.svelte";
 
   const LOGIN_NOTICE_DELAY_SECS = 5;
 
@@ -50,6 +51,7 @@
       (l: League) => l.realm === workspaceState.activeProjectRealm,
     ),
   );
+
   // "Proceed & Login" is locked for a few seconds each time the notice opens
   $effect(() => {
     if (!loginModalOpen) return;
@@ -91,8 +93,6 @@
     }
   }
 
-  // The backend ends the session when Cloudflare blocks it (refresh or fetch) and sets a
-  // flag, so the popup also appears if the event fired before this component mounted.
   async function checkSessionExpired() {
     try {
       const expired = await invoke<boolean>("consume_session_expired");
@@ -166,6 +166,9 @@
       if (accountMenuOpen) closeAccountMenu();
       if (loginModalOpen) loginModalOpen = false;
       if (sessionExpiredOpen) sessionExpiredOpen = false;
+      if (updaterState.whatsNewModalOpen) {
+        updaterState.whatsNewModalOpen = false;
+      }
     }
   }
 
@@ -182,14 +185,12 @@
     }
   }
 
-  // Regular login: only after the notice timer has run out
   async function confirmLogin() {
     if (proceedCountdown > 0) return;
     loginModalOpen = false;
     await startLogin();
   }
 
-  // Login from the "session ended" popup: skips the regular notice
   async function reloginFromExpired() {
     sessionExpiredOpen = false;
     await startLogin();
@@ -469,7 +470,6 @@
   </div>
 
   <nav class="tabs">
-    <!-- .filter is a safety net in case an old settings tab is restored from a saved session -->
     {#each openTabs.filter((t) => !t.isSettings) as tab (tab.id)}
       <div
         class="tab"
@@ -500,51 +500,141 @@
     {/each}
   </nav>
 
-  <!-- Top-Right Account Button -->
-  <div
-    class="menu-item-container account-container"
-    bind:this={accountContainerEl}
-  >
-    {#if !isLoggedIn}
-      <button
-        type="button"
-        class="menu-btn account-btn"
-        onclick={handleLoginClick}
-      >
-        Log In
-      </button>
-    {:else}
-      <button
-        type="button"
-        class="menu-btn account-btn logged-in"
-        class:active={accountMenuOpen}
-        aria-expanded={accountMenuOpen}
-        onclick={() => {
-          accountMenuOpen = !accountMenuOpen;
-          if (accountMenuOpen) closeFileMenu();
-        }}
-      >
-        <span>{accountName || "Logged In"}</span>
-        <span class="chevron">{accountMenuOpen ? "▴" : "▾"}</span>
-      </button>
-
-      {#if accountMenuOpen}
-        <div class="dropdown-menu account-dropdown" role="presentation">
-          <button
-            type="button"
-            class="dropdown-item logout-item"
-            onclick={handleLogoutClick}
-          >
-            <span>Log Out</span>
-          </button>
+  <!-- Right Side Controls: Update / What's New (Left of Login) + Account Button -->
+  <div class="right-controls">
+    {#if updaterState.updateAvailable}
+      {#if updaterState.isUpdating}
+        <div
+          class="update-progress-pill"
+          title={updaterState.updateDownloaded
+            ? "Restarting..."
+            : `Downloading v${updaterState.updateVersion}: ${updaterState.updateProgress}%`}
+        >
+          <div
+            class="update-progress-fill"
+            style="width: {updaterState.updateProgress}%"
+          ></div>
+          <span class="update-progress-label">
+            {updaterState.updateDownloaded
+              ? "Restarting..."
+              : `Downloading ${updaterState.updateProgress}%`}
+          </span>
         </div>
+      {:else}
+        <button
+          type="button"
+          class="menu-btn update-download-btn"
+          onclick={() => updaterState.downloadAndInstallUpdate()}
+          title={`Download Update v${updaterState.updateVersion}`}
+        >
+          Download v{updaterState.updateVersion}
+        </button>
       {/if}
+    {:else if updaterState.whatsNew}
+      <button
+        type="button"
+        class="menu-btn whats-new-btn"
+        class:active={updaterState.whatsNewModalOpen}
+        onclick={() => (updaterState.whatsNewModalOpen = true)}
+      >
+        What's New
+      </button>
     {/if}
+
+    <!-- Top-Right Account Button -->
+    <div
+      class="menu-item-container account-container"
+      bind:this={accountContainerEl}
+    >
+      {#if !isLoggedIn}
+        <button
+          type="button"
+          class="menu-btn account-btn"
+          onclick={handleLoginClick}
+        >
+          Log In
+        </button>
+      {:else}
+        <button
+          type="button"
+          class="menu-btn account-btn logged-in"
+          class:active={accountMenuOpen}
+          aria-expanded={accountMenuOpen}
+          onclick={() => {
+            accountMenuOpen = !accountMenuOpen;
+            if (accountMenuOpen) closeFileMenu();
+          }}
+        >
+          <span>{accountName || "Logged In"}</span>
+          <span class="chevron">{accountMenuOpen ? "▴" : "▾"}</span>
+        </button>
+
+        {#if accountMenuOpen}
+          <div class="dropdown-menu account-dropdown" role="presentation">
+            <button
+              type="button"
+              class="dropdown-item logout-item"
+              onclick={handleLogoutClick}
+            >
+              <span>Log Out</span>
+            </button>
+          </div>
+        {/if}
+      {/if}
+    </div>
   </div>
 </div>
 
 <!-- Settings overlay (opened via File > Settings) -->
 <SettingsOverlay />
+
+<!-- What's New Modal -->
+{#if updaterState.whatsNewModalOpen && updaterState.whatsNew}
+  <div
+    class="modal-backdrop"
+    role="presentation"
+    onclick={() => (updaterState.whatsNewModalOpen = false)}
+  >
+    <div
+      class="modal-card whats-new-card"
+      role="dialog"
+      aria-label="What's New"
+      onclick={(e) => e.stopPropagation()}
+    >
+      <div class="modal-header">
+        <h3 class="modal-title">
+          version {updaterState.whatsNew.version}
+        </h3>
+        <button
+          type="button"
+          class="modal-close-btn"
+          onclick={() => (updaterState.whatsNewModalOpen = false)}
+          title="Close (Esc)"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div class="modal-content markdown-notes">
+        {#if updaterState.whatsNew.body}
+          {@html renderMarkdown(updaterState.whatsNew.body)}
+        {:else}
+          <p class="small-text">No patch notes provided for this version.</p>
+        {/if}
+      </div>
+
+      <div class="modal-actions">
+        <button
+          type="button"
+          class="btn-primary"
+          onclick={() => (updaterState.whatsNewModalOpen = false)}
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <!-- Notice Modal for Login -->
 {#if loginModalOpen}
@@ -702,8 +792,12 @@
     flex-shrink: 0;
   }
 
-  .account-container {
+  .right-controls {
     margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
   }
 
   /* Base Trigger Buttons & Tabs */
@@ -741,6 +835,51 @@
     border-color: #ffffff;
     color: #ffffff;
     font-weight: normal;
+  }
+
+  /* Green Download Button */
+  .update-download-btn {
+    background-color: #0d2812;
+    border-color: #38a149;
+    color: #7ee787;
+  }
+
+  .update-download-btn:hover {
+    background-color: #153e1c;
+    border-color: #6fdd8b;
+    color: #ffffff;
+  }
+
+  /* Inline Progress Bar replacing Download Button */
+  .update-progress-pill {
+    position: relative;
+    height: 22px;
+    min-width: 130px;
+    background: #050505;
+    border: 1px solid #38a149;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 8px;
+    overflow: hidden;
+  }
+
+  .update-progress-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    background: #1f632b;
+    transition: width 0.15s ease;
+    z-index: 0;
+  }
+
+  .update-progress-label {
+    position: relative;
+    z-index: 1;
+    font-size: 11px;
+    color: #ffffff;
+    white-space: nowrap;
   }
 
   .tabs {
@@ -804,9 +943,6 @@
     color: #ff5555;
   }
 
-  /* --------------------------------------------------------------------------
-     Expanded Child Dropdown Menu (1px Solid White Border)
-     -------------------------------------------------------------------------- */
   .dropdown-menu {
     position: absolute;
     top: 100%;
@@ -828,7 +964,6 @@
     min-width: 160px;
   }
 
-  /* Child Option Items */
   .dropdown-item {
     font-family: "Fontin", monospace, sans-serif !important;
     display: flex;
@@ -945,7 +1080,7 @@
     color: #ff6666 !important;
   }
 
-  /* Notice Modal Styles matching WorkspaceModals */
+  /* Modals */
   .modal-backdrop {
     position: fixed;
     inset: 0;
@@ -969,6 +1104,11 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.9);
     color: #d3d3d3;
     box-sizing: border-box;
+  }
+
+  .whats-new-card {
+    width: 480px;
+    max-height: 80vh;
   }
 
   .modal-header {
@@ -1016,6 +1156,36 @@
     font-size: 12px;
     color: #d3d3d3;
     line-height: 1.4;
+  }
+
+  .markdown-notes {
+    max-height: 320px;
+    overflow-y: auto;
+    padding-right: 4px;
+    user-select: text;
+  }
+
+  .markdown-notes :global(h1),
+  .markdown-notes :global(h2),
+  .markdown-notes :global(h3) {
+    color: #ffffff;
+    margin: 6px 0 2px 0;
+    font-size: 13px;
+    border-bottom: 1px solid #222222;
+    padding-bottom: 2px;
+  }
+
+  .markdown-notes :global(ul) {
+    margin: 4px 0;
+    padding-left: 18px;
+  }
+
+  .markdown-notes :global(code) {
+    background: #151515;
+    border: 1px solid #333333;
+    padding: 1px 4px;
+    font-size: 11px;
+    color: #e0e0e0;
   }
 
   .modal-content h4 {

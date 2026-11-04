@@ -25,71 +25,9 @@
   import FooterBar from "$lib/layout/FooterBar.svelte";
   import type { Snippet } from "svelte";
   import type { League } from "$lib/types/leagues";
+  import { updaterState } from "$lib/update.svelte";
 
   let { children }: { children: Snippet } = $props();
-
-  // --- Auto-Updater State ---
-  let updateAvailable = $state(false);
-  let updateVersion = $state("");
-  let updateBody = $state("");
-  let isUpdating = $state(false);
-  let updateProgress = $state(0);
-  let updateError = $state("");
-  let updateDownloaded = $state(false);
-  let updaterModule: any = null;
-
-  async function checkForUpdates() {
-    try {
-      updaterModule = await import("@tauri-apps/plugin-updater");
-      const update = await updaterModule.check();
-
-      if (update) {
-        updateAvailable = true;
-        updateVersion = update.version;
-        updateBody = update.body || "";
-      }
-    } catch (e) {
-      console.error("Failed to check for updates:", e);
-    }
-  }
-
-  async function downloadAndInstallUpdate() {
-    if (!updaterModule) return;
-    try {
-      isUpdating = true;
-      updateError = "";
-      const update = await updaterModule.check();
-      if (!update) return;
-
-      let downloaded = 0;
-      let contentLength = 0;
-
-      await update.downloadAndInstall((event: any) => {
-        switch (event.event) {
-          case "Started":
-            contentLength = event.data.contentLength || 0;
-            break;
-          case "Progress":
-            downloaded += event.data.chunkLength;
-            if (contentLength > 0) {
-              updateProgress = Math.round((downloaded / contentLength) * 100);
-            }
-            break;
-          case "Finished":
-            updateDownloaded = true;
-            break;
-        }
-      });
-
-      const { relaunch } = await import("@tauri-apps/plugin-process");
-      await relaunch();
-    } catch (e: any) {
-      console.error("Failed to install update:", e);
-      updateError = e?.message || "Failed to install update.";
-      isUpdating = false;
-    }
-  }
-  // --------------------------
 
   $effect(() => {
     const handleContextMenu = (e: MouseEvent) => {
@@ -108,8 +46,8 @@
     Boolean($page.url.pathname.startsWith("/projects/")),
   );
 
-  const poe1PcLeagues = ($leaguesAll || []).filter(
-    (l: League) => l.realm === "pc",
+  const poe1PcLeagues = $derived(
+    ($leaguesAll || []).filter((l: League) => l.realm === "pc"),
   );
 
   onMount(async () => {
@@ -140,7 +78,7 @@
       // Browser fallback
     }
 
-    checkForUpdates();
+    updaterState.checkForUpdates();
   });
 
   onDestroy(() => {
@@ -196,43 +134,6 @@
   <main class="content">
     {@render children()}
   </main>
-
-  <!-- Update Available Popover Box -->
-  {#if updateAvailable}
-    <div class="update-banner">
-      <div class="update-header">
-        <span>Update Available ({updateVersion})</span>
-      </div>
-      <div class="update-info">
-        {#if updateBody}
-          <div class="update-notes">{updateBody}</div>
-        {/if}
-        {#if isUpdating}
-          <div class="progress-bar-container">
-            <div class="progress-bar" style="width: {updateProgress}%"></div>
-          </div>
-          <span class="progress-text">
-            {updateDownloaded
-              ? "Restarting..."
-              : `Downloading... ${updateProgress}%`}
-          </span>
-        {/if}
-        {#if updateError}
-          <span class="error-text">{updateError}</span>
-        {/if}
-      </div>
-      <div class="update-actions">
-        {#if !isUpdating}
-          <button class="pob-button" onclick={downloadAndInstallUpdate}
-            >Update Now</button
-          >
-          <button class="pob-button" onclick={() => (updateAvailable = false)}
-            >Later</button
-          >
-        {/if}
-      </div>
-    </div>
-  {/if}
 
   <WorkspaceModals />
   <FooterBar />
@@ -307,49 +208,123 @@
     user-select: text;
   }
 
-  /* --- Update Banner Matching Overall Styling --- */
-  .update-banner {
-    position: absolute;
-    bottom: 35px;
-    right: 15px;
-    z-index: 2000;
-    width: 320px;
+  /* --- Centered Update Modal & Grayed Out Backdrop --- */
+  .update-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+
+  .update-modal {
+    width: 100%;
+    max-width: 480px;
+    max-height: 80vh;
     background: #050505;
     border: 1px solid #777777;
     border-radius: 0px;
-    padding: 10px 12px;
+    padding: 14px 16px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.9);
-  }
-
-  .update-banner:hover {
-    border-color: #ffffff;
+    gap: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.95);
   }
 
   .update-header {
-    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 14px;
     font-weight: bold;
     color: #ffffff;
     border-bottom: 1px solid #333333;
-    padding-bottom: 4px;
+    padding-bottom: 8px;
   }
 
-  .update-info {
+  .close-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: #888888;
+    font-size: 13px;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+  }
+
+  .close-btn:hover {
+    color: #ffffff;
+    border-color: #555555;
+    background: #111111;
+  }
+
+  .update-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: hidden;
+  }
+
+  .markdown-notes {
+    color: #d3d3d3;
+    font-size: 12px;
+    max-height: 280px;
+    overflow-y: auto;
+    line-height: 1.45;
+    padding-right: 4px;
+    user-select: text;
+  }
+
+  .empty-notes {
+    color: #777777;
+    font-style: italic;
+  }
+
+  .markdown-notes :global(h1),
+  .markdown-notes :global(h2),
+  .markdown-notes :global(h3) {
+    color: #ffffff;
+    margin: 8px 0 4px 0;
+    font-size: 13px;
+    border-bottom: 1px solid #222222;
+    padding-bottom: 2px;
+  }
+
+  .markdown-notes :global(h1:first-child),
+  .markdown-notes :global(h2:first-child),
+  .markdown-notes :global(h3:first-child) {
+    margin-top: 0;
+  }
+
+  .markdown-notes :global(ul) {
+    margin: 4px 0;
+    padding-left: 18px;
+  }
+
+  .markdown-notes :global(li) {
+    margin-bottom: 3px;
+  }
+
+  .markdown-notes :global(code) {
+    background: #151515;
+    border: 1px solid #333333;
+    padding: 1px 4px;
+    font-size: 11px;
+    color: #e0e0e0;
+  }
+
+  .update-progress-section {
     display: flex;
     flex-direction: column;
     gap: 4px;
-  }
-
-  .update-notes {
-    margin: 0;
-    color: #d3d3d3;
-    font-size: 12px;
-    max-height: 80px;
-    overflow-y: auto;
-    white-space: pre-wrap;
-    line-height: 1.3;
   }
 
   .progress-bar-container {
@@ -359,7 +334,6 @@
     height: 8px;
     width: 100%;
     overflow: hidden;
-    margin-top: 4px;
   }
 
   .progress-bar {
@@ -381,21 +355,21 @@
   .update-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 6px;
-    margin-top: 2px;
+    gap: 8px;
+    border-top: 1px solid #222222;
+    padding-top: 10px;
   }
 
-  /* Reusing your .pob-button style rules */
   .pob-button {
     font-family: "Fontin", monospace, sans-serif;
     background: #000000;
     border: 1px solid #7f7f7f;
     border-radius: 0px;
     color: #ffffff;
-    height: 24px;
+    height: 26px;
     line-height: 1;
-    padding: 0 10px;
-    font-size: 11px;
+    padding: 0 14px;
+    font-size: 12px;
     cursor: pointer;
     white-space: nowrap;
     text-align: center;
@@ -404,9 +378,14 @@
       border-color 0.1s ease;
   }
 
+  .pob-button.primary-button {
+    border-color: #b5b5b5;
+    background: #141414;
+  }
+
   .pob-button:hover,
   .pob-button:focus {
-    background: #111111;
+    background: #1f1f1f;
     border-color: #ffffff;
     color: #ffffff;
     outline: none;

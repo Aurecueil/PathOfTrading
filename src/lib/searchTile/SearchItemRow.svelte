@@ -46,11 +46,52 @@
   export let gone: boolean = false;
   $: isGone = gone || data?.gone === true;
   export let doubleTitle: boolean = false;
+  export let onRefresh: ((realId: string) => Promise<void>) | null = null;
+  let isRefreshing = false;
 
   const dispatch = createEventDispatcher<{
     sortvalue: { id: string; value: any };
+    gone: { id: string };
   }>();
+  async function handleRefresh() {
+    // use the id from the fetch result: for live rows `id` can still be the live token
+    if (isRefreshing || !onRefresh || !data?.id) return;
+    isRefreshing = true;
+    travelError = null;
+    try {
+      await onRefresh(data.id);
+    } catch (err) {
+      console.error("Failed to refresh item:", err);
+    } finally {
+      isRefreshing = false;
+    }
+  }
 
+  function parseErrorObject(err: any): any | null {
+    if (err && typeof err === "object") return err;
+    if (typeof err === "string") {
+      const s = err.indexOf("{");
+      const e = err.lastIndexOf("}");
+      if (s !== -1 && e > s) {
+        try {
+          return JSON.parse(err.slice(s, e + 1));
+        } catch {
+          /* not json */
+        }
+      }
+    }
+    return null;
+  }
+
+  // {"error":{"code":1,"message":"Resource not found; Item no longer available"}}
+  function isItemGoneError(err: any): boolean {
+    const o = parseErrorObject(err);
+    const code = o?.error?.code ?? o?.code;
+    if (code === 1) return true;
+    const msg =
+      o?.error?.message ?? o?.message ?? (typeof err === "string" ? err : "");
+    return /item no longer available/i.test(String(msg));
+  }
   let isTraveling = false;
   let isQueued = false;
   let travelError: string | null = null;
@@ -119,7 +160,7 @@
 
   // Compact is a single-column layout and stays readable far below 520px,
   // so minimal only kicks in when the row is really narrow.
-  const MINIMAL_BELOW = 480;
+  const MINIMAL_BELOW = 440;
   const COMPACT_BELOW = 880;
   const HYSTERESIS = 12;
   let prevStyle: ResolvedDisplayStyle = "full";
@@ -306,7 +347,13 @@
         searchId,
       });
     } catch (err: any) {
-      travelError = parseTravelError(err);
+      if (isItemGoneError(err)) {
+        gone = true;
+        travelError = null;
+        dispatch("gone", { id: data?.id ?? id });
+      } else {
+        travelError = parseTravelError(err);
+      }
     } finally {
       isTraveling = false;
     }
@@ -323,6 +370,7 @@
     {#if isGone}
       <div class="gone-badge" role="status">No longer available</div>
     {/if}
+
     {#if resolvedStyle !== "minimal"}
       <div class="skel-title-bar">
         <div class="skel-line title"></div>
@@ -420,6 +468,19 @@
       </div>
 
       {#if resolvedStyle !== "minimal"}
+        {#if onRefresh && data}
+          <div class="top-actions-left">
+            <button
+              type="button"
+              class="btn-refresh"
+              class:is-refreshing={isRefreshing}
+              disabled={isRefreshing}
+              on:click|stopPropagation={handleRefresh}
+            >
+              <span class="refresh-icon"></span>
+            </button>
+          </div>
+        {/if}
         <div class="top-actions">
           {#if item.extended?.text}
             <button
@@ -800,6 +861,68 @@
     .skel-icon,
     .skel-line {
       animation: none;
+    }
+  }
+  .top-actions-left {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    z-index: 15;
+    display: flex;
+  }
+  .btn-refresh {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: #b8b8b8;
+    opacity: 0.4;
+    cursor: pointer;
+    transition:
+      opacity 0.12s ease,
+      color 0.12s ease;
+  }
+  .item-row:hover .btn-refresh {
+    opacity: 0.72;
+  }
+  .btn-refresh:hover:not(:disabled),
+  .btn-refresh:focus-visible {
+    opacity: 1;
+    color: #fff;
+    outline: none;
+  }
+  .btn-refresh:disabled {
+    cursor: default;
+  }
+  .refresh-icon {
+    width: 26px;
+    height: 26px;
+    background-color: currentColor;
+    -webkit-mask: url("/static/refresh.svg") center / contain no-repeat;
+    mask: url("/static/refresh.svg") center / contain no-repeat;
+  }
+
+  .btn-refresh {
+    padding: 2px 4px;
+  }
+
+  .btn-refresh.is-refreshing .refresh-icon {
+    animation: refresh-spin 1s linear infinite;
+  }
+
+  @keyframes refresh-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .btn-refresh.is-refreshing .refresh-icon {
+      animation-duration: 3s;
     }
   }
 </style>
