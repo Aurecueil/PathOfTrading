@@ -248,6 +248,7 @@ export interface GemTabPage {
   skillName?: string;
   properties?: ItemProperty[];
   stats?: string[];
+  description?: string;
 }
 export interface GemTab {
   name: string;

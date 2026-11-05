@@ -19,7 +19,7 @@
   export let convertedPrice: number | null = null;
   export let convertedCurrency: string = "chaos";
   export let isVisited: boolean = false;
-
+  export let disabled = false;
   function formatConverted(v: number): string {
     const digits = v < 1 ? 3 : v < 10 ? 2 : v < 100 ? 1 : 0;
     return Number(v.toFixed(digits)).toLocaleString();
@@ -128,7 +128,8 @@
       <button
         type="button"
         class="btn-icon-travel"
-        disabled={isTraveling || isQueued}
+        disabled={isTraveling || isQueued || disabled}
+        aria-disabled={disabled}
         aria-label={hasWhisperToken ? "Whisper Player" : "Travel to hideout"}
         on:click|stopPropagation={onTravel}
       >

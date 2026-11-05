@@ -65,7 +65,9 @@ export function parseKeywordSegments(text: string): KeywordSegment[] {
 
   return segments;
 }
-
+export function getBaseTypeLabel(item: Item): string {
+  return item.hybrid?.baseTypeName || item.baseType || item.typeLine || "";
+}
 export function cleanBracketText(text: string): string {
   if (!text) return "";
   return text.replace(/\[([^\]]+)\]/g, (full, inner: string) => {

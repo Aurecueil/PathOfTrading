@@ -27,7 +27,10 @@
     resolveItemStyle,
     styleToCssVars,
     resolveRarityTint,
+    buildItemVisuals,
   } from "$lib/trade/components/item/itemStyles";
+  import "$lib/trade/components/item/foilTitle.css";
+  import { getBaseTypeLabel } from "$lib/trade/components/item/stats/statsUtils";
 
   export let displayCurrency: string = "chaos";
   export let displayOptions: Partial<TileDisplayOptions> | null = null;
@@ -49,7 +52,7 @@
   export let styleType: number = 1; // 0 | 1
   export let gone: boolean = false;
   $: isGone = gone || data?.gone === true;
-  export let doubleTitle: boolean = false;
+  export let doubleTitle: boolean = true;
   export let onRefresh: ((realId: string) => Promise<void>) | null = null;
   let isRefreshing = false;
 
@@ -196,7 +199,7 @@
   $: titleBase = item
     ? isMercenaryWarrant && mercenaryName
       ? ""
-      : item.baseType || item.typeLine || ""
+      : getBaseTypeLabel(item)
     : "";
   $: fullItemTitle = [titleName, titleBase].filter(Boolean).join(" ");
 
@@ -272,77 +275,15 @@
   /* ------------------------------------------------------------------ */
   /* Frame Style, Left Rarity/Frame Tint & Supporter Foil Colors        */
   /* ------------------------------------------------------------------ */
-  $: frameTypeId = String(
-    (item as any)?.frameTypeId ?? (item as any)?.frameType ?? "",
-  );
-  $: foilVariation = Number((item as any)?.foilVariation ?? 0);
-  $: isPoe2 = (item?.realm || realm || "").toLowerCase() === "poe2";
+
   $: isStyled = styleType === 1;
-
-  // Overall style depends on frameTypeId
-  $: itemStyle = resolveItemStyle(frameTypeId);
-  $: isCorruptedItem = !!(item?.corrupted || item?.doubleCorrupted);
-  $: isRunic = isRunicFrame(frameTypeId);
-  $: foilGradient = getFoilGradient(frameTypeId, foilVariation);
-  $: styledHeaderBg = isStyled
-    ? getStyledHeaderBg(frameTypeId, useDoubleTitle, isPoe2)
-    : "";
-
-  // Left tint specifically depends on rarity if present, else on frameTypeId/frameType
-  $: rarityTint = item?.rarity
-    ? resolveRarityTint(item.rarity)
-    : resolveRarityTint(frameTypeId);
-
-  $: styleVars = styleToCssVars(itemStyle, styleType, {
-    corrupted: isCorruptedItem,
-    runic: isRunic,
-    foilGradient,
-    tint: rarityTint,
-  });
-
-  $: leftTintOverride = rarityTint
-    ? `--left-tint: ${rarityTint};`
-    : (itemStyle as any)?.leftTint
-      ? `--left-tint: ${(itemStyle as any).leftTint};`
-      : "";
-
-  const FOIL_VARIATION_COLORS: Record<number, [string, string]> = {
-    0: ["#50d890", "#a8ffce"],
-    1: ["#d667ff", "#f0b8ff"],
-    2: ["#4bb8ff", "#aee2ff"],
-    3: ["#ff5252", "#ffb4b4"],
-    4: ["#ffbe42", "#ffe6a3"],
-    5: ["#e2e8f0", "#ffffff"],
-    6: ["#ff7847", "#ffc2a8"],
-  };
-
-  $: foilTitleVars = (() => {
-    if (
-      !foilGradient &&
-      frameTypeId.toLowerCase() !== "foil" &&
-      frameTypeId.toLowerCase() !== "supporter_foil" &&
-      (item as any)?.frameType !== 9
-    ) {
-      return "";
-    }
-    const colorMatches = foilGradient
-      ? foilGradient.match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|hsla?\([^)]+\)/g)
-      : null;
-    const c1 =
-      colorMatches?.[0] ??
-      (FOIL_VARIATION_COLORS[foilVariation] ?? FOIL_VARIATION_COLORS[0])[0];
-    const c2 =
-      colorMatches?.[1] ??
-      colorMatches?.[0] ??
-      (FOIL_VARIATION_COLORS[foilVariation] ?? FOIL_VARIATION_COLORS[0])[1];
-    return `--foil-c1: ${c1}; --foil-c2: ${c2};`;
-  })();
+  $: visuals = buildItemVisuals(item, realm, styleType, useDoubleTitle);
+  $: styledHeaderBg = isStyled ? visuals.headerBg : "";
+  $: symbols = item ? getCategorySymbols(item, visuals.isPoe2) : [];
+  $: extendedCells = buildExtendedCells(item?.extended, visuals.isPoe2);
 
   $: sepVars = separatorCssVars(item?.rarity);
   $: defaultVars = styleToCssVars(DEFAULT_STYLE, 0);
-  $: symbols = item ? getCategorySymbols(item, isPoe2) : [];
-
-  $: extendedCells = buildExtendedCells(item?.extended, isPoe2);
   $: hasExtended = extendedCells.some(Boolean);
 
   /* ------------------------------------------------------------------ */
@@ -384,7 +325,7 @@
   }
 
   async function handleTravel() {
-    if (!listing || isTraveling) return;
+    if (!listing || isTraveling || isGone) return;
     const token = listing.hideout_token ?? listing.whisper_token;
     if (!token) {
       travelError = "No token";
@@ -453,18 +394,21 @@
 {:else}
   <div
     class="item-row mode-{resolvedStyle}"
-    style="{styleVars}; {leftTintOverride} {foilTitleVars} {sepVars}"
+    style="{visuals.styleVars}; {visuals.foilTitleVars} {sepVars}"
     class:style-1={isStyled}
-    class:is-gone={gone}
+    class:is-gone={isGone}
     class:is-live-entry={isLive}
     class:is-tp-visited={tpVisited}
-    class:is-corrupted={isCorruptedItem}
-    class:is-foil={!!foilTitleVars}
+    class:is-corrupted={visuals.isCorrupted}
+    class:is-foil={!!visuals.foilTitleVars}
     class:is-double-title={useDoubleTitle}
     class:is-unidentified={item.identified === false}
     data-item-id={id}
     bind:clientWidth={rowWidth}
   >
+    {#if isGone}<div class="gone-badge" role="status">
+        No longer available
+      </div>{/if}
     {#if resolvedStyle !== "minimal"}
       <div
         class="title-wrap"
@@ -477,14 +421,23 @@
           baseType={titleBase}
           double={useDoubleTitle}
           {isStyled}
-          hasOverlay={!!foilGradient}
-          {symbols}
+          hasOverlay={!!visuals.foilGradient}
           {styledHeaderBg}
+          {symbols}
         />
       </div>
     {/if}
 
     <div class="row-content mode-{resolvedStyle}">
+      {#if tpVisited}
+        <span
+          class="visited-mark"
+          class:has-refresh={resolvedStyle !== "minimal" && !!onRefresh}
+          role="img"
+          aria-label="Visited"
+          title="Visited"
+        ></span>
+      {/if}
       {#if resolvedStyle !== "compact"}
         <div class="col-icon">
           <ItemIcon item={displayItem ?? item} styleMode={resolvedStyle} />
@@ -531,6 +484,7 @@
           {searchId}
           styleMode={resolvedStyle}
           onTravel={handleTravel}
+          disabled={isGone}
         />
       </div>
 
@@ -642,11 +596,6 @@
   /* No bold text anywhere in row content except minimal title */
   .row-content:not(.mode-minimal) :global(*) {
     font-weight: 400 !important;
-  }
-
-  /* Title (both name and baseType) is always bold */
-  .title-wrap :global(*) {
-    font-weight: 700 !important;
   }
 
   .item-row:hover {
@@ -1064,7 +1013,22 @@
   .btn-refresh.is-refreshing .refresh-icon {
     animation: refresh-spin 1s linear infinite;
   }
-
+  .visited-mark {
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    z-index: 15;
+    width: 14px;
+    height: 14px;
+    pointer-events: none;
+    background-color: #4ae63a;
+    opacity: 0.8;
+    -webkit-mask: url("/static/check.svg") center / contain no-repeat;
+    mask: url("/static/check.svg") center / contain no-repeat;
+  }
+  .visited-mark.has-refresh {
+    left: 32px; /* sits right of the 26px refresh button */
+  }
   @keyframes refresh-spin {
     to {
       transform: rotate(360deg);

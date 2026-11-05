@@ -1,5 +1,6 @@
 <!-- src/lib/trade/components/item/ItemStats.svelte -->
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import type { Item, ItemMod, ItemProperty } from "$lib/types/tradeItem";
   import type {
     ResolvedDisplayStyle,
@@ -30,10 +31,9 @@
   import PropertyLine from "./stats/PropertyLine.svelte";
   import { isRenderableProp } from "./stats/propertyGroups";
   import CdnImage from "./CdnImage.svelte";
+  import { createTooltipPin } from "./tooltipPin";
+  import { getBaseTypeLabel } from "$lib/trade/components/item/stats/statsUtils";
 
-  $: additionalProps = (item.additionalProperties ?? []).filter(
-    isRenderableProp,
-  );
   export let displayOptions: Partial<TileDisplayOptions> | null = null;
   export let item: Item;
   export let realm: string = "poe";
@@ -65,15 +65,34 @@
       } as ItemProperty)
     : null;
 
+  $: lastProps = [
+    ...(item.properties ?? []),
+    ...(item.additionalProperties ?? []),
+  ].filter((p) => p.type === 20 && isRenderableProp(p));
+
+  $: additionalProps = (item.additionalProperties ?? []).filter(
+    (p) => p.type !== 20 && isRenderableProp(p),
+  );
+
+  // ItemProperties must not render type 20 itself
+  $: propsItem = (item.properties ?? []).some((p) => p.type === 20)
+    ? { ...item, properties: item.properties!.filter((p) => p.type !== 20) }
+    : item;
+
+  $: hasProgressBlock = !!incubated || !!enshrouded || lastProps.length > 0;
+
+  /* Item level + requirements (Requires: ...) */
+
   /* Progress bars */
   $: incubated = item.incubatedItem ?? null;
   $: enshrouded = item.enshrouded ?? null;
-  $: hasProgressBlock = !!incubated || !!enshrouded;
   const ratio = (p: number, t: number) => (t > 0 ? p / t : 0);
 
-  /* Gem tabs (interactive, so not in portaled tooltips - those keep tooltipTexts) */
+  /* Gem tabs (interactive, so not in portaled tooltips) */
   $: gemTabs =
-    !isTooltip && show.displayExplicitMods ? (item.gemTabs ?? []) : [];
+    !isTooltip && show.displayExplicitMods
+      ? (item.gemTabs ?? []).filter((t) => (t.pages?.length ?? 0) > 0)
+      : [];
 
   /* Logbook / Ultimatum */
   $: logbookMods = item.logbookMods ?? [];
@@ -85,8 +104,8 @@
     if (!hy?.baseTypeName) return null;
     return {
       name: "",
-      typeLine: hy.baseTypeName,
-      baseType: hy.baseTypeName,
+      typeLine: item.typeLine,
+      baseType: item.typeLine,
       ilvl: 0,
       identified: true,
       verified: true,
@@ -121,9 +140,7 @@
     : "";
 
   $: minimalBase = (() => {
-    const b = cleanBracketText(
-      mercenaryName || item.typeLine || item.baseType || "",
-    ).trim();
+    const b = cleanBracketText(mercenaryName || getBaseTypeLabel(item)).trim();
     return b && b !== minimalName ? b : "";
   })();
 
@@ -242,10 +259,10 @@
       if (isBondedMod(m)) {
         const effect = normalizeBondedEffect(m);
         if (hasFoxIdol && effect && idolBondedEffects.has(effect)) {
-          // Bonded rune mod coming specifically from a socketed Idol when Fox Idol is present
+          // Bonded rune mod coming from a socketed Idol when Fox Idol is present
           runeRegular.push(m);
         } else {
-          // Non-idol bonded rune mod (e.g. Greater Iron Rune) or no Fox Idol -> collapsed
+          // Non-idol bonded rune mod or no Fox Idol -> collapsed
           runeBonded.push(m);
         }
       } else {
@@ -310,7 +327,7 @@
     return [...prefixes, ...suffixes, ...others];
   })();
 
-  // item.bondedMods displayed directly BELOW explicit mods with no divider
+  // item.bondedMods displayed directly BELOW explicit mods
   $: directBondedMods = show.displayBondedMods
     ? ((item.bondedMods ?? []) as Array<string | ItemMod>)
     : [];
@@ -335,13 +352,6 @@
     : [];
   $: shownStatGroupMods = isTooltip ? [] : statGroupMods;
 
-  /* ------------------------------------------------------------------ */
-  /* Section visibility flags (a divider is only drawn for real content) */
-  /* ------------------------------------------------------------------ */
-  $: hasEnchantRuneBlock =
-    enchantMods.length > 0 ||
-    shownRuneRegular.length > 0 ||
-    shownRuneBonded.length > 0;
   $: hasExplicitBlock =
     classifiedExplicits.length > 0 ||
     directBondedMods.length > 0 ||
@@ -431,16 +441,27 @@
   })();
 
   /* ------------------------------------------------------------------ */
-  /* Portaled Tooltip for Granted Skills, Merc Skills & Socketed Items  */
+  /* Portaled tooltip (Granted Skills, Merc Skills, Socketed Items)     */
+  /* Hold Alt while open to pin it                                      */
   /* ------------------------------------------------------------------ */
-  const TIP_W = 450;
   let hoveredItem: { item: Item; rect: DOMRect } | null = null;
+  let locked = false;
+  const pin = createTooltipPin(
+    (v) => (locked = v),
+    () => (hoveredItem = null),
+  );
+
   function openItemTooltip(targetItem: Item, rect: DOMRect) {
+    if (locked) return;
     hoveredItem = { item: targetItem, rect };
+    pin.start();
   }
   function closeItemTooltip() {
+    if (locked) return;
     hoveredItem = null;
+    pin.stop();
   }
+  onDestroy(pin.stop);
 </script>
 
 {#if effectiveMode === "minimal"}
@@ -453,7 +474,9 @@
     {/if}
   </div>
 {:else}
-  <!-- COMPACT & FULL VIEW -->
+  <!-- COMPACT & FULL VIEW.
+       Separator rule: every .section draws ONE separator above itself (CSS),
+       unless nothing visible precedes it. Nothing else draws separators. -->
   <div
     class="stats-container mode-{effectiveMode}"
     class:is-tooltip={isTooltip}
@@ -464,16 +487,27 @@
       {#if monsterLevelProp}
         <PropertyLine prop={monsterLevelProp} {isPoe2} />
       {/if}
+      <ItemProperties item={propsItem} {realm} {effectiveMode} part="props" />
+    </div>
+
+    <!-- Item level + requirements, above the sockets -->
+    <div class="section">
+      <ItemProperties item={propsItem} {realm} {effectiveMode} part="level" />
+    </div>
+
+    <!-- Inline sockets -->
+    <div class="section">
       <ItemProperties
-        {item}
+        item={propsItem}
         {realm}
         {effectiveMode}
+        part="sockets"
         on:itemhover={(e) => openItemTooltip(e.detail.item, e.detail.rect)}
         on:itemleave={closeItemTooltip}
       />
     </div>
 
-    <!-- Additional Properties (above implicit, enchant, and rune mods) -->
+    <!-- Additional Properties (e.g. Experience progress bar) -->
     {#if additionalProps.length > 0}
       <div class="section">
         <div class="additional-line">
@@ -486,8 +520,8 @@
       </div>
     {/if}
 
-    <!-- Enchant (incl. builtInSupport) + Rune + Bonded Rune -->
-    {#if hasEnchantRuneBlock}
+    <!-- Enchant (incl. builtInSupport) -->
+    {#if enchantMods.length > 0}
       <div class="section">
         <div class="stat-group">
           {#each enchantMods as mod}
@@ -498,9 +532,14 @@
               compact={isCompact}
             />
           {/each}
-          {#if enchantMods.length > 0 && (shownRuneRegular.length > 0 || shownRuneBonded.length > 0)}
-            <div class="separator-line"></div>
-          {/if}
+        </div>
+      </div>
+    {/if}
+
+    <!-- Rune + Bonded Rune -->
+    {#if shownRuneRegular.length > 0 || shownRuneBonded.length > 0}
+      <div class="section">
+        <div class="stat-group">
           {#each shownRuneRegular as mod}
             <ItemModifier {mod} {realm} category="rune" compact={isCompact} />
           {/each}
@@ -543,7 +582,7 @@
       </div>
     {/if}
 
-    <!-- Scourge Mods (above implicit mods) -->
+    <!-- Scourge Mods -->
     {#if scourgeMods.length > 0}
       <div class="section">
         <div class="stat-group">
@@ -575,7 +614,7 @@
       </div>
     {/if}
 
-    <!-- Secondary Description Text (above explicit stats, #1BA274) -->
+    <!-- Description texts -->
     {#if hasDescriptions}
       <div class="section">
         <div class="stat-group descr-group">
@@ -614,7 +653,7 @@
       </div>
     {/if}
 
-    <!-- Explicit Mods + Bonded Mods (below explicit, no divider) + Veiled + Pseudo -->
+    <!-- Explicit + Bonded (below explicit) + Veiled + Pseudo -->
     {#if hasExplicitBlock}
       <div class="section">
         <div class="stat-group">
@@ -662,7 +701,7 @@
       </div>
     {/if}
 
-    <!-- Crucible Mods (Under Explicit Mods) -->
+    <!-- Crucible Mods -->
     {#if crucibleMods.length > 0}
       <div class="section">
         <div class="stat-group">
@@ -698,16 +737,18 @@
       </div>
     {/if}
 
-    <!-- Mercenary skills -->
+    <!-- Mercenary skills: one section (= one separator) per skill -->
     {#if showMercSkills}
-      <div class="section">
-        <MercenarySkills
-          skills={item.mercenarySkills ?? []}
-          {item}
-          on:itemhover={(e) => openItemTooltip(e.detail.item, e.detail.rect)}
-          on:itemleave={closeItemTooltip}
-        />
-      </div>
+      {#each item.mercenarySkills ?? [] as skill}
+        <div class="section">
+          <MercenarySkills
+            skills={[skill]}
+            {item}
+            on:itemhover={(e) => openItemTooltip(e.detail.item, e.detail.rect)}
+            on:itemleave={closeItemTooltip}
+          />
+        </div>
+      {/each}
     {/if}
 
     {#if hybridItem}
@@ -749,7 +790,7 @@
       </div>
     {/if}
 
-    <!-- Stat group lines (statgroup.N pseudo mods: Count, Sum, Sum2, ...) -->
+    <!-- Stat group lines (statgroup.N pseudo mods: Count, Sum, ...) -->
     {#if shownStatGroupMods.length > 0}
       <div class="section">
         <StatGroupSummary mods={shownStatGroupMods} compact={isCompact} />
@@ -768,10 +809,13 @@
           {/if}
           {#if enshrouded}
             <ProgressBar
-              text="{enshrouded.progress}/{enshrouded.total}"
+              text="{enshrouded.progress}/{enshrouded.total} Variants Tested"
               ratio={ratio(enshrouded.progress, enshrouded.total)}
             />
           {/if}
+          {#each lastProps as p}
+            <div class="prog-prop"><PropertyLine prop={p} {isPoe2} /></div>
+          {/each}
         </div>
       </div>
     {/if}
@@ -789,13 +833,12 @@
 {/if}
 
 {#if hoveredItem}
-  <ItemTooltip item={hoveredItem.item} {realm} rect={hoveredItem.rect}>
+  <ItemTooltip item={hoveredItem.item} {realm} rect={hoveredItem.rect} {locked}>
     <svelte:self
       item={hoveredItem.item}
       {realm}
       styleMode="compact"
       isTooltip={true}
-      tileWidth={TIP_W}
     />
   </ItemTooltip>
 {/if}
@@ -868,6 +911,10 @@
     width: 100%;
   }
 
+  /* ---------------------------------------------------------------- */
+  /* Separators: ONE rule. Every .section has one separator above it, */
+  /* shown only when a visible block precedes it.                     */
+  /* ---------------------------------------------------------------- */
   .section {
     display: flex;
     flex-direction: column;
@@ -877,30 +924,56 @@
   }
   .section::before {
     content: "";
+    display: none;
     flex-shrink: 0;
     height: var(--sep-h, 8px);
     margin: 1px 0;
     background: var(--sep-img, none) center no-repeat;
   }
+  :global(
+      .stats-container > :is(.props-block, .section):has(*) ~ .section::before
+    ) {
+    display: block;
+  }
+  /* a section that renders nothing is gone: no separator, no gap */
+  .section:not(:has(*)),
+  .props-block:not(:has(*)) {
+    display: none;
+  }
+  /* the hybrid title acts as its own divider */
+  .section.hybrid-section::before {
+    display: none !important;
+  }
 
   .props-block {
     display: flex;
     flex-direction: column;
-    gap: inherit;
+    gap: 0;
     width: 100%;
     min-width: 0;
   }
-  .props-block:not(:has(*)) {
-    display: none;
-  }
-  .props-block:not(:has(*)) + .section::before {
-    display: none;
+
+  .inline-item {
+    display: inline-flex;
+    align-items: center;
+    color: #7f7f7f;
   }
 
-  .separator-line {
-    height: var(--sep-h, 8px);
-    margin: 1px 0;
-    background: var(--sep-img, none) center no-repeat;
+  /* Additional properties (full width so progress bars can size themselves) */
+  .additional-line {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.12rem;
+    width: 100%;
+    min-width: 0;
+    text-align: center;
+  }
+  .additional-line .prop-line {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    min-width: 0;
   }
 
   /* Secondary Description Text (Skills / Gems) */
@@ -962,7 +1035,6 @@
   }
   .notable-title {
     font-size: 0.98rem;
-    font-weight: 400;
     color: #b8b09c;
   }
   .notable-line {
@@ -971,8 +1043,7 @@
     line-height: 1.22;
   }
 
-  /* Bottom State Tags (Corrupted, Mirrored, Split, etc.):
-     exact same font size as ItemModifier and regular weight (not bold) */
+  /* Bottom State Tags */
   .bottom-state-group {
     align-items: center;
     text-align: center;
@@ -980,11 +1051,7 @@
   .state-stat-line {
     margin-top: -2px;
     font-size: 20px;
-    font-weight: 400;
     line-height: 24px;
-  }
-  .mode-compact .state-stat-line {
-    font-size: var(--mod-font-size, 0.96rem);
   }
   .state-corrupted {
     color: #d20000;
@@ -1055,15 +1122,16 @@
     gap: 0.3rem;
   }
 
-  .hybrid-section::before {
-    display: none;
-  }
   .hybrid-title {
     position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 34px;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 350px; /* never wider than the art; narrower rows stretch it */
+    height: 34px;
+    margin: 0 auto;
     padding: 0 0.5rem;
     font-size: 1rem;
     font-weight: 700 !important;
@@ -1072,7 +1140,7 @@
   .hybrid-title :global(.hybrid-bg) {
     position: absolute;
     inset: 0;
-    width: 100%;
+    width: 100%; /* follows the title: shrinks when narrow, stops at max-width */
     height: 100%;
     object-fit: fill;
     pointer-events: none;
@@ -1082,13 +1150,10 @@
     z-index: 1;
     font-weight: 700 !important;
   }
-  .additional-line {
+  .prog-prop {
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.12rem;
+    justify-content: center;
     width: 100%;
     min-width: 0;
-    text-align: center;
   }
 </style>

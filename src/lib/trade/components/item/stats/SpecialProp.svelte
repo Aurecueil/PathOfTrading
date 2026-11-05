@@ -54,9 +54,9 @@
     <StatColorText text={label} />{values.length ? ":" : ""}
   </span>
   {#each values as val}
-    <strong style="color: {cfg.valueColor}">
+    <span style="color: {cfg.valueColor}">
       <StatColorText text={val.text} />
-    </strong>
+    </span>
   {/each}
   <span
     class="special-prop-icon-wrap"
@@ -83,9 +83,6 @@
     font-size: 1rem;
     line-height: 1.2;
     white-space: nowrap;
-  }
-  .special-prop strong {
-    font-weight: 600;
   }
   .special-prop-icon-wrap {
     display: inline-flex;

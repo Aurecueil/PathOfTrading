@@ -33,12 +33,15 @@
   <div class="bar">
     <CdnImage src={FRAME} alt="" className="pb-frame" />
     <div class="track">
-      <div class="fill" style="width: {pct}%">
+      <!-- full-width art, clipped to the progress (never squished) -->
+      <div class="fill" style:clip-path="inset(0 {100 - pct}% 0 0)">
         <CdnImage src={FILL} alt="" className="pb-fill" />
       </div>
     </div>
     {#if text}
-      <span class="p-text"><KeywordText {text} /></span>
+      <div class="p-text">
+        <span class="p-text-in"><KeywordText {text} /></span>
+      </div>
     {/if}
   </div>
 </div>
@@ -58,14 +61,17 @@
     color: #cbd5e1;
     text-align: center;
   }
-  /* 2x the original 212px frame */
   .bar {
+    /* tune these three to match the frame art */
+    --bar-h: 24px;
+    --inset-x: 5px;
+    --inset-y: 4px;
+
     position: relative;
-    display: flex;
-    align-items: center;
-    width: min(100%, 424px);
+    flex-shrink: 0;
     box-sizing: border-box;
-    padding: 3px 4px;
+    width: min(100%, 424px);
+    height: var(--bar-h);
   }
   .bar :global(.pb-frame) {
     position: absolute;
@@ -76,15 +82,14 @@
     pointer-events: none;
   }
   .track {
-    position: relative;
-    width: 100%;
-  }
-  .fill {
-    height: 1em;
-    font-size: 0.95rem;
+    position: absolute;
+    inset: var(--inset-y) var(--inset-x);
     overflow: hidden;
   }
-  /* the fill art is a slice, so stretching it equals repeat-x */
+  .fill {
+    position: absolute;
+    inset: 0;
+  }
   .fill :global(.pb-fill) {
     display: block;
     width: 100%;
@@ -94,18 +99,24 @@
   .p-text {
     position: absolute;
     inset: 0;
+    z-index: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 0 8px;
+    padding: 0 10px;
+    pointer-events: none;
     font-size: 0.86rem;
-    font-weight: 600;
+    line-height: 1;
     color: #fff;
     text-shadow:
       0 0 3px #000,
       0 1px 1px #000;
     font-variant-numeric: tabular-nums;
-    white-space: nowrap;
+  }
+  .p-text-in {
+    min-width: 0;
     overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 </style>

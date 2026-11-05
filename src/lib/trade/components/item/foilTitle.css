@@ -1,0 +1,54 @@
+/* src/lib/trade/components/item/foilTitle.css */
+.foil-title-host,
+.foil-title-host * {
+  font-weight: 700 !important; /* the only bold in the whole row */
+}
+
+.is-foil:not(.is-double-title) .foil-title-host * {
+  color: var(--foil-c1, var(--rc)) !important;
+}
+
+.is-foil.is-double-title
+  .foil-title-host
+  :is(
+    .title-name,
+    .name,
+    .line-1,
+    .row-1,
+    :is(div, span, h1, h2, h3, p):first-of-type
+  ),
+.is-foil.is-double-title
+  .foil-title-host
+  :is(
+    .title-name,
+    .name,
+    .line-1,
+    .row-1,
+    :is(div, span, h1, h2, h3, p):first-of-type
+  )
+  * {
+  color: var(--foil-c1, var(--rc)) !important;
+}
+.is-foil.is-double-title
+  .foil-title-host
+  :is(
+    .title-base,
+    .base,
+    .base-type,
+    .line-2,
+    .row-2,
+    :is(div, span, h1, h2, h3, p):nth-of-type(2)
+  ),
+.is-foil.is-double-title
+  .foil-title-host
+  :is(
+    .title-base,
+    .base,
+    .base-type,
+    .line-2,
+    .row-2,
+    :is(div, span, h1, h2, h3, p):nth-of-type(2)
+  )
+  * {
+  color: var(--foil-c2, var(--rc)) !important;
+}

@@ -37,7 +37,7 @@
       </span>
     {/if}
 
-    <span class="title-text" class:double>
+    <span class="title-text" class:double class:foil-text={hasOverlay}>
       {#if name}
         <span class="t-name">{name}</span>
       {/if}
@@ -104,9 +104,6 @@
     margin: 0 auto;
     font-size: 22px;
     line-height: 1.2;
-    text-shadow:
-      0 1px 2px rgba(0, 0, 0, 0.95),
-      0 0 6px rgba(0, 0, 0, 0.5);
   }
 
   .title-text {
@@ -134,13 +131,10 @@
     font-size: 22px;
   }
 
+  /* replace the .t-name/.t-base.solo and .t-base:not(.solo) rules with: */
   .t-name,
-  .t-base.solo {
+  .t-base {
     font-weight: 700;
-  }
-
-  .t-base:not(.solo) {
-    font-weight: 400;
   }
 
   .symbols {
@@ -155,5 +149,19 @@
     width: 24px;
     object-fit: contain;
     filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.85));
+  }
+  /* Supporter foil: white text, tinted by the foil gradient */
+  .title-text.foil-text {
+    background: var(--foil-overlay), #fff;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    /* text-shadow would show through the transparent fill, so use a filter */
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.95));
+  }
+  .title-text.foil-text .t-name,
+  .title-text.foil-text .t-base {
+    color: transparent;
   }
 </style>

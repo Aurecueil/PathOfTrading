@@ -275,10 +275,6 @@
     background-color: rgba(var(--mod-rgb), 0.1);
   }
 
-  .mod-row:hover {
-    background-color: rgba(var(--mod-rgb), 0.1);
-  }
-
   .side-anchor {
     position: absolute;
     top: 50%;
@@ -453,7 +449,6 @@
     padding: 0;
     box-sizing: border-box;
     font-size: inherit;
-    font-weight: 600;
     line-height: inherit;
     text-align: center;
     white-space: nowrap;

@@ -4,6 +4,8 @@
   import ItemStats from "$lib/trade/components/item/ItemStats.svelte";
   import ItemTooltip from "./ItemTooltip.svelte";
   import CdnImage from "./CdnImage.svelte";
+  import { onDestroy } from "svelte";
+  import { createTooltipPin } from "./tooltipPin";
   import {
     SHEET_1,
     SOCKET_SIZE,
@@ -93,20 +95,28 @@
     ];
   });
 
-  const TIP_W = 450;
   let hovered: { item: Item; rect: DOMRect } | null = null;
+  let locked = false;
+  const pin = createTooltipPin(
+    (v) => (locked = v),
+    () => (hovered = null),
+  );
 
   function showTip(e: Event, item: Item | null) {
-    if (!item) return;
+    if (!item || locked) return;
     const rect = (e.currentTarget as HTMLElement)
       .querySelector(".box")!
       .getBoundingClientRect();
     hovered = { item, rect };
+    pin.start();
   }
 
   function hideTip() {
+    if (locked) return;
     hovered = null;
+    pin.stop();
   }
+  onDestroy(pin.stop);
 </script>
 
 <div class="sockets-overlay">
@@ -207,13 +217,12 @@
 </div>
 
 {#if hovered}
-  <ItemTooltip item={hovered.item} {realm} rect={hovered.rect}>
+  <ItemTooltip item={hovered.item} {realm} rect={hovered.rect} {locked}>
     <ItemStats
       item={hovered.item}
       {realm}
       styleMode="compact"
       isTooltip={true}
-      tileWidth={TIP_W}
     />
   </ItemTooltip>
 {/if}

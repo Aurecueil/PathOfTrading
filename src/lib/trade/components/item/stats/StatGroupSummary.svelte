@@ -21,11 +21,9 @@
   <div class="stat-group-summary-line" class:compact>
     {#each summaries as sg, sgi}
       <span class="sg-entry"
-        >{#if sg.label}<span class="sg-label">{sg.label}:</span
-          >&nbsp;{/if}<strong class="sg-val">{sg.value}</strong>{sgi <
-        summaries.length - 1
-          ? ","
-          : ""}</span
+        >{#if sg.label}<span class="sg-label">{sg.label}:</span>&nbsp;{/if}<span
+          class="sg-val">{sg.value}</span
+        >{sgi < summaries.length - 1 ? "," : ""}</span
       >
     {/each}
   </div>
@@ -57,7 +55,6 @@
     color: #8b9bb4;
   }
   .sg-val {
-    font-weight: 600;
     color: #f1f5f9;
   }
 </style>

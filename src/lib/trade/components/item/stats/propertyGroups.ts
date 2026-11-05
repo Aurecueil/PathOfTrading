@@ -15,8 +15,6 @@ export interface PropertyGroup {
   label?: string;
   props: ItemProperty[];
   bare: boolean;
-  /** draw a separator above and below this group */
-  separated?: boolean;
 }
 
 export function getSpecialKind(p: ItemProperty): SpecialKind | null {
@@ -46,33 +44,18 @@ const INLINE_GROUPS: {
   bare: boolean;
 }[] = [
   { key: "requirements", label: "Requires:", bare: true },
-  { key: "weaponRequirements", bare: true },
+  { key: "weaponRequirements", label: "Requires:", bare: true },
   { key: "supportGemRequirements", bare: true },
 ];
-
 export function buildInlineGroups(item: Item): PropertyGroup[] {
   const out: PropertyGroup[] = [];
   const ilvl = item.ilvl || item.itemLevel;
 
-  // Collect all requirement props
-  const reqProps: ItemProperty[] = [];
-  for (const g of INLINE_GROUPS) {
-    const props = ((item[g.key] as ItemProperty[] | undefined) ?? []).filter(
-      isRenderableProp,
-    );
-    reqProps.push(...props);
-  }
-
-  // If we have either ilvl or requirements, bundle them together with separators
-  const hasIlvl = ilvl && ilvl > 0;
-  const hasReqs = reqProps.length > 0;
-
-  if (hasIlvl) {
+  if (ilvl && ilvl > 0) {
     out.push({
       key: "itemLevel",
       props: [{ name: "Item Level", values: [[String(ilvl), 0]] }],
       bare: false,
-      separated: !hasReqs, // only separated if no requirements follow inside the same block
     });
   }
 
@@ -81,21 +64,9 @@ export function buildInlineGroups(item: Item): PropertyGroup[] {
       isRenderableProp,
     );
     if (props.length > 0) {
-      out.push({
-        key: String(g.key),
-        label: g.label,
-        props,
-        bare: g.bare,
-        separated: false,
-      });
+      out.push({ key: String(g.key), label: g.label, props, bare: g.bare });
     }
   }
-
-  // Mark the last requirement group as separated so the bottom divider renders
-  if (out.length > 0) {
-    out[out.length - 1].separated = true;
-  }
-
   return out;
 }
 

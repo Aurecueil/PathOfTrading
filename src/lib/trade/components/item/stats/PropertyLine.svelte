@@ -32,6 +32,7 @@
       ? buildTemplate(name, values)
       : [];
   $: valuesText = values.map((v) => v.text).join(", ");
+  $: barText = [valuesText, name].filter(Boolean).join(" ");
   $: ratio = resolveRatio(prop, values);
 
   function buildTemplate(tpl: string, vals: Val[]): Part[] {
@@ -64,7 +65,7 @@
         alt=""
         className="prop-icon"
       />{/if}
-    <ProgressBar text={valuesText} {ratio} />
+    <ProgressBar text={barText} {ratio} />
   </span>
 {:else if mode === DisplayMode.ValuesInsertedByIndex}
   <span class="prop-item wrap-text" class:is-italic={isItalic}>
