@@ -1,1 +1,1 @@
-le notos
+0.6.2 -> telemtry impl test
