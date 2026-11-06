@@ -25,6 +25,17 @@
   import { authState } from "$lib/trade/tradeStore";
   import { t } from "$lib/translation/text";
   import { updaterState, renderMarkdown } from "$lib/update.svelte";
+  import { telemetryLevel, setTelemetryLevel } from "$lib/project/telemetry";
+  import Check from "$lib/settings/color/Check.svelte";
+  let telemetryModalOpen = $state(false);
+  let telemetryChoice = $state<0 | 1>(1); // default: Basic
+  let telemetryDetailsOpen = $state(false);
+  let teleTick = $state(0);
+
+  function pickTelemetry(level: 0 | 1) {
+    telemetryChoice = level;
+    teleTick++;
+  }
 
   const LOGIN_NOTICE_DELAY_SECS = 5;
 
@@ -129,14 +140,26 @@
     const unlistenExpired = listen("poe_session_expired", () => {
       checkSessionExpired();
     });
-
+    if ($telemetryLevel === null) {
+      telemetryChoice = 1;
+      telemetryDetailsOpen = false;
+      telemetryModalOpen = true;
+    }
     return () => {
       unlistenSuccess.then((fn) => fn());
       unlistenLogout.then((fn) => fn());
       unlistenExpired.then((fn) => fn());
     };
   });
+  function closeTelemetryModal() {
+    // Closing without confirming saves nothing; level stays unset
+    telemetryModalOpen = false;
+  }
 
+  function confirmTelemetry() {
+    setTelemetryLevel(telemetryChoice);
+    telemetryModalOpen = false;
+  }
   function closeFileMenu() {
     fileMenuOpen = false;
     realmLeagueExpanded = false;
@@ -166,9 +189,15 @@
       if (accountMenuOpen) closeAccountMenu();
       if (loginModalOpen) loginModalOpen = false;
       if (sessionExpiredOpen) sessionExpiredOpen = false;
+      if (telemetryModalOpen) closeTelemetryModal();
       if (updaterState.whatsNewModalOpen) {
         updaterState.whatsNewModalOpen = false;
       }
+    } else if (e.key === "Enter" && telemetryModalOpen) {
+      // Let focused buttons (e.g. the details toggle) handle Enter themselves
+      if (e.target instanceof HTMLButtonElement) return;
+      e.preventDefault();
+      confirmTelemetry();
     }
   }
 
@@ -635,7 +664,70 @@
     </div>
   </div>
 {/if}
+<!-- Telemetry choice (first launch) -->
+{#if telemetryModalOpen}
+  <div class="modal-backdrop" role="presentation" onclick={closeTelemetryModal}>
+    <div
+      class="modal-card"
+      role="dialog"
+      aria-label="Telemetry"
+      onclick={(e) => e.stopPropagation()}
+    >
+      <div class="modal-header">
+        <h3 class="modal-title">Telemetry</h3>
+        <button
+          type="button"
+          class="modal-close-btn"
+          onclick={closeTelemetryModal}
+          title="Close (Esc)"
+        >
+          ✕
+        </button>
+      </div>
 
+      <div class="tele-options">
+        {#key teleTick}
+          <div class="tele-option" class:selected={telemetryChoice === 0}>
+            <Check
+              checked={telemetryChoice === 0}
+              label="None"
+              onchange={() => pickTelemetry(0)}
+            />
+          </div>
+
+          <div class="tele-option" class:selected={telemetryChoice === 1}>
+            <Check
+              checked={telemetryChoice === 1}
+              label="Basic"
+              onchange={() => pickTelemetry(1)}
+            />
+            <button
+              type="button"
+              class="tele-expand-btn"
+              aria-expanded={telemetryDetailsOpen}
+              onclick={() => (telemetryDetailsOpen = !telemetryDetailsOpen)}
+            >
+              <span class="chevron">{telemetryDetailsOpen ? "▾" : "▸"}</span>
+              Details
+            </button>
+            {#if telemetryDetailsOpen}
+              <p class="tele-details">Fully anonymous, for CCU only.</p>
+            {/if}
+          </div>
+        {/key}
+      </div>
+
+      <div class="tele-footer">
+        <span class="tele-footer-text"
+          >You can change this later in Settings.</span
+        >
+        <button type="button" class="btn-primary" onclick={confirmTelemetry}>
+          Confirm
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 <!-- Notice Modal for Login -->
 {#if loginModalOpen}
   <div
@@ -1264,5 +1356,64 @@
     border-color: #ffffff;
     color: #ffffff;
     outline: none;
+  }
+  .tele-options {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 2px;
+  }
+
+  .tele-option {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  /* Gray when not selected, white when selected */
+  .tele-option :global(.pb-check-text) {
+    color: #888888;
+  }
+
+  .tele-option.selected :global(.pb-check-text) {
+    color: #ffffff;
+  }
+
+  .tele-expand-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: transparent;
+    border: none;
+    color: #888888;
+    font-size: 11px;
+    cursor: pointer;
+    padding: 0 0 0 24px; /* aligns under the label text, adjust to match the box width */
+  }
+
+  .tele-expand-btn:hover {
+    color: #ffffff;
+  }
+
+  .tele-details {
+    margin: 0;
+    padding-left: 24px;
+    font-size: 11px;
+    color: #9a9a9a;
+  }
+
+  .tele-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-top: 1px solid #333333;
+    padding-top: 8px;
+  }
+
+  .tele-footer-text {
+    font-size: 11px;
+    color: #9a9a9a;
   }
 </style>

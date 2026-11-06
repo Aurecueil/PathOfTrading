@@ -26,36 +26,7 @@
   import type { Snippet } from "svelte";
   import type { League } from "$lib/types/leagues";
   import { updaterState } from "$lib/update.svelte";
-
-  import { invoke } from "@tauri-apps/api/core";
-
-  const USER_ID_STORAGE_KEY = "app_telemetry_user_id";
-
-  export function getOrCreateUserId(): string {
-    let uid = localStorage.getItem(USER_ID_STORAGE_KEY);
-    if (!uid) {
-      uid = crypto.randomUUID();
-      localStorage.setItem(USER_ID_STORAGE_KEY, uid);
-    }
-    return uid;
-  }
-
-  export interface TelemetryEvent {
-    timestamp: number;
-    action: string;
-  }
-
-  export async function flushTelemetry(events: TelemetryEvent[]) {
-    const userId = getOrCreateUserId();
-    try {
-      await invoke("send_telemetry", {
-        userId,
-        events,
-      });
-    } catch (err) {
-      console.error("Failed to send telemetry:", err);
-    }
-  }
+  import { flushTelemetry } from "$lib/project/telemetry";
 
   let { children }: { children: Snippet } = $props();
 
@@ -110,7 +81,6 @@
 
     updaterState.checkForUpdates();
 
-    // Example call:
     flushTelemetry([{ timestamp: Date.now(), action: "open" }]);
   });
 

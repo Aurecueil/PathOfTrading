@@ -6,6 +6,7 @@
   import ItemSearchCombobox from "$lib/trade/components/drawer/ItemSearchCombobox.svelte";
   import SortCombobox from "$lib/trade/components/drawer/SortCombobox.svelte";
   import StatGroupsSection from "$lib/trade/components/drawer/StatGroupsSection.svelte";
+  import { sortOptions, sortOptions2 } from "$lib/types/propertyTypeMap";
   import {
     computeDisplayName,
     getItemDisplayName,
@@ -378,23 +379,41 @@
       };
     });
 
+  // Realm-specific map
+  $: activeSortMap = realm === "poe2" ? sortOptions2 : sortOptions;
+
+  // Price sort key, derived from the active realm's map
+  $: sortPrice = (() => {
+    if (activeSortMap.has("price")) return "filter:price";
+    for (const [key, label] of activeSortMap) {
+      if (/price/i.test(key) || /price/i.test(label)) return `filter:${key}`;
+    }
+    return "filter:price"; // fallback if the map has no price entry
+  })();
+
   $: sortableFilterFields = (() => {
-    const list: SortOptionItem[] = [
-      { id: "filter:price", category: "filter", label: "Buyout Price" },
-    ];
-    for (const g of currentFilterGroups) {
-      for (const f of g.filters) {
-        if (f.minMax && f.id !== "price") {
-          list.push({
-            id: `filter:${f.id}`,
-            category: "filter",
-            label: f.text || f.id,
-          });
-        }
-      }
+    const list: SortOptionItem[] = [];
+    for (const [key, label] of activeSortMap) {
+      list.push({ id: `filter:${key}`, category: "filter", label });
+    }
+    // Guarantee the price option exists so the fallback is always selectable
+    if (!list.some((o) => o.id === sortPrice)) {
+      list.unshift({
+        id: sortPrice,
+        category: "filter",
+        label: "Buyout Price",
+      });
     }
     return list;
   })();
+
+  // Reset to price if the current filter key doesn't exist in this realm
+  $: if (
+    sortKey.startsWith("filter:") &&
+    !sortableFilterFields.some((o) => o.id === sortKey)
+  ) {
+    sortKey = sortPrice;
+  }
 
   $: sortableStats = flatStats.map((s) => ({
     id: `stat:${s.id}`,

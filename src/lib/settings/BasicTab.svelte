@@ -18,6 +18,7 @@
     getCacheStats,
     clearAllCaches,
   } from "$lib/trade/utilis/imageService";
+  import { telemetryLevel, setTelemetryLevel } from "$lib/project/telemetry";
 
   const DEFAULT_HOTKEY = "CommandOrControl+Shift+T";
 
@@ -58,7 +59,12 @@
   let clearingCache = $state(false);
 
   let fileInput: HTMLInputElement | undefined = $state();
-
+  function handleTelemetryChange(e: Event) {
+    const value = (e.currentTarget as HTMLSelectElement).value;
+    if (value !== "0" && value !== "1") return;
+    setTelemetryLevel(value === "1" ? 1 : 0);
+    onStatus(`Telemetry set to ${value === "1" ? "Basic" : "None"}`);
+  }
   function formatHotkeyDisplay(accel: string): string {
     if (!accel) return "";
     return accel
@@ -312,7 +318,22 @@
       </button>
     </div>
   </div>
-
+  <!-- Telemetry -->
+  <div class="st-grid-row">
+    <label class="pb-check-text" for="telemetry-select">Telemetry</label>
+    <div class="st-col-control">
+      <select
+        id="telemetry-select"
+        class="st-select"
+        value={$telemetryLevel === null ? "" : String($telemetryLevel)}
+        onchange={handleTelemetryChange}
+      >
+        <option value="" disabled hidden></option>
+        <option value="0">None</option>
+        <option value="1">Basic</option>
+      </select>
+    </div>
+  </div>
   <!-- Teleport Hotkey -->
   <div class="st-grid-row">
     <label class="pb-check-text" for="tp-hotkey-box">Teleport Hotkey</label>

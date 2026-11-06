@@ -25,7 +25,7 @@
   - regular search, locallyt sorted based on exchange value
   - updated on the go by items coming from live search
 - hide bonded modifiers
-  - if fox idol, shows bonded that come from idols (probabyl bugged with non-en langs)
+  - if fox idol, shows bonded that come from idols
 - u can tell apart fractured from crafted + fractured
 - poe2 tooltip
 - global tp-to-hidoeout button
@@ -33,7 +33,7 @@
   - always goes top-bottom
 - preset blocks for stat groups
 - share projects via code
-- auto-ignores "are u sure u want to telport to hidoeout? some bot has alreay snipped it so dont waste your time" when trying to teleport to hideout to buy an item
+- auto-ignores `"are u sure u want to telport to hidoeout? some bot has alreay snipped it so dont waste your time"` when trying to teleport to hideout to buy an item
 
 ## Download / Install
 
@@ -42,11 +42,12 @@
 
 ## Updates
 
-Haphazardous, to improve, should (i hope) work
+Green button in top right corner, telling u there is an update
+Click to download update
 
 ## Usage
 
-uhhh future me will do this
+uhhh future me will do this x2
 
 # Acknowledgments
 
