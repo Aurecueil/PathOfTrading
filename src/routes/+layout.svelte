@@ -19,13 +19,43 @@
     showToast,
   } from "$lib/project/projects.svelte";
 
-  import TitleBar from "$lib/layout/TitleBar.svelte";
-  import MenuTabBar from "$lib/layout/MenuTabBar.svelte";
-  import WorkspaceModals from "$lib/layout/WorkspaceModals.svelte";
-  import FooterBar from "$lib/layout/FooterBar.svelte";
+  import TitleBar from "$lib/settings/color/layout/TitleBar.svelte";
+  import MenuTabBar from "$lib/settings/color/layout/MenuTabBar.svelte";
+  import WorkspaceModals from "$lib/settings/color/layout/WorkspaceModals.svelte";
+  import FooterBar from "$lib/settings/color/layout/FooterBar.svelte";
   import type { Snippet } from "svelte";
   import type { League } from "$lib/types/leagues";
   import { updaterState } from "$lib/update.svelte";
+
+  import { invoke } from "@tauri-apps/api/core";
+
+  const USER_ID_STORAGE_KEY = "app_telemetry_user_id";
+
+  export function getOrCreateUserId(): string {
+    let uid = localStorage.getItem(USER_ID_STORAGE_KEY);
+    if (!uid) {
+      uid = crypto.randomUUID();
+      localStorage.setItem(USER_ID_STORAGE_KEY, uid);
+    }
+    return uid;
+  }
+
+  export interface TelemetryEvent {
+    timestamp: number;
+    action: string;
+  }
+
+  export async function flushTelemetry(events: TelemetryEvent[]) {
+    const userId = getOrCreateUserId();
+    try {
+      await invoke("send_telemetry", {
+        userId,
+        events,
+      });
+    } catch (err) {
+      console.error("Failed to send telemetry:", err);
+    }
+  }
 
   let { children }: { children: Snippet } = $props();
 
@@ -79,6 +109,9 @@
     }
 
     updaterState.checkForUpdates();
+
+    // Example call:
+    flushTelemetry([{ timestamp: Date.now(), action: "open" }]);
   });
 
   onDestroy(() => {

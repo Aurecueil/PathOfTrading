@@ -131,6 +131,7 @@ pub fn run() {
             trade::tp::tp_mark_gone,
             project::fetch_prices::fetch_pricing_index,
             project::fetch_prices::fetch_realm_pricing,
+            project::telemetry::send_telemetry,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

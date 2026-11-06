@@ -80,7 +80,8 @@ export interface ExchangeRateEntry {
 }
 
 /**
- * [have, want, via, ts, buyH, buyW, sellH, sellW, volH, volW, traded]
+ * [have, want, via, ts, buyH, buyW, sellH, sellW, volH, volW]
+ * `via` is always -1 in current files (direct rows only).
  */
 export type R2Row = [
   number,
@@ -488,7 +489,7 @@ export function getPairMultiplier(
 /**
  * Resolves the conversion multiplier from `fromCurr` -> `toCurr` strictly from
  * the league's `direct` and `proxy` maps. Returns `null` if the pair does not
- * exist in the R2 JSON file.
+ * exist in either map.
  */
 function resolvePairMultiplier(
   leagueMaps: LeagueExchangeMaps,
@@ -720,56 +721,176 @@ export function getValidLeagues(
 }
 
 // ---------------------------------------------------------------------------
+// Proxy trade computation (client-side)
+// ---------------------------------------------------------------------------
+const DEFAULT_PROXY_CANDIDATES = ["chaos", "divine", "exalted"];
+const RUTHLESS_PROXY_CANDIDATES = ["chaos", "divine", "exalted", "alch"];
+/** Maximum age (1 day, in seconds) for a direct quote to be considered fresh */
+const MAX_DIRECT_AGE = 86400;
+
+type Quote = Pick<ExchangeRateEntry, "buy" | "sell" | "vol" | "timestamp">;
+
+const flipHW = (p: HWPair): HWPair => ({ h: p.w, w: p.h });
+const mulHW = (a: HWPair, b: HWPair): HWPair => ({
+  h: a.h * b.h,
+  w: a.w * b.w,
+});
+const quoteScore = (q: Quote): number => q.vol.h + q.vol.w;
+
+function isStaleQuote(q: Quote, nowTs: number): boolean {
+  return q.timestamp !== undefined && nowTs - q.timestamp > MAX_DIRECT_AGE;
+}
+
+/** Direct quote oriented from `have` -> `want` (either alphabetical order). */
+function orientQuote(
+  direct: ExchangePairMap,
+  have: string,
+  want: string,
+): Quote | undefined {
+  const flipped = have > want;
+  const e = direct[flipped ? `${want}/${have}` : `${have}/${want}`];
+  if (!e) return undefined;
+  if (!flipped) return e;
+  return {
+    buy: flipHW(e.sell),
+    sell: flipHW(e.buy),
+    vol: flipHW(e.vol),
+    timestamp: e.timestamp,
+  };
+}
+
+/** (larger - smaller) >= 30% of smaller AND larger > smaller + 1 */
+function hasBigDiff(a: number, b: number): boolean {
+  const smaller = Math.min(a, b);
+  const larger = Math.max(a, b);
+  return (larger - smaller) * 10 >= smaller * 3 && larger - smaller > 1;
+}
+
+/**
+ * A proxy is wanted when:
+ * 1. there is no direct trade
+ * 2. the direct trade is older than 1 day
+ * 3. buy and sell ratios differ a lot
+ * 4. the avg of buy/sell ratios differs a lot from the traded-volume ratio
+ */
+function needsProxy(direct: Quote | undefined, nowTs: number): boolean {
+  if (!direct || quoteScore(direct) <= 0) return true;
+  if (isStaleQuote(direct, nowTs)) return true;
+
+  const useHW = direct.vol.h > direct.vol.w;
+  const ratio = (r: HWPair) => (useHW ? r.h / r.w : r.w / r.h);
+
+  const buyR = ratio(direct.buy);
+  const sellR = ratio(direct.sell);
+  const volR = ratio(direct.vol);
+
+  if (hasBigDiff(buyR, sellR)) return true;
+  return hasBigDiff((buyR + sellR) / 2, volR);
+}
+
+function computeProxies(
+  direct: ExchangePairMap,
+  currencies: string[],
+  leagueId: string,
+  nowTs: number,
+): ExchangePairMap {
+  const proxy: ExchangePairMap = {};
+  const candidates = leagueId.toLowerCase().includes("ruthless")
+    ? RUTHLESS_PROXY_CANDIDATES
+    : DEFAULT_PROXY_CANDIDATES;
+  const sorted = [...currencies].sort();
+
+  for (let i = 0; i < sorted.length; i++) {
+    for (let j = i + 1; j < sorted.length; j++) {
+      const have = sorted[i];
+      const want = sorted[j];
+      const key = `${have}/${want}`;
+      const d = direct[key];
+      if (!needsProxy(d, nowTs)) continue;
+
+      // Best route by combined volume, using only fresh direct legs
+      let best:
+        | { via: string; l1: Quote; l2: Quote; score: number }
+        | undefined;
+      for (const via of candidates) {
+        if (via === have || via === want || !currencies.includes(via)) continue;
+        const l1 = orientQuote(direct, have, via);
+        const l2 = orientQuote(direct, via, want);
+        if (!l1 || !l2) continue;
+        if (quoteScore(l1) <= 0 || quoteScore(l2) <= 0) continue;
+        if (isStaleQuote(l1, nowTs) || isStaleQuote(l2, nowTs)) continue;
+
+        const score = quoteScore(l1) + quoteScore(l2);
+        if (!best || score > best.score) best = { via, l1, l2, score };
+      }
+      if (!best) continue;
+
+      // A fresh direct trade is only replaced if the proxy has more volume
+      if (d && !isStaleQuote(d, nowTs) && best.score <= quoteScore(d)) continue;
+
+      proxy[key] = {
+        have,
+        want,
+        type: "proxy",
+        via: best.via,
+        buy: mulHW(best.l1.buy, best.l2.buy),
+        sell: mulHW(best.l1.sell, best.l2.sell),
+        vol: mulHW(best.l1.vol, best.l2.vol),
+        timestamp: Math.min(
+          best.l1.timestamp ?? nowTs,
+          best.l2.timestamp ?? nowTs,
+        ),
+      };
+    }
+  }
+  return proxy;
+}
+
+// ---------------------------------------------------------------------------
 // R2 Parsing, Rust-Backed Fetching & Minute-Aligned Scheduler
 // ---------------------------------------------------------------------------
-function parseR2League(raw: R2LeagueData): LeagueExchangeMaps | null {
+function parseR2League(
+  raw: R2LeagueData,
+  leagueId: string,
+): LeagueExchangeMaps | null {
   if (!raw || !Array.isArray(raw.c) || !Array.isArray(raw.r)) return null;
 
   const direct: ExchangePairMap = {};
-  const proxy: ExchangePairMap = {};
   const currencies = raw.c.map((c) => c.toLowerCase());
-  const currencySet = new Set<string>(currencies);
 
   for (const row of raw.r) {
     if (!Array.isArray(row) || row.length < 10) continue;
     const [hi, wi, viaIdx, ts, buyH, buyW, sellH, sellW, volH, volW] = row;
+    if (viaIdx >= 0) continue; // legacy proxy rows: always recomputed below
 
     const haveRaw = currencies[hi];
     const wantRaw = currencies[wi];
     if (!haveRaw || !wantRaw) continue;
 
-    const via = viaIdx >= 0 ? currencies[viaIdx] : undefined;
-    const isProxy = viaIdx >= 0;
-
     const flipped = haveRaw > wantRaw;
     const have = flipped ? wantRaw : haveRaw;
     const want = flipped ? haveRaw : wantRaw;
-    const key = `${have}/${want}`;
 
-    const entry: ExchangeRateEntry = {
+    direct[`${have}/${want}`] = {
       have,
       want,
-      type: isProxy ? "proxy" : "direct",
-      ...(via ? { via } : {}),
+      type: "direct",
       buy: flipped ? { h: sellW, w: sellH } : { h: buyH, w: buyW },
       sell: flipped ? { h: buyW, w: buyH } : { h: sellH, w: sellW },
       vol: flipped ? { h: volW, w: volH } : { h: volH, w: volW },
       timestamp: ts,
     };
-
-    if (isProxy) {
-      proxy[key] = entry;
-    } else {
-      direct[key] = entry;
-    }
   }
 
+  const timestamp =
+    typeof raw.t === "number" ? raw.t : Math.floor(Date.now() / 1000);
+  const sortedCurrencies = Array.from(new Set(currencies)).sort();
+
   return {
-    timestamp:
-      typeof raw.t === "number" ? raw.t : Math.floor(Date.now() / 1000),
-    currencies: Array.from(currencySet).sort(),
+    timestamp,
+    currencies: sortedCurrencies,
     direct,
-    proxy,
+    proxy: computeProxies(direct, sortedCurrencies, leagueId, timestamp),
   };
 }
 
@@ -779,7 +900,7 @@ function parseR2GameFile(
   if (!file || typeof file.leagues !== "object" || !file.leagues) return null;
   const out: Record<string, LeagueExchangeMaps> = {};
   for (const [leagueId, leagueData] of Object.entries(file.leagues)) {
-    const parsed = parseR2League(leagueData);
+    const parsed = parseR2League(leagueData, leagueId);
     if (parsed) out[leagueId] = parsed;
   }
   return out;
@@ -1050,7 +1171,7 @@ export function convertCurrency(
     return Math.round(rawConverted * 10) / 10;
   }
 
-  // 2. Otherwise, require an explicit pair entry (`direct` or `proxy`) in the R2 JSON
+  // 2. Otherwise, require an explicit pair entry (`direct` or computed `proxy`)
   const preferDirect = get(preferDirectExchange);
   const useTradedVol = get(tadedExchangeRatios);
   const mult = resolvePairMultiplier(

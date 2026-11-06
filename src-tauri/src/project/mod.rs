@@ -1,6 +1,7 @@
 pub mod colorCodingSettings;
 pub mod fetch_prices;
 pub mod statgroup;
+pub mod telemetry;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};

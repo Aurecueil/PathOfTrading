@@ -39,6 +39,10 @@ tokio-util = "0.7.20"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"
+
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
