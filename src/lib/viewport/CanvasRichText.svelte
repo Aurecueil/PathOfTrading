@@ -60,38 +60,129 @@
     }
   }
 
-  function renderMarkdown(raw: string): string {
-    if (!raw?.trim()) {
-      return "<span class='empty-hint'>Double-click to edit...</span>";
+  type InlineToken =
+    | { type: "text"; text: string }
+    | { type: "code"; text: string }
+    | { type: "link"; url: string }
+    | { type: "bold"; text: string }
+    | { type: "italic"; text: string }
+    | { type: "strike"; text: string }
+    | { type: "color"; color: string; text: string };
+
+  type Block =
+    | { type: "codeblock"; text: string }
+    | {
+        type: "h1" | "h2" | "h3" | "subtext" | "quote" | "line";
+        tokens: InlineToken[];
+      }
+    | { type: "list"; indent: number; marker: string; tokens: InlineToken[] };
+
+  // Single-pass tokenizer: no HTML escaping or null-byte placeholders needed
+  const INLINE_REGEX =
+    /`([^`\n]+)`|(https?:\/\/[^\s<>()"]+)|<#([0-9a-fA-F]{3,8})>([^\n]*?)<(?:\/?#\3\/?|\/)>|\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|~~\+?([^~\n]+)~~/g;
+
+  function tokenizeInline(text: string): InlineToken[] {
+    const tokens: InlineToken[] = [];
+    let lastIndex = 0;
+
+    for (const match of text.matchAll(INLINE_REGEX)) {
+      const idx = match.index ?? 0;
+      if (idx > lastIndex) {
+        tokens.push({ type: "text", text: text.slice(lastIndex, idx) });
+      }
+
+      if (match[1] !== undefined) {
+        tokens.push({ type: "code", text: match[1] });
+      } else if (match[2] !== undefined) {
+        // Strip trailing punctuation like .,;:!?) so (https://example.com) leaves ')' as text
+        const cleanUrl = match[2].replace(/[.,;:!?]+$/, "");
+        tokens.push({ type: "link", url: cleanUrl });
+        const trailing = match[2].slice(cleanUrl.length);
+        if (trailing) tokens.push({ type: "text", text: trailing });
+      } else if (match[3] !== undefined) {
+        tokens.push({ type: "color", color: `#${match[3]}`, text: match[4] });
+      } else if (match[5] !== undefined) {
+        tokens.push({ type: "bold", text: match[5] });
+      } else if (match[6] !== undefined) {
+        tokens.push({ type: "italic", text: match[6] });
+      } else if (match[7] !== undefined) {
+        tokens.push({ type: "strike", text: match[7] });
+      }
+
+      lastIndex = idx + match[0].length;
     }
 
-    let html = raw
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-
-    html = html.replace(/```([\s\S]*?)```/g, "<pre><code>$1</code></pre>");
-    html = html.replace(/^### (.*$)/gm, "<h3>$1</h3>");
-    html = html.replace(/^## (.*$)/gm, "<h2>$1</h2>");
-    html = html.replace(/^# (.*$)/gm, "<h1>$1</h1>");
-    html = html.replace(/^&gt; (.*$)/gm, "<blockquote>$1</blockquote>");
-    html = html.replace(/^---$/gm, "<hr />");
-    html = html.replace(/^\s*[-*] (.*$)/gm, "<li>$1</li>");
-    html = html.replace(/(<li>.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`);
-    html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-    html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
-    html = html.replace(/~~(.+?)~~/g, "<del>$1</del>");
-    html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
-    html = html.replace(
-      /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
-    );
-    html = html.replace(/\n/g, "<br />");
-
-    return html;
+    if (lastIndex < text.length) {
+      tokens.push({ type: "text", text: text.slice(lastIndex) });
+    }
+    return tokens;
   }
 
-  $: renderedHtml = renderMarkdown(item.text || "");
+  function parseBlocks(raw: string): Block[] {
+    if (!raw?.trim()) return [];
+
+    const lines = raw.replace(/\r\n?/g, "\n").split("\n");
+    const blocks: Block[] = [];
+    let inCodeBlock = false;
+    let codeBuffer: string[] = [];
+
+    for (const line of lines) {
+      if (line.trim().startsWith("```")) {
+        if (inCodeBlock) {
+          blocks.push({ type: "codeblock", text: codeBuffer.join("\n") });
+          codeBuffer = [];
+          inCodeBlock = false;
+        } else {
+          inCodeBlock = true;
+        }
+        continue;
+      }
+
+      if (inCodeBlock) {
+        codeBuffer.push(line);
+        continue;
+      }
+
+      const heading = line.match(/^(#{1,3}|-#) (.*)$/);
+      if (heading) {
+        const [, prefix, content] = heading;
+        const type =
+          prefix === "-#"
+            ? "subtext"
+            : (`h${prefix.length}` as "h1" | "h2" | "h3");
+        blocks.push({ type, tokens: tokenizeInline(content) });
+        continue;
+      }
+
+      const quote = line.match(/^> ?(.*)$/);
+      if (quote) {
+        blocks.push({ type: "quote", tokens: tokenizeInline(quote[1]) });
+        continue;
+      }
+
+      const list = line.match(/^( *)(?:([-*])|(\d+\.)) (.*)$/);
+      if (list) {
+        blocks.push({
+          type: "list",
+          indent: Math.min(10, Math.floor(list[1].length / 2)),
+          marker: list[2] ? "•" : list[3],
+          tokens: tokenizeInline(list[4]),
+        });
+        continue;
+      }
+
+      blocks.push({ type: "line", tokens: tokenizeInline(line) });
+    }
+
+    // If a ``` block was left unclosed, still render its contents safely
+    if (inCodeBlock && codeBuffer.length) {
+      blocks.push({ type: "codeblock", text: codeBuffer.join("\n") });
+    }
+
+    return blocks;
+  }
+
+  $: blocks = parseBlocks(item.text || "");
 
   function onPointerDown(e: PointerEvent) {
     if (editing || e.button !== 0) return;
@@ -263,11 +354,73 @@
       placeholder="Write markdown... (Enter to submit, Shift+Enter for new line)"
       on:pointerdown|stopPropagation
       on:keydown={onTextareaKeyDown}
-      on:blur={finishEditing}
-    ></textarea>
+      on:blur={finishEditing}></textarea>
   {:else}
     <div class="rt-rendered">
-      {@html renderedHtml}
+      {#if blocks.length === 0}
+        <span class="empty-hint">Double-click to edit...</span>
+      {:else}
+        {#each blocks as block}
+          {#if block.type === "codeblock"}
+            <pre><code>{block.text}</code></pre>
+          {:else if block.type === "list"}
+            <div
+              class="rt-list-item"
+              style:padding-left="{block.indent * 1.25}em"
+            >
+              <span class="rt-list-marker">{block.marker}</span>
+              <span class="rt-list-content">
+                {#each block.tokens as t}
+                  {#if t.type === "link"}<a
+                      href={t.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      on:pointerdown|stopPropagation>{t.url}</a
+                    >
+                  {:else if t.type === "code"}<code>{t.text}</code>
+                  {:else if t.type === "bold"}<strong>{t.text}</strong>
+                  {:else if t.type === "italic"}<em>{t.text}</em>
+                  {:else if t.type === "strike"}<del>{t.text}</del>
+                  {:else if t.type === "color"}<span style:color={t.color}
+                      >{t.text}</span
+                    >
+                  {:else}{t.text}{/if}
+                {/each}
+              </span>
+            </div>
+          {:else}
+            <svelte:element
+              this={block.type === "h1"
+                ? "h1"
+                : block.type === "h2"
+                  ? "h2"
+                  : block.type === "h3"
+                    ? "h3"
+                    : block.type === "quote"
+                      ? "blockquote"
+                      : "div"}
+              class:rt-subtext={block.type === "subtext"}
+            >
+              {#each block.tokens as t}
+                {#if t.type === "link"}<a
+                    href={t.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    on:pointerdown|stopPropagation>{t.url}</a
+                  >
+                {:else if t.type === "code"}<code>{t.text}</code>
+                {:else if t.type === "bold"}<strong>{t.text}</strong>
+                {:else if t.type === "italic"}<em>{t.text}</em>
+                {:else if t.type === "strike"}<del>{t.text}</del>
+                {:else if t.type === "color"}<span style:color={t.color}
+                    >{t.text}</span
+                  >
+                {:else}{t.text}{/if}
+              {/each}
+            </svelte:element>
+          {/if}
+        {/each}
+      {/if}
     </div>
   {/if}
 
@@ -344,7 +497,6 @@
     padding: 0 6px;
     z-index: 30;
     box-sizing: border-box;
-    font-family: "Fontin", monospace, sans-serif;
   }
 
   .rt-toolbar-label {
@@ -363,7 +515,6 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: inherit;
     font-size: 12px;
     line-height: 1;
     cursor: pointer;
@@ -380,7 +531,6 @@
     background: #000000;
     color: #ffffff;
     border: 1px solid #555555;
-    font-family: inherit;
     font-size: 11px;
     text-align: center;
     padding: 0 2px;
@@ -402,7 +552,6 @@
     border: none;
     padding: 4px 6px;
     margin: 0;
-    font-family: "Fontin", monospace, sans-serif;
     font-size: var(--item-font-size, 12px);
     line-height: 1.25;
     outline: none;
@@ -416,7 +565,6 @@
     box-sizing: border-box;
     padding: 4px 6px;
     overflow-y: auto;
-    font-family: "Fontin", monospace, sans-serif;
     font-size: var(--item-font-size, 12px);
     color: #d3d3d3;
     line-height: 1.25;
@@ -441,12 +589,18 @@
     font-weight: bold;
   }
 
+  .rt-rendered :global(.rt-subtext) {
+    font-size: 0.8em;
+    color: #888888;
+    margin: 0 0 0.25rem;
+    line-height: 1.2;
+  }
+
   .rt-rendered :global(code) {
     background: #111111;
     border: 1px solid #555555;
     padding: 0 3px;
     border-radius: 0px;
-    font-family: "Fontin", monospace, sans-serif;
     font-size: 0.9em;
     color: #ffffff;
   }
@@ -460,6 +614,12 @@
     margin: 0.25rem 0;
   }
 
+  .rt-rendered :global(pre code) {
+    border: none;
+    padding: 0;
+    background: transparent;
+  }
+
   .rt-rendered :global(blockquote) {
     margin: 0.25rem 0;
     padding-left: 0.5rem;
@@ -467,15 +627,22 @@
     color: #888888;
   }
 
-  .rt-rendered :global(hr) {
-    border: none;
-    border-top: 1px solid #777777;
-    margin: 0.5rem 0;
+  .rt-rendered :global(.rt-list-item) {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4em;
+    margin: 0.1rem 0;
   }
 
-  .rt-rendered :global(ul) {
-    margin: 0.25rem 0;
-    padding-left: 1.1rem;
+  .rt-rendered :global(.rt-list-marker) {
+    color: #aaaaaa;
+    flex-shrink: 0;
+    user-select: none;
+  }
+
+  .rt-rendered :global(.rt-list-content) {
+    flex: 1;
+    min-width: 0;
   }
 
   .rt-rendered :global(a) {
