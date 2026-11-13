@@ -221,11 +221,11 @@ pub async fn run_poe_refresh_or_challenge(
 #[tauri::command]
 pub async fn refresh_poetoken_background(app: tauri::AppHandle) -> Result<String, String> {
     match run_poe_refresh_or_challenge(app.clone(), false).await {
-        Err(e) if e == CF_BLOCKED_ERR => {
+        Ok(token) => Ok(token),
+        Err(e) => {
             expire_session(&app).await;
             Err(e)
         }
-        other => other,
     }
 }
 

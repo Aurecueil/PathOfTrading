@@ -94,32 +94,40 @@
               .then((updated) => {
                 isLoggedIn = updated.logged_in;
                 accountName = updated.username;
+                authState.set(updated.logged_in);
               })
               .catch(() => {});
           })
-          .catch(() => {});
+          .catch(() => {
+            // Background refresh failed -> show the Session Ended popup
+            checkSessionExpired(true);
+          });
       }
     } catch (err) {
       console.error("Failed to check PoE auth status:", err);
     }
   }
+  function triggerSessionExpiredModal() {
+    isLoggedIn = false;
+    accountName = null;
+    authState.set(false);
+    closeFileMenu();
+    closeAccountMenu();
+    loginModalOpen = false;
+    sessionExpiredOpen = true;
+  }
 
-  async function checkSessionExpired() {
+  async function checkSessionExpired(forceOpen = false) {
     try {
       const expired = await invoke<boolean>("consume_session_expired");
-      if (expired) {
-        isLoggedIn = false;
-        accountName = null;
-        closeFileMenu();
-        closeAccountMenu();
-        loginModalOpen = false;
-        sessionExpiredOpen = true;
+      if (expired || forceOpen) {
+        triggerSessionExpiredModal();
       }
     } catch (err) {
       console.error("Failed to check session expiry:", err);
+      if (forceOpen) triggerSessionExpiredModal();
     }
   }
-
   onMount(() => {
     refreshAuthStatus();
     checkSessionExpired();
@@ -138,7 +146,7 @@
     });
 
     const unlistenExpired = listen("poe_session_expired", () => {
-      checkSessionExpired();
+      checkSessionExpired(true);
     });
     if ($telemetryLevel === null) {
       telemetryChoice = 1;

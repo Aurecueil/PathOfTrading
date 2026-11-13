@@ -446,14 +446,14 @@ const HEADERS_POE1: Record<string, HeaderSet> = {
   },
   viscera: {
     single: art(
-      "header-sentinel",
-      V_RUNIC,
+      "header-viscera",
+      1792542404183,
       [
-        "6Mg2COvT2XXv4a4shVhY7w",
-        "pxPIWOtol-iSxWFBIa_g3A",
-        "-9Xe2vpyeqEKyP3daPqNDQ",
+        "24dgTltoLtddTtyez8c9rg",
+        "duYYKvRZYvixnSFEwBCmpw",
+        "duYYKvRZYvixnSFEwBCmpw",
       ],
-      29,
+      55,
     ),
   },
   rare: {
