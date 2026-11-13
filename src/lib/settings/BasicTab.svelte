@@ -12,16 +12,29 @@
     updateTpHotkey,
     canvasBgPath,
     canvasBgOpacity,
+    doubleTitle,
+    styleType,
+    liveSoundEnabled,
+    liveSoundGainDb,
+    liveSoundCustomData,
+    liveSoundCustomName,
   } from "$lib/trade/tradeStore";
   // Adjust this import path to wherever your fetchCdnImage file is located:
   import {
     getCacheStats,
     clearAllCaches,
   } from "$lib/trade/utilis/imageService";
+  import {
+    previewLiveBlip,
+    stopLiveBlips,
+    livePreviewPlaying,
+  } from "$lib/trade/utilis/liveSound";
   import { telemetryLevel, setTelemetryLevel } from "$lib/project/telemetry";
 
   const DEFAULT_HOTKEY = "CommandOrControl+Shift+T";
-
+  let customFileName = $derived(
+    ($liveSoundCustomData ?? "").split(/[\\/]/).pop() ?? "",
+  );
   let {
     onStatus,
     isDraggingOpacity = $bindable(false),
@@ -262,6 +275,51 @@
     canvasBgPath.set("");
     onStatus("Background image cleared");
   }
+
+  let soundFileInput: HTMLInputElement | undefined = $state();
+
+  function handleSoundFileSelect(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("audio/")) {
+      onStatus("Selected file is not an audio file");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        liveSoundCustomData.set(reader.result);
+      }
+      if (typeof reader.result === "string") {
+        liveSoundCustomData.set(reader.result);
+        liveSoundCustomName.set(file.name);
+        onStatus(`Live blip set to ${file.name}`);
+        previewLiveBlip();
+      }
+    };
+    reader.onerror = () => onStatus("Failed to read sound file");
+    reader.readAsDataURL(file);
+  }
+
+  function resetLiveSound() {
+    liveSoundCustomData.set("");
+    liveSoundCustomName.set("");
+    onStatus("Live blip reset to default");
+  }
+  function clampGain(e: Event) {
+    const el = e.currentTarget as HTMLInputElement;
+    let v = parseFloat(el.value.replace(",", "."));
+    if (!Number.isFinite(v)) v = $liveSoundGainDb; // invalid input: keep previous value
+    v = Math.min(96, Math.max(-96, v));
+    liveSoundGainDb.set(v);
+    el.value = String(v);
+  }
+
+  function gainKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+  }
 </script>
 
 <!-- Checkboxes -->
@@ -293,7 +351,32 @@
   <span class="pb-box"></span>
   <span class="pb-check-text">Compact mercenary display</span>
 </label>
+<label class="pb-check">
+  <input type="checkbox" bind:checked={$liveSoundEnabled} />
+  <span class="pb-box"></span>
+  <span class="pb-check-text">Livesearch blip</span>
+</label>
+<label class="pb-check">
+  <input
+    type="checkbox"
+    bind:checked={() => !$doubleTitle, (v) => ($doubleTitle = !v)}
+  />
+  <span class="pb-box"></span>
+  <span class="pb-check-text">Compact Item Names</span>
+</label>
+
 <div class="st-form-grid">
+  <div class="st-grid-row">
+    <label class="pb-check-text" for="telemetry-select">Frame Style</label>
+    <div class="st-col-control">
+      <select id="telemetry-select" class="st-select" bind:value={$styleType}>
+        <option value={null} disabled hidden></option>
+        <option value={0}>Simple</option>
+        <option value={1}>Styled</option>
+      </select>
+    </div>
+  </div>
+
   <!-- Language -->
   <div class="st-grid-row">
     <label class="pb-check-text" for="language-select">Language</label>
@@ -318,6 +401,7 @@
       </button>
     </div>
   </div>
+
   <!-- Telemetry -->
   <div class="st-grid-row">
     <label class="pb-check-text" for="telemetry-select">Telemetry</label>
@@ -368,7 +452,63 @@
       </button>
     </div>
   </div>
-
+  <!-- Live search blip -->
+  <div class="st-grid-row">
+    <span class="pb-check-text">Livesearch Blip</span>
+    <div class="st-col-control">
+      <input
+        bind:this={soundFileInput}
+        type="file"
+        accept="audio/*"
+        style="display: none;"
+        onchange={handleSoundFileSelect}
+      />
+      <span class="pb-check-text st-file-name" title={$liveSoundCustomName}>
+        {$liveSoundCustomData
+          ? $liveSoundCustomName || "Custom file"
+          : "Default Bip"}
+      </span>
+      <button
+        type="button"
+        class="st-btn"
+        onclick={() => soundFileInput?.click()}
+      >
+        Select…
+      </button>
+      {#if $liveSoundCustomData}
+        <button type="button" class="st-btn" onclick={resetLiveSound}
+          >Reset</button
+        >
+      {/if}
+      <button type="button" class="st-btn" onclick={previewLiveBlip}>
+        ▶ Preview
+      </button>
+      <button
+        type="button"
+        class="st-btn"
+        onclick={stopLiveBlips}
+        disabled={!$livePreviewPlaying}
+      >
+        ■ Stop
+      </button>
+    </div>
+  </div>
+  <div class="st-grid-row">
+    <label class="pb-check-text" for="blip-gain-input">Blip Gain</label>
+    <div class="st-col-control">
+      <input
+        id="blip-gain-input"
+        type="text"
+        inputmode="decimal"
+        autocomplete="off"
+        class="st-select st-db-input"
+        value={$liveSoundGainDb}
+        onchange={clampGain}
+        onkeydown={gainKeydown}
+      />
+      <span class="pb-check-text">dB</span>
+    </div>
+  </div>
   <!-- Background Image -->
   <div class="st-grid-row st-align-top">
     <span class="pb-check-text st-label-pad">Background Image</span>
@@ -529,7 +669,11 @@
     outline: none;
     cursor: pointer;
   }
-
+  .st-db-input {
+    width: 70px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
   .st-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;

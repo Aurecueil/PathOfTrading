@@ -80,6 +80,13 @@ export const ITEM_STYLES: Record<string, ItemStyle> = {
     side_bar_color: "#af6025",
     body_tint_color: "#af602512",
   },
+  viscera: {
+    title_font_color: "#8FA0C2",
+    title_bar_color: "#5A4533",
+    title_line_color: "#6B523D",
+    side_bar_color: "#5A4533",
+    body_tint_color: "#1A120E",
+  },
   runicnormal: normal,
   runicmagic: magic,
   runicrare: rare,
@@ -436,6 +443,18 @@ const HEADERS_POE1: Record<string, HeaderSet> = {
       "Ns5zBHC-Iiy7UlkZJ8Mqug",
       "FFR-bQYccIWgM7HdwCnSDw",
     ]),
+  },
+  viscera: {
+    single: art(
+      "header-sentinel",
+      V_RUNIC,
+      [
+        "6Mg2COvT2XXv4a4shVhY7w",
+        "pxPIWOtol-iSxWFBIa_g3A",
+        "-9Xe2vpyeqEKyP3daPqNDQ",
+      ],
+      29,
+    ),
   },
   rare: {
     single: art("header-rare", V_BASE, [

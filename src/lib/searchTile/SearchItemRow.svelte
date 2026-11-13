@@ -21,16 +21,12 @@
   import type { Realm } from "$lib/types/leagues";
   import {
     DEFAULT_STYLE,
-    getFoilGradient,
-    getStyledHeaderBg,
-    isRunicFrame,
-    resolveItemStyle,
     styleToCssVars,
-    resolveRarityTint,
     buildItemVisuals,
   } from "$lib/trade/components/item/itemStyles";
   import "$lib/trade/components/item/foilTitle.css";
   import { getBaseTypeLabel } from "$lib/trade/components/item/stats/statsUtils";
+  import { doubleTitle, styleType } from "$lib/trade/tradeStore";
 
   export let displayCurrency: string = "chaos";
   export let displayOptions: Partial<TileDisplayOptions> | null = null;
@@ -49,10 +45,8 @@
   export let tpQueued: boolean = false;
   export let tpVisited: boolean = false;
   export let tpError: string | null = null;
-  export let styleType: number = 1; // 0 | 1
   export let gone: boolean = false;
   $: isGone = gone || data?.gone === true;
-  export let doubleTitle: boolean = true;
   export let onRefresh: ((realId: string) => Promise<void>) | null = null;
   let isRefreshing = false;
 
@@ -204,7 +198,7 @@
   $: fullItemTitle = [titleName, titleBase].filter(Boolean).join(" ");
 
   $: useDoubleTitle =
-    doubleTitle && !!titleName && !!titleBase && resolvedStyle !== "minimal";
+    $doubleTitle && !!titleName && !!titleBase && resolvedStyle !== "minimal";
 
   $: displayItem =
     item && isMercenaryWarrant && mercenaryName && item.properties?.length
@@ -276,8 +270,8 @@
   /* Frame Style, Left Rarity/Frame Tint & Supporter Foil Colors        */
   /* ------------------------------------------------------------------ */
 
-  $: isStyled = styleType === 1;
-  $: visuals = buildItemVisuals(item, realm, styleType, useDoubleTitle);
+  $: isStyled = $styleType === 1;
+  $: visuals = buildItemVisuals(item, realm, $styleType, useDoubleTitle);
   $: styledHeaderBg = isStyled ? visuals.headerBg : "";
   $: symbols = item ? getCategorySymbols(item, visuals.isPoe2) : [];
   $: extendedCells = buildExtendedCells(item?.extended, visuals.isPoe2);
@@ -413,8 +407,8 @@
       <div
         class="title-wrap"
         bind:this={titleWrapEl}
-        style:margin-inline={styleType === 1 ? "-1px" : null}
-        style:width={styleType === 1 ? "calc(100% + 2px)" : "calc(100% + 1px)"}
+        style:margin-inline={$styleType === 1 ? "-1px" : null}
+        style:width={$styleType === 1 ? "calc(100% + 2px)" : "calc(100% + 1px)"}
       >
         <ItemTitleBar
           name={titleName}

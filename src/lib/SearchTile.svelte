@@ -17,6 +17,7 @@
   import SearchItemRow from "$lib/searchTile/SearchItemRow.svelte";
   import ItemJsonModal from "$lib/trade/components/item/ItemJsonModal.svelte";
   import { authState, isDev, leagueToRealm } from "$lib/trade/tradeStore";
+  import { playLiveBlip } from "$lib/trade/utilis/liveSound";
 
   export let tile: SearchTile;
   export let scale: number = 1;
@@ -1089,6 +1090,8 @@
           if (isDestroyed || !tile.searchId) return;
           const messages = parseLiveEventMessages(event.payload);
           if (messages.length === 0) return;
+
+          playLiveBlip();
 
           const currentSearchId = tile.searchId;
 

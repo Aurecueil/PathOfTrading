@@ -76,6 +76,12 @@ type UiSettings = {
   tadedExchangeRatios?: unknown;
   compactMercenaryDisplay?: boolean;
   tpHotkey?: string;
+  doubleTitle?: boolean;
+  styleType?: number;
+  liveSoundEnabled?: boolean;
+  liveSoundCustomData?: string;
+  liveSoundGainDb?: number;
+  liveSoundCustomName?: string;
 };
 
 function readUiSettings(): UiSettings {
@@ -116,12 +122,18 @@ export const tpHotkey = writable<string>(
 export const displayTiers = writable<boolean>(
   typeof initialUi.displayTiers === "boolean" ? initialUi.displayTiers : false,
 );
+// Display Settings
+export const doubleTitle = writable<boolean>(
+  typeof initialUi.doubleTitle === "boolean" ? initialUi.doubleTitle : false,
+);
+export const styleType = writable<number>(
+  typeof initialUi.styleType === "number" ? initialUi.styleType : 1,
+);
 
 // Hide socketable modifiers (if hidden, displayRune is false)
 export const displayRune = writable<boolean>(
   typeof initialUi.displayRune === "boolean" ? initialUi.displayRune : true,
 );
-
 export const canvasBgPath = writable<string>(
   typeof initialUi.canvasBgPath === "string" ? initialUi.canvasBgPath : "",
 );
@@ -132,7 +144,30 @@ export const canvasBgOpacity = writable<number>(
     ? initialUi.canvasBgOpacity
     : 0.35,
 );
+// Live search blip
+export const liveSoundEnabled = writable<boolean>(
+  typeof initialUi.liveSoundEnabled === "boolean"
+    ? initialUi.liveSoundEnabled
+    : true,
+);
 
+// data: URL of a user-selected file, "" = use bundled /blip.mp3
+export const liveSoundCustomData = writable<string>(
+  typeof initialUi.liveSoundCustomData === "string"
+    ? initialUi.liveSoundCustomData
+    : "",
+);
+export const liveSoundGainDb = writable<number>(
+  typeof initialUi.liveSoundGainDb === "number" &&
+    Number.isFinite(initialUi.liveSoundGainDb)
+    ? Math.min(96, Math.max(-96, initialUi.liveSoundGainDb))
+    : 0,
+);
+export const liveSoundCustomName = writable<string>(
+  typeof initialUi.liveSoundCustomName === "string"
+    ? initialUi.liveSoundCustomName
+    : "",
+);
 function persistUiSettings() {
   if (typeof window === "undefined") return;
   try {
@@ -148,6 +183,12 @@ function persistUiSettings() {
         tadedExchangeRatios: get(tadedExchangeRatios),
         compactMercenaryDisplay: get(compactMercenaryDisplay),
         tpHotkey: get(tpHotkey),
+        styleType: get(styleType),
+        doubleTitle: get(doubleTitle),
+        liveSoundEnabled: get(liveSoundEnabled),
+        liveSoundCustomData: get(liveSoundCustomData),
+        liveSoundGainDb: get(liveSoundGainDb),
+        liveSoundCustomName: get(liveSoundCustomName),
       }),
     );
   } catch {
@@ -164,7 +205,12 @@ preferDirectExchange.subscribe(persistUiSettings);
 tadedExchangeRatios.subscribe(persistUiSettings);
 compactMercenaryDisplay.subscribe(persistUiSettings);
 tpHotkey.subscribe(persistUiSettings);
-
+styleType.subscribe(persistUiSettings);
+doubleTitle.subscribe(persistUiSettings);
+liveSoundEnabled.subscribe(persistUiSettings);
+liveSoundCustomData.subscribe(persistUiSettings);
+liveSoundGainDb.subscribe(persistUiSettings);
+liveSoundCustomName.subscribe(persistUiSettings);
 // Keep other app windows in sync (the "storage" event only fires in other windows)
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (e) => {
@@ -178,6 +224,7 @@ if (typeof window !== "undefined") {
       canvasBgPath.set(next.canvasBgPath);
     if (typeof next.canvasBgOpacity === "number")
       canvasBgOpacity.set(next.canvasBgOpacity);
+    if (typeof next.styleType === "number") styleType.set(next.styleType);
     if (typeof next.showTooltips === "boolean")
       showTooltips.set(next.showTooltips);
     if (typeof next.preferDirectExchange === "boolean")
@@ -186,7 +233,17 @@ if (typeof window !== "undefined") {
       tadedExchangeRatios.set(next.tadedExchangeRatios as any);
     if (typeof next.compactMercenaryDisplay === "boolean")
       compactMercenaryDisplay.set(next.compactMercenaryDisplay);
+    if (typeof next.doubleTitle === "boolean")
+      doubleTitle.set(next.doubleTitle);
     if (typeof next.tpHotkey === "string") tpHotkey.set(next.tpHotkey);
+    if (typeof next.liveSoundEnabled === "boolean")
+      liveSoundEnabled.set(next.liveSoundEnabled);
+    if (typeof next.liveSoundCustomData === "string")
+      liveSoundCustomData.set(next.liveSoundCustomData);
+    if (typeof next.liveSoundGainDb === "number")
+      liveSoundGainDb.set(next.liveSoundGainDb);
+    if (typeof next.liveSoundCustomName === "string")
+      liveSoundCustomName.set(next.liveSoundCustomName);
   });
 }
 
