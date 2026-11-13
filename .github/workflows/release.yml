@@ -82,4 +82,4 @@ jobs:
           releaseName: "Path of Trading v__VERSION__"
           bodyPath: "./RELEASE_NOTES.md"
           releaseDraft: false
-          prere
+          prerelease: false
