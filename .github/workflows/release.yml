@@ -12,12 +12,28 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [windows-latest] # macos-latest, ubuntu-latest
+        # Use ubuntu-22.04 for broad glibc compatibility across Linux distros
+        platform: [windows-latest, ubuntu-22.04]
 
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          # For Tauri v2 (use libwebkit2gtk-4.0-dev and libsoup2.4-dev if on Tauri v1)
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -48,6 +64,8 @@ jobs:
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
 
       - name: Install frontend dependencies
         run: pnpm install
@@ -64,4 +82,4 @@ jobs:
           releaseName: "Path of Trading v__VERSION__"
           bodyPath: "./RELEASE_NOTES.md"
           releaseDraft: false
-          prerelease: false
+          prere
