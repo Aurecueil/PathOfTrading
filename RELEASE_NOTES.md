@@ -1,3 +1,8 @@
+0.7.4
+
+- (attempt) Fix linux sound
+- (attempt) Fix linux auto-update
+  0.7.3
 - Compact Title and Frame Style settings
 - visceral frame added (speculated)
 - live search bip
