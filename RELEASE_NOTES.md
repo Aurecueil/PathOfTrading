@@ -2,6 +2,7 @@
 
 - (attempt) Fix linux sound
 - (attempt) Fix linux auto-update
+- Fix coven thingies styled frame (still kinda scuffed)
   0.7.3
 - Compact Title and Frame Style settings
 - visceral frame added (speculated)

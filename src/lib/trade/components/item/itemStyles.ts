@@ -82,7 +82,7 @@ export const ITEM_STYLES: Record<string, ItemStyle> = {
   },
   viscera: {
     title_font_color: "#8FA0C2",
-    title_bar_color: "#5A4533",
+    title_bar_color: "#3c2a19",
     title_line_color: "#6B523D",
     side_bar_color: "#5A4533",
     body_tint_color: "#1A120E",
@@ -205,6 +205,7 @@ const CDN = "https://web.poecdn.com/protected/image/item";
 const V_BASE = 1709582916256;
 const V_RELIC2 = 1742523473552;
 const V_RUNIC = 1777507982778;
+const V_STRAWMAN = 1792542404183;
 
 type Keys = [left: string, right: string, middle: string];
 interface HeaderArt {
@@ -446,14 +447,14 @@ const HEADERS_POE1: Record<string, HeaderSet> = {
   },
   viscera: {
     single: art(
-      "header-viscera",
-      1792542404183,
+      "viscera/header-viscera",
+      V_STRAWMAN,
       [
         "24dgTltoLtddTtyez8c9rg",
         "duYYKvRZYvixnSFEwBCmpw",
-        "duYYKvRZYvixnSFEwBCmpw",
+        "X_MRKJky_pMbbyRRpeAakg",
       ],
-      55,
+      45,
     ),
   },
   rare: {
