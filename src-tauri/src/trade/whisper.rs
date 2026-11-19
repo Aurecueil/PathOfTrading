@@ -3,6 +3,40 @@ use reqwest::header::{COOKIE, ORIGIN, REFERER, USER_AGENT};
 use reqwest::Client;
 use serde_json::{json, Value};
 
+async fn send_whisper(
+    client: &Client,
+    url: &str,
+    referer_url: &str,
+    origin: &str,
+    cookie_header: &str,
+    payload: &Value,
+) -> Result<Value, String> {
+    let res = client
+        .post(url)
+        .header(USER_AGENT, "Aurecueil.PathOfTrading (dc:aurecueil)")
+        .header(REFERER, referer_url)
+        .header(ORIGIN, origin)
+        .header("X-Requested-With", "XMLHttpRequest")
+        .header(COOKIE, cookie_header)
+        .json(payload)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP request error: {e}"))?;
+
+    let status = res.status();
+    let body_text = res
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response body: {e}"))?;
+
+    if !status.is_success() {
+        return Err(body_text);
+    }
+
+    serde_json::from_str(&body_text)
+        .map_err(|e| format!("Failed to parse response body as JSON: {e}"))
+}
+
 #[tauri::command]
 pub async fn whisper(
     token: String,
@@ -24,39 +58,38 @@ pub async fn whisper(
     if let Some(cf) = cf_clearance {
         cookie_header.push_str(&format!("; cf_clearance={cf}"));
     }
+
     let trade_path = if realm == "poe2" { "trade2" } else { "trade" };
     let url = format!("{endpoint}/api/{trade_path}/whisper");
-
-    // Adjust this URL to match the exact search URL/view where the whisper originates
     let referer_url = format!("{endpoint}/{trade_path}/search/{league}/{searchId}");
 
-    let payload = json!({
-        "token": token,
-        "continue": true
-    });
+    // First request: no `continue`
+    let first_payload = json!({ "token": token });
+    let first = send_whisper(
+        &client,
+        &url,
+        &referer_url,
+        &endpoint,
+        &cookie_header,
+        &first_payload,
+    )
+    .await?;
 
-    let res = client
-        .post(&url)
-        .header(USER_AGENT, "Aurecueil.PathOfTrading (dc:aurecueil)")
-        .header(REFERER, referer_url)
-        .header(ORIGIN, endpoint)
-        .header("X-Requested-With", "XMLHttpRequest")
-        .header(COOKIE, cookie_header)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| format!("HTTP request error: {e}"))?;
-
-    let status = res.status();
-    let body_text = res
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read response body: {e}"))?;
-
-    if !status.is_success() {
-        return Err(body_text);
+    // success:false with a `continue` -> one followup using that value
+    if first.get("success").and_then(Value::as_bool) == Some(false) {
+        if let Some(c) = first.get("continue") {
+            let followup_payload = json!({ "token": token, "continue": c });
+            return send_whisper(
+                &client,
+                &url,
+                &referer_url,
+                &endpoint,
+                &cookie_header,
+                &followup_payload,
+            )
+            .await;
+        }
     }
-    let body: Value = serde_json::from_str(&body_text)
-        .map_err(|e| format!("Failed to parse response body as JSON: {e}"))?;
-    Ok(body)
+
+    Ok(first)
 }

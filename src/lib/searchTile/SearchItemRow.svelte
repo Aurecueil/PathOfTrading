@@ -69,6 +69,7 @@
   }
 
   function parseErrorObject(err: any): any | null {
+    console.log(err);
     if (err && typeof err === "object") return err;
     if (typeof err === "string") {
       const s = err.indexOf("{");
@@ -90,7 +91,7 @@
     if (code === 1) return true;
     const msg =
       o?.error?.message ?? o?.message ?? (typeof err === "string" ? err : "");
-    return /item no longer available/i.test(String(msg));
+    return /tem no longer available/i.test(String(msg));
   }
 
   let isTraveling = false;

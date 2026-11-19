@@ -102,6 +102,7 @@
 
   function showTpMessage(msg: string) {
     tpMessage = msg;
+    console.log(msg);
     clearTimeout(tpMessageTimer);
     tpMessageTimer = setTimeout(() => (tpMessage = ""), 3000);
   }

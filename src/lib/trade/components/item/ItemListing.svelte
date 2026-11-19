@@ -42,6 +42,7 @@
   function formatErrorMessage(raw: string | null): string | null {
     if (!raw) return null;
     const trimmed = raw.trim();
+    console.log(raw);
     const start = trimmed.indexOf("{");
     const end = trimmed.lastIndexOf("}");
     if (start !== -1 && end > start) {

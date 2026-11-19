@@ -88,6 +88,7 @@ export interface ItemModFlags {
   fractured?: boolean;
   mutated?: boolean;
   crafted?: boolean;
+  rareonly?: boolean;
   /** PoE2 only */
   desecrated?: boolean;
   /** PoE1 only */

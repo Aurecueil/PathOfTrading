@@ -200,6 +200,7 @@
   class:is-crafted={parsed.flags.crafted}
   class:is-mutated={parsed.flags.mutated}
   class:is-fractured={parsed.flags.fractured}
+  class:is-rareonly={parsed.flags.rareonly}
   class:poe2={isPoe2}
   style:--badge-count={parsed.tierParts.length > 0
     ? parsed.tierParts.length - 1
@@ -437,6 +438,14 @@
   }
   .mod-row.is-fractured .mod-text-center {
     color: #b58e3a !important;
+  }
+
+  .mod-row.is-rareonly {
+    --mod: #db982a;
+    --mod-rgb: 219, 152, 42;
+  }
+  .mod-row.is-rareonly .mod-text-center {
+    color: #db982a !important;
   }
 
   /* ---- Badges (plain text, same font size as modifier) ---- */

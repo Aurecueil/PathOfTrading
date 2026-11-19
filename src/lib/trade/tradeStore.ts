@@ -58,7 +58,7 @@ export const loadError = writable<string | null>(null);
 export const currentLanguage = writable<string>("EN");
 
 export const authState = writable<boolean>(false);
-export const isDev = writable<boolean>(false);
+export const isDev = writable<boolean>(true);
 export { preferDirectExchange, tadedExchangeRatios };
 
 // ---------------------------------------------------------------------------
