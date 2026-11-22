@@ -70,6 +70,27 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      - name: Extract release notes for current tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          NOTES=$(awk -v ver="$VERSION" '
+            $0 ~ "^##[[:space:]]+v?" ver "([[:space:]]|$)" { flag=1; next }
+            /^##[[:space:]]+/ && flag { exit }
+            flag { print }
+          ' ./RELEASE_NOTES.md)
+
+          if [ -z "$NOTES" ]; then
+            echo "Warning: No section found for $VERSION in RELEASE_NOTES.md"
+            NOTES="Release $VERSION"
+          fi
+
+          {
+            echo 'RELEASE_NOTES<<EOF'
+            echo "$NOTES"
+            echo 'EOF'
+          } >> "$GITHUB_ENV"
+
       - name: Build and Release Tauri App
         uses: tauri-apps/tauri-action@v0
         env:
@@ -80,6 +101,6 @@ jobs:
         with:
           tagName: __VERSION__
           releaseName: "Path of Trading v__VERSION__"
-          bodyPath: "./RELEASE_NOTES.md"
+          releaseBody: ${{ env.RELEASE_NOTES }}
           releaseDraft: false
           prerelease: false

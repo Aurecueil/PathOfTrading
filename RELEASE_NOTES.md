@@ -1,9 +1,14 @@
-0.7.4
+## 0.7.5
+
+- import from links / protocol
+- (attempt) fix live-search updating
+
+## 0.7.4
 
 - Fix teleport to hideout button
 - `rare only` modifier color (eg. "Area contains a Mirage" map mod)
 
-  0.7.3
+## 0.7.3
 
 - (attempt) Fix linux sound
 - (attempt) Fix linux auto-update
