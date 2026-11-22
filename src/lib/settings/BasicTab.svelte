@@ -18,6 +18,8 @@
     liveSoundGainDb,
     liveSoundCustomData,
     liveSoundCustomName,
+    maskShaperBgWithCdnAlpha,
+    enableShaperEffect,
   } from "$lib/trade/tradeStore";
   // Adjust this import path to wherever your fetchCdnImage file is located:
   import {
@@ -364,6 +366,25 @@
   <span class="pb-box"></span>
   <span class="pb-check-text">Compact Item Names</span>
 </label>
+
+<label class="pb-check">
+  <input type="checkbox" bind:checked={$enableShaperEffect} />
+  <span class="pb-box"></span>
+  <span class="pb-check-text">Animate Shaper BG</span>
+</label>
+
+{#if $enableShaperEffect}
+  <!-- Inverted: checked = fill Shaper BG = maskShaperBgWithCdnAlpha false -->
+  <label class="pb-check">
+    <input
+      type="checkbox"
+      checked={!$maskShaperBgWithCdnAlpha}
+      onchange={(e) => maskShaperBgWithCdnAlpha.set(!e.currentTarget.checked)}
+    />
+    <span class="pb-box"></span>
+    <span class="pb-check-text">Fill Shaper BG</span>
+  </label>
+{/if}
 
 <div class="st-form-grid">
   <div class="st-grid-row">

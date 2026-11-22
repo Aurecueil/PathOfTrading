@@ -1,5 +1,6 @@
-## 0.7.5
+## 0.7.6
 
+- Animated shaper background
 - import from links / protocol
 - (attempt) fix live-search updating
 

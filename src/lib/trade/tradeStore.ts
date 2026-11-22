@@ -58,7 +58,7 @@ export const loadError = writable<string | null>(null);
 export const currentLanguage = writable<string>("EN");
 
 export const authState = writable<boolean>(false);
-export const isDev = writable<boolean>(true);
+export const isDev = writable<boolean>(false);
 export { preferDirectExchange, tadedExchangeRatios };
 
 // ---------------------------------------------------------------------------
@@ -82,6 +82,8 @@ type UiSettings = {
   liveSoundCustomData?: string;
   liveSoundGainDb?: number;
   liveSoundCustomName?: string;
+  maskShaperBgWithCdnAlpha?: boolean;
+  enableShaperEffect?: boolean;
 };
 
 function readUiSettings(): UiSettings {
@@ -168,6 +170,19 @@ export const liveSoundCustomName = writable<string>(
     ? initialUi.liveSoundCustomName
     : "",
 );
+
+// Shaper background & effect settings
+export const maskShaperBgWithCdnAlpha = writable<boolean>(
+  typeof initialUi.maskShaperBgWithCdnAlpha === "boolean"
+    ? initialUi.maskShaperBgWithCdnAlpha
+    : true,
+);
+export const enableShaperEffect = writable<boolean>(
+  typeof initialUi.enableShaperEffect === "boolean"
+    ? initialUi.enableShaperEffect
+    : true,
+);
+
 function persistUiSettings() {
   if (typeof window === "undefined") return;
   try {
@@ -189,6 +204,8 @@ function persistUiSettings() {
         liveSoundCustomData: get(liveSoundCustomData),
         liveSoundGainDb: get(liveSoundGainDb),
         liveSoundCustomName: get(liveSoundCustomName),
+        maskShaperBgWithCdnAlpha: get(maskShaperBgWithCdnAlpha),
+        enableShaperEffect: get(enableShaperEffect),
       }),
     );
   } catch {
@@ -211,6 +228,9 @@ liveSoundEnabled.subscribe(persistUiSettings);
 liveSoundCustomData.subscribe(persistUiSettings);
 liveSoundGainDb.subscribe(persistUiSettings);
 liveSoundCustomName.subscribe(persistUiSettings);
+maskShaperBgWithCdnAlpha.subscribe(persistUiSettings);
+enableShaperEffect.subscribe(persistUiSettings);
+
 // Keep other app windows in sync (the "storage" event only fires in other windows)
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (e) => {
@@ -244,6 +264,10 @@ if (typeof window !== "undefined") {
       liveSoundGainDb.set(next.liveSoundGainDb);
     if (typeof next.liveSoundCustomName === "string")
       liveSoundCustomName.set(next.liveSoundCustomName);
+    if (typeof next.maskShaperBgWithCdnAlpha === "boolean")
+      maskShaperBgWithCdnAlpha.set(next.maskShaperBgWithCdnAlpha);
+    if (typeof next.enableShaperEffect === "boolean")
+      enableShaperEffect.set(next.enableShaperEffect);
   });
 }
 
@@ -289,8 +313,8 @@ function getPoe2KeywordsUrl(): string {
 }
 
 /**
- * Fetches JSON from Cache Storage if available; otherwise fetches from network
- * and stores it in `app-cdn-images-v1` for future launches.
+- Fetches JSON from Cache Storage if available; otherwise fetches from network
+- and stores it in `app-cdn-images-v1` for future launches.
  */
 async function fetchCachedJson<T>(url: string): Promise<T> {
   let cache: Cache | null = null;
@@ -328,7 +352,7 @@ export const isLeaguesLoading = writable<boolean>(false);
 export const leaguesError = writable<string | null>(null);
 
 /**
- * Loads PoE & PoE2 leagues first to unblock critical UI flows immediately.
+- Loads PoE & PoE2 leagues first to unblock critical UI flows immediately.
  */
 export async function initLeaguesData(): Promise<void> {
   isLeaguesLoading.set(true);
