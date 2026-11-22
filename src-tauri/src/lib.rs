@@ -45,6 +45,14 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            use tauri::Manager;
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .setup(move |app| {
             let app_handle = app.handle().clone();
 
@@ -80,6 +88,11 @@ pub fn run() {
                 unsafe {
                     let _ = SetWindowSubclass(HWND(raw as _), Some(block_alt_menu), 1, 0);
                 }
+            }
+            #[cfg(any(windows, target_os = "linux"))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                app.deep_link().register_all()?;
             }
             Ok(())
         })

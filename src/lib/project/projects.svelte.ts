@@ -366,10 +366,12 @@ export async function triggerSaveActiveProject(): Promise<boolean> {
   return false;
 }
 
-export function triggerImportElementsIntoActive(items: ProjectItem[]) {
+export function triggerImportElementsIntoActive(items: ProjectItem[]): boolean {
   if (activeImportElementsHandler) {
     activeImportElementsHandler(items);
+    return true;
   }
+  return false;
 }
 
 export function getActiveSharePayload(
@@ -544,7 +546,7 @@ export async function createNewProject(options: {
     league,
     camera,
     updated_at: Date.now(),
-    items: [],
+    items: options.initialItems ?? [],
   };
 
   sessionCameras.set(id, { ...camera });

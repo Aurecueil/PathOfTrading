@@ -20,22 +20,30 @@ pub async fn search_items_trade(
     };
     let url = format!("{endpoint}/api/{trade_path}/search/{poe_platform}{league}");
 
-    let poe_token =
-        load_secret("poetoken")?.ok_or_else(|| "Missing 'poetoken' secret".to_string())?;
-    let poesessid =
-        load_secret("poesessid")?.ok_or_else(|| "Missing 'poesessid' secret".to_string())?;
-    let cf_clearance = load_secret("cf_clearance")?.filter(|s| !s.trim().is_empty());
+    let mut cookies = Vec::new();
 
-    let mut cookie_header = format!("POESESSID={poesessid}; poetoken={poe_token}");
-    if let Some(cf) = cf_clearance {
-        cookie_header.push_str(&format!("; cf_clearance={cf}"));
+    if let Some(poesessid) = load_secret("poesessid")?.filter(|s| !s.trim().is_empty()) {
+        cookies.push(format!("POESESSID={poesessid}"));
     }
 
-    let data = client
+    if let Some(poe_token) = load_secret("poetoken")?.filter(|s| !s.trim().is_empty()) {
+        cookies.push(format!("poetoken={poe_token}"));
+    }
+
+    if let Some(cf) = load_secret("cf_clearance")?.filter(|s| !s.trim().is_empty()) {
+        cookies.push(format!("cf_clearance={cf}"));
+    }
+
+    let mut request = client
         .post(&url)
         .header(CONTENT_TYPE, "application/json")
-        .header(USER_AGENT, "Aurecueil.PathOfTrading (dc:aurecueil)")
-        .header(COOKIE, cookie_header)
+        .header(USER_AGENT, "Aurecueil.PathOfTrading (dc:aurecueil)");
+
+    if !cookies.is_empty() {
+        request = request.header(COOKIE, cookies.join("; "));
+    }
+
+    let data = request
         .json(&payload)
         .send()
         .await

@@ -711,7 +711,7 @@
         bodyElement.scrollTop = 0;
       }
 
-      if (!$authState || mode === "regular") {
+      if (!$authState || mode === "regular" || mode === "mixed") {
         for (const id of tile.results) {
           const entry: DisplayEntry = {
             uid: `reg_${id}_${uidCounter++}`,
@@ -913,6 +913,7 @@
     if (isDestroyed) return;
 
     const usedPlaceholderUids = new Set<string>();
+    const bumpedEntries: DisplayEntry[] = [];
     let placeholderIdx = 0;
 
     for (const itemData of fetchedResults) {
@@ -920,9 +921,11 @@
       const realId = itemData.id;
 
       if (itemsMap.has(realId)) {
+        // Already known: update in place, (maybe) move to top afterwards
         const existing = itemsMap.get(realId)!;
         existing.data = itemData;
         existing.isLive = true;
+        if (!bumpedEntries.includes(existing)) bumpedEntries.push(existing);
       } else if (placeholderIdx < placeholders.length) {
         const targetPlaceholder = placeholders[placeholderIdx++];
         targetPlaceholder.id = realId;
@@ -944,6 +947,8 @@
       }
     }
     noteGone(fetchedResults);
+
+    // Drop placeholders that were not used (their item already existed)
     const unusedPlaceholderUids = new Set(
       placeholders
         .filter((p) => !usedPlaceholderUids.has(p.uid))
@@ -957,8 +962,19 @@
     }
 
     if (mode === "mixed") {
+      // Only update; sorting decides the position
       sortOrderedList();
     } else {
+      // Live mode: push refreshed existing items to the top
+      if (bumpedEntries.length > 0) {
+        const bumpedSet = new Set(bumpedEntries);
+        orderedEntries = [
+          ...bumpedEntries,
+          ...orderedEntries.filter((e) => !bumpedSet.has(e)),
+        ];
+      } else {
+        orderedEntries = [...orderedEntries]; // trigger reactivity for data updates
+      }
       syncDisplayedSlice();
     }
   }

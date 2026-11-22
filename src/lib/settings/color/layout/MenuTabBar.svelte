@@ -1,6 +1,6 @@
 <!-- src/lib/layout/MenuTabBar.svelte -->
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { page } from "$app/stores";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
@@ -27,10 +27,43 @@
   import { updaterState, renderMarkdown } from "$lib/update.svelte";
   import { telemetryLevel, setTelemetryLevel } from "$lib/project/telemetry";
   import Check from "$lib/settings/color/Check.svelte";
+  import {
+    importFromTradeInput,
+    registerDeepLinks,
+  } from "$lib/project/tradeImport";
+
   let telemetryModalOpen = $state(false);
   let telemetryChoice = $state<0 | 1>(1); // default: Basic
   let telemetryDetailsOpen = $state(false);
   let teleTick = $state(0);
+
+  let tradeImportOpen = $state(false);
+  let tradeImportText = $state("");
+  let tradeImportError = $state<string | null>(null);
+  let tradeImportBusy = $state(false);
+  let tradeInputEl: HTMLInputElement | null = null;
+
+  function openTradeImportModal() {
+    closeFileMenu();
+    tradeImportText = "";
+    tradeImportError = null;
+    tradeImportOpen = true;
+    tick().then(() => tradeInputEl?.focus());
+  }
+
+  async function submitTradeImport() {
+    if (tradeImportBusy || !tradeImportText.trim()) return;
+    tradeImportBusy = true;
+    tradeImportError = null;
+    try {
+      await importFromTradeInput(tradeImportText);
+      tradeImportOpen = false;
+    } catch (err) {
+      tradeImportError = err instanceof Error ? err.message : String(err);
+    } finally {
+      tradeImportBusy = false;
+    }
+  }
 
   function pickTelemetry(level: 0 | 1) {
     telemetryChoice = level;
@@ -131,7 +164,7 @@
   onMount(() => {
     refreshAuthStatus();
     checkSessionExpired();
-
+    const offDeepLinks = registerDeepLinks();
     const unlistenSuccess = listen("poe_auth_success", () => {
       refreshAuthStatus();
       sessionExpiredOpen = false;
@@ -157,6 +190,7 @@
       unlistenSuccess.then((fn) => fn());
       unlistenLogout.then((fn) => fn());
       unlistenExpired.then((fn) => fn());
+      offDeepLinks.then((fn) => fn());
     };
   });
   function closeTelemetryModal() {
@@ -197,6 +231,7 @@
       if (accountMenuOpen) closeAccountMenu();
       if (loginModalOpen) loginModalOpen = false;
       if (sessionExpiredOpen) sessionExpiredOpen = false;
+      if (tradeImportOpen) tradeImportOpen = false;
       if (telemetryModalOpen) closeTelemetryModal();
       if (updaterState.whatsNewModalOpen) {
         updaterState.whatsNewModalOpen = false;
@@ -481,6 +516,14 @@
         <button
           type="button"
           class="dropdown-item"
+          onclick={openTradeImportModal}
+        >
+          <span>Import from trade link</span>
+        </button>
+        <div class="divider"></div>
+        <button
+          type="button"
+          class="dropdown-item"
           disabled={!isInsideProject}
           onclick={() => handleCopyProjectShareCode(false)}
         >
@@ -624,7 +667,64 @@
 
 <!-- Settings overlay (opened via File > Settings) -->
 <SettingsOverlay />
-
+{#if tradeImportOpen}
+  <div
+    class="modal-backdrop"
+    role="presentation"
+    onclick={() => (tradeImportOpen = false)}
+  >
+    <div
+      class="modal-card"
+      role="dialog"
+      aria-label="Import from trade link"
+      onclick={(e) => e.stopPropagation()}
+    >
+      <div class="modal-header">
+        <h3 class="modal-title">Import from trade link</h3>
+        <button
+          type="button"
+          class="modal-close-btn"
+          onclick={() => (tradeImportOpen = false)}
+          title="Close (Esc)">✕</button
+        >
+      </div>
+      <div class="modal-content">
+        <input
+          class="trade-input"
+          type="text"
+          placeholder="https://www.pathofexile.com/trade/search/Standard/..."
+          bind:this={tradeInputEl}
+          bind:value={tradeImportText}
+          onkeydown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              submitTradeImport();
+            }
+          }}
+        />
+        <p class="small-text">Paste the trade link.</p>
+        {#if tradeImportError}<p class="import-error">
+            {tradeImportError}
+          </p>{/if}
+      </div>
+      <div class="modal-actions">
+        <button
+          type="button"
+          class="btn-secondary"
+          onclick={() => (tradeImportOpen = false)}>Cancel</button
+        >
+        <button
+          type="button"
+          class="btn-primary"
+          disabled={tradeImportBusy || !tradeImportText.trim()}
+          onclick={submitTradeImport}
+        >
+          {tradeImportBusy ? "Importing..." : "Import"}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 <!-- What's New Modal -->
 {#if updaterState.whatsNewModalOpen && updaterState.whatsNew}
   <div
@@ -1423,5 +1523,23 @@
   .tele-footer-text {
     font-size: 11px;
     color: #9a9a9a;
+  }
+  .trade-input {
+    background: #000000;
+    border: 1px solid #777777;
+    border-radius: 0;
+    color: #ffffff;
+    font-size: 12px;
+    padding: 4px 6px;
+    outline: none;
+    width: 100%;
+    user-select: text;
+  }
+  .trade-input:focus {
+    border-color: #ffffff;
+  }
+  .import-error {
+    color: #ff6666;
+    font-size: 11px;
   }
 </style>
